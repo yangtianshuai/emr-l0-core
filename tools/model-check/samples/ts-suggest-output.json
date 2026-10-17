@@ -1,0 +1,611 @@
+{
+  "schemaVersion": "1.0.0",
+  "docId": "doc_synthetic_2x2",
+  "docType": {
+    "system": "WST500",
+    "code": "WST500.2",
+    "display": "门（急）诊病历"
+  },
+  "patient": {
+    "patientId": "P_SYN",
+    "nameMasked": "合**",
+    "gender": "U"
+  },
+  "encounter": {
+    "visitId": "V_SYN",
+    "visitType": "outpatient"
+  },
+  "status": "signed",
+  "createdAt": "2026-10-08T01:00:00Z",
+  "updatedAt": "2026-10-08T01:00:06Z",
+  "createdBy": "DR_SYN",
+  "rootId": "n_root",
+  "nodes": {
+    "n_root": {
+      "id": "n_root",
+      "type": "document",
+      "parentId": null,
+      "order": 0,
+      "rev": 1,
+      "provenance": {
+        "origin": "system",
+        "actorId": "synthetic",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "sec_1": {
+      "id": "sec_1",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 10,
+      "rev": 1,
+      "title": "第 1 节",
+      "sectionCode": "sec1",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "p_2": {
+      "id": "p_2",
+      "type": "paragraph",
+      "parentId": "sec_1",
+      "order": 20,
+      "rev": 1,
+      "semantic": "presentIllness",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "t_3": {
+      "id": "t_3",
+      "type": "text",
+      "parentId": "p_2",
+      "order": 10,
+      "rev": 3,
+      "runs": [
+        {
+          "text": "结合病史与体征，考虑社区获得性肺炎，建议抗感染治疗并复查。",
+          "provenance": {
+            "origin": "ai",
+            "modelId": "local/qwen-med:7b@2026-09",
+            "confidence": 0.96,
+            "suggestionId": "sg_0001"
+          }
+        }
+      ],
+      "provenance": {
+        "origin": "ai",
+        "modelId": "local/qwen-med:7b@2026-09",
+        "promptId": "tpl-assessment-v3",
+        "confidence": 0.96,
+        "evidence": [
+          {
+            "kind": "lis",
+            "ref": "LIS:20261008-0100:WBC",
+            "valueText": "9.8"
+          }
+        ],
+        "acceptedBy": "DR_T",
+        "acceptedAt": "2026-10-08T01:00:02Z",
+        "suggestionId": "sg_0001",
+        "at": "2026-10-08T01:00:02Z"
+      },
+      "humanConfirmed": true
+    },
+    "f_4": {
+      "id": "f_4",
+      "type": "field",
+      "parentId": "p_2",
+      "order": 20,
+      "rev": 1,
+      "dataType": "number",
+      "value": 36.5,
+      "valueText": "36.5",
+      "unit": "℃",
+      "sourceKey": "VITAL.T0_0",
+      "tags": [
+        {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        }
+      ],
+      "provenance": {
+        "origin": "system",
+        "actorId": "system/lis",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "p_5": {
+      "id": "p_5",
+      "type": "paragraph",
+      "parentId": "sec_1",
+      "order": 30,
+      "rev": 1,
+      "semantic": "physicalExam",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "t_6": {
+      "id": "t_6",
+      "type": "text",
+      "parentId": "p_5",
+      "order": 10,
+      "rev": 1,
+      "runs": [
+        {
+          "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ],
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "f_7": {
+      "id": "f_7",
+      "type": "field",
+      "parentId": "p_5",
+      "order": 20,
+      "rev": 1,
+      "dataType": "number",
+      "value": 36.8,
+      "valueText": "36.8",
+      "unit": "℃",
+      "sourceKey": "VITAL.T1_0",
+      "tags": [
+        {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        }
+      ],
+      "provenance": {
+        "origin": "system",
+        "actorId": "system/lis",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "sec_8": {
+      "id": "sec_8",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 20,
+      "rev": 1,
+      "title": "第 2 节",
+      "sectionCode": "sec2",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "p_9": {
+      "id": "p_9",
+      "type": "paragraph",
+      "parentId": "sec_8",
+      "order": 20,
+      "rev": 1,
+      "semantic": "presentIllness",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "t_10": {
+      "id": "t_10",
+      "type": "text",
+      "parentId": "p_9",
+      "order": 10,
+      "rev": 1,
+      "runs": [
+        {
+          "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ],
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "f_11": {
+      "id": "f_11",
+      "type": "field",
+      "parentId": "p_9",
+      "order": 20,
+      "rev": 1,
+      "dataType": "number",
+      "value": 36.5,
+      "valueText": "36.5",
+      "unit": "℃",
+      "sourceKey": "VITAL.T0_0",
+      "tags": [
+        {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        }
+      ],
+      "provenance": {
+        "origin": "system",
+        "actorId": "system/lis",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "p_12": {
+      "id": "p_12",
+      "type": "paragraph",
+      "parentId": "sec_8",
+      "order": 30,
+      "rev": 1,
+      "semantic": "physicalExam",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "t_13": {
+      "id": "t_13",
+      "type": "text",
+      "parentId": "p_12",
+      "order": 10,
+      "rev": 1,
+      "runs": [
+        {
+          "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ],
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "f_14": {
+      "id": "f_14",
+      "type": "field",
+      "parentId": "p_12",
+      "order": 20,
+      "rev": 1,
+      "dataType": "number",
+      "value": 36.8,
+      "valueText": "36.8",
+      "unit": "℃",
+      "sourceKey": "VITAL.T1_0",
+      "tags": [
+        {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        }
+      ],
+      "provenance": {
+        "origin": "system",
+        "actorId": "system/lis",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    }
+  },
+  "revisions": [
+    {
+      "rev": 1,
+      "at": "2026-10-08T01:00:00Z",
+      "actorId": "DR_SYN",
+      "op": "create",
+      "targetId": "n_root",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_root",
+          "value": {
+            "id": "n_root",
+            "type": "document",
+            "parentId": null,
+            "order": 0,
+            "rev": 1,
+            "provenance": {
+              "origin": "system",
+              "actorId": "synthetic",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 2,
+      "at": "2026-10-08T01:00:03Z",
+      "actorId": "DR_T",
+      "op": "accept-ai",
+      "targetId": "t_3",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/t_3/humanConfirmed",
+          "value": false
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/provenance/acceptedAt",
+          "value": "2026-10-08T01:00:02Z"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/provenance/acceptedBy",
+          "value": "DR_T"
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/t_3/provenance/actorId",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/provenance/at",
+          "value": "2026-10-08T01:00:02Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/provenance/confidence",
+          "value": 0.96
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/provenance/evidence",
+          "value": [
+            {
+              "kind": "lis",
+              "ref": "LIS:20261008-0100:WBC",
+              "valueText": "9.8"
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/provenance/modelId",
+          "value": "local/qwen-med:7b@2026-09"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/provenance/origin",
+          "value": "ai",
+          "oldValue": "human"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/provenance/promptId",
+          "value": "tpl-assessment-v3"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/provenance/suggestionId",
+          "value": "sg_0001"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "add",
+          "path": "/nodes/t_3/runs/0/provenance",
+          "value": {
+            "origin": "ai",
+            "modelId": "local/qwen-med:7b@2026-09",
+            "confidence": 0.96,
+            "suggestionId": "sg_0001"
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/runs/0/text",
+          "value": "结合病史与体征，考虑社区获得性肺炎，建议抗感染治疗并复查。",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ],
+      "aiSuggestionId": "sg_0001",
+      "modelId": "local/qwen-med:7b@2026-09",
+      "confidence": 0.96
+    },
+    {
+      "rev": 3,
+      "at": "2026-10-08T01:00:04Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "t_3",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/humanConfirmed",
+          "value": true,
+          "oldValue": false
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 4,
+      "at": "2026-10-08T01:00:06Z",
+      "actorId": "DR_T",
+      "op": "sign",
+      "targetId": "n_root",
+      "patch": []
+    }
+  ],
+  "machineReadable": {
+    "generatedAt": "2026-10-08T01:00:05Z",
+    "generator": "l0-session/1.0.0",
+    "sourceHash": "737ee26e880c37c98a7040d664c3b31d",
+    "modelSchemaVersion": "1.0.0",
+    "dataElements": [
+      {
+        "tag": {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        "value": 36.5,
+        "nodeId": "f_4",
+        "origin": "system",
+        "valueText": "36.5",
+        "unit": "℃"
+      },
+      {
+        "tag": {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        },
+        "value": 36.5,
+        "nodeId": "f_4",
+        "origin": "system",
+        "valueText": "36.5",
+        "unit": "℃"
+      },
+      {
+        "tag": {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        "value": 36.8,
+        "nodeId": "f_7",
+        "origin": "system",
+        "valueText": "36.8",
+        "unit": "℃"
+      },
+      {
+        "tag": {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        },
+        "value": 36.8,
+        "nodeId": "f_7",
+        "origin": "system",
+        "valueText": "36.8",
+        "unit": "℃"
+      },
+      {
+        "tag": {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        "value": 36.5,
+        "nodeId": "f_11",
+        "origin": "system",
+        "valueText": "36.5",
+        "unit": "℃"
+      },
+      {
+        "tag": {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        },
+        "value": 36.5,
+        "nodeId": "f_11",
+        "origin": "system",
+        "valueText": "36.5",
+        "unit": "℃"
+      },
+      {
+        "tag": {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        "value": 36.8,
+        "nodeId": "f_14",
+        "origin": "system",
+        "valueText": "36.8",
+        "unit": "℃"
+      },
+      {
+        "tag": {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        },
+        "value": 36.8,
+        "nodeId": "f_14",
+        "origin": "system",
+        "valueText": "36.8",
+        "unit": "℃"
+      }
+    ],
+    "keyContentRefs": []
+  },
+  "signatureRefs": [
+    {
+      "signatureRef": "sig_doc_synthetic_2x2_4",
+      "signerRole": "author",
+      "signerId": "DR_T",
+      "signedAt": "2026-10-08T01:00:05Z",
+      "covers": [
+        "Document.xml",
+        "Pages/Page_0/Content.xml",
+        "MachineReadable.xml"
+      ],
+      "algorithm": "SM2-SM3",
+      "provider": "software",
+      "publicKeyFingerprint": "8ad8e010fef87e3cb88b28d2b6025c74b1f94f24ddc4a8908ef3761f66fb1cfa",
+      "publicKeyBase64": "MFkwEwYHKoZIzj0CAQYIKoEcz1UBgi0DQgAERsOOhd/OP3+BKVNswgAV5Rkb5V9Cu7lk7BlPcpepW5fIaNodDWET0GuCR8yHRO+kkAV2Mf5Mp5w99D0vmJXbfg==",
+      "signedInfoDigest": "a8094261b0e476859559db8850764d33409cb88fedabf9acd4dcb42f9e4aaf7a",
+      "signatureValue": "MEUCIAWQcNiwYJOheC5vY0hg/jDqCPsZPIcxZuCdueXGaSBZAiEA6J+L4E7O4dvLusKeBf8lLXQyCWtH95lbRqzCXHGODcE=",
+      "references": [
+        {
+          "path": "Document.xml",
+          "digest": "0a644c3011e0d2c5a407ae49b983bc8c1ccbfea82d3b0b0b3c7b721789067b7e"
+        },
+        {
+          "path": "MachineReadable.xml",
+          "digest": "d6796293fe9071cd2b76c85865db4dad9a62937499ec9535b0a9dcf40b71912b"
+        },
+        {
+          "path": "Pages/Page_0/Content.xml",
+          "digest": "03bef2f590fa4c9355d9de5538bb82b2737199ad8a703a5bd93986c0d6a3292b"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+# L0 病历内核 · 忽略规则
+#
+# 第一原则：**运行期状态、密钥材料、日志与一切可再生产物都不入版本库**。
+
+# ── `artifacts/` 整目录忽略 ──
+#
+# 这里的每一份东西都是"跑一次就会有"的：自测与 demo 会自己 `mkdir` 这个目录
+# （`ofd-self-test` / `import-self-test` / `wst500-self-test` 都有
+#  `if (!existsSync(ARTIFACTS)) mkdirSync(ARTIFACTS, { recursive: true })`），
+# 所以全新 clone 上没有这个目录也**不是缺陷**。
+#
+# 里面包含四类，全部不入库：
+#   ① 运行期状态：`state*/`、`runtime*/`、`derive-check/`、`knowledge/`
+#      —— 快照虽加密，但 salt 与密文同时进仓库就成了离线爆破的目标；
+#   ② 密钥与凭据材料：`recipient-keys*.json`、`admin-audit.log*`、`reading-grants.json`；
+#   ③ 演示与验收产物：`*.ofd` / `*.machine.json` / `*.doc.json` / `*.wst500.xml` / `*.report.json`
+#      —— 其中 `*.report.json` 的路径栏还写着本机绝对路径
+#      （`C:\Users\<用户名>\…`），对读者没有价值，对"这仓库是谁的机器上跑出来的"倒很有价值；
+#   ④ 外部真实样例的投放点：`external/`（含患者信息，**永远**不该入库）。
+#
+# **代价写在明面上**：`npm run verify:ofd` 要读 `artifacts/demo-signed.ofd`，
+# 而它现在只在跑过 `npm run test:export` 之后才存在 —— README 的命令表里已注明。
+# 用"命令之间的先后依赖"换"仓库里不留产物"，是有意的取舍。
+/artifacts/
+
+# 密钥材料：管理后台口令等（`npm run demo` 会自动加载；不建则用内置演示口令）
+/.env
+
+# 运行日志（可能含正文片段）
+/logs/
+
+# 探针样例的扫描报告（每次运行都会重写，同样含本机路径）
+/tools/**/samples/*.report.json
+
+# ── 根目录的浏览器快照：无障碍树 dump ──
+#
+# 跑浏览器验收时抓的页面结构（`cur.yaml` / `login.yaml` / `undo2.yaml` /
+# `after-type.yaml` / `after-undo.yaml` …），每次运行都换名字重写，且编码还是坏的。
+# 仓库根目录只放"人要看的入口文件"，这类 dump 一律不入库。
+/*.yaml
+
+# ── 依赖与工具缓存 ──
+/node_modules/
+/.playwright-cli/
+
+# ── 编译产物：语音采集客户端 ──
+#
+# `bin/VoiceCaptureClient.exe` 由 `npm run build:client-exe`（tools/voice-client/build.ps1，
+# 用系统自带的 csc 编译 .cs 源码）生成；`app.ico` 由 make-icon.ps1 生成，build 时缺了会自己补。
+# 开源仓库里放一个来路不明的 exe 是负担：读者无法核对它是否由这些 .cs 编出来。
+# 要跑 exe 版客户端，先本地编译（见 README「语音采集客户端」）。
+/tools/voice-client/bin/
+/tools/voice-client/app.ico
+
+# ── 系统与编辑器 ──
+.DS_Store
+# AI 编码助手的工作目录（会话与团队记录，不是项目内容）
+/.codebuddy/
+Thumbs.db
+*~
+
+# ── 故意**不**忽略的：三份"代码的输入"（不是产物）──
+#
+#   hongyi-ai-qr.jpg               src/demo/demo-server.ts 按仓库根读取（/hongyi-ai-qr.jpg）
+#   docs/images/flow-mode.png      src/export/ofd-self-test.ts 的图样夹具（真 PNG，验"字节不重编码"）
+#   docs/images/*.png              其余界面截图，README 直接引用
+#
+#   `hongyi-ai-qr.jpg` **不能**挪进 docs/ —— 代码用的是 ROOT 拼接路径，挪了就地 404。
+#   截图统一放 `docs/images/`，代码里也是按这个路径读的。
+#
+#   除此以外，仓库里**没有任何**运行产物：`artifacts/` 整个目录见文件开头。
+
+# 这些文件已通过 `npm run scan:phi` 排查：**不含明文患者信息，不含任何私钥或证书**
+# （患者姓名一律为掩码，如 `王**`；身份类号码为合成号）。改动忽略规则后请重跑该命令。

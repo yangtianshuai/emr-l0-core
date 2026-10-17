@@ -1,0 +1,6037 @@
+{
+  "schemaVersion": "1.0.0",
+  "docId": "doc_synthetic_3x3",
+  "docType": {
+    "system": "WST500",
+    "code": "WST500.2",
+    "display": "门（急）诊病历"
+  },
+  "patient": {
+    "patientId": "P_SYN",
+    "nameMasked": "合**",
+    "gender": "U"
+  },
+  "encounter": {
+    "visitId": "V_SYN",
+    "visitType": "outpatient"
+  },
+  "status": "draft",
+  "createdAt": "2026-10-08T01:00:00Z",
+  "updatedAt": "2026-10-08T01:04:40Z",
+  "createdBy": "DR_SYN",
+  "rootId": "n_root",
+  "nodes": {
+    "n_root": {
+      "id": "n_root",
+      "type": "document",
+      "parentId": null,
+      "order": 0,
+      "rev": 1,
+      "provenance": {
+        "origin": "system",
+        "actorId": "synthetic",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "sec_1": {
+      "id": "sec_1",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 10,
+      "rev": 1,
+      "title": "第 1 节",
+      "sectionCode": "sec1",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "p_5": {
+      "id": "p_5",
+      "type": "paragraph",
+      "parentId": "sec_1",
+      "order": 30,
+      "rev": 7,
+      "semantic": "body_146",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:33Z"
+      },
+      "humanConfirmed": true
+    },
+    "f_7": {
+      "id": "f_7",
+      "type": "field",
+      "parentId": "sec_19",
+      "order": 50,
+      "rev": 5,
+      "dataType": "number",
+      "value": 37,
+      "valueText": "37",
+      "unit": "℃",
+      "sourceKey": "VITAL.T1_0",
+      "tags": [
+        {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        }
+      ],
+      "provenance": {
+        "origin": "system",
+        "actorId": "system/lis",
+        "at": "2026-10-08T01:04:29Z"
+      }
+    },
+    "sec_19": {
+      "id": "sec_19",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 20,
+      "rev": 1,
+      "title": "第 2 节",
+      "sectionCode": "sec2",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "f_28": {
+      "id": "f_28",
+      "type": "field",
+      "parentId": "sec_37",
+      "order": 110,
+      "rev": 11,
+      "dataType": "number",
+      "value": 38,
+      "valueText": "38",
+      "unit": "℃",
+      "sourceKey": "VITAL.T2_0",
+      "tags": [
+        {
+          "system": "WS445",
+          "code": "DE05.01.000",
+          "display": "体温"
+        },
+        {
+          "system": "local",
+          "code": "LT0",
+          "display": "院内项"
+        }
+      ],
+      "provenance": {
+        "origin": "system",
+        "actorId": "system/lis",
+        "at": "2026-10-08T01:04:37Z"
+      }
+    },
+    "tb_29": {
+      "id": "tb_29",
+      "type": "table",
+      "parentId": "sec_37",
+      "order": 50,
+      "rev": 2,
+      "colCount": 3,
+      "headerRows": 1,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:00:33Z"
+      }
+    },
+    "tr_30": {
+      "id": "tr_30",
+      "type": "tableRow",
+      "parentId": "tb_29",
+      "order": 10,
+      "rev": 1,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "tc_31": {
+      "id": "tc_31",
+      "type": "tableCell",
+      "parentId": "tr_30",
+      "order": 10,
+      "rev": 1,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "tct_32": {
+      "id": "tct_32",
+      "type": "text",
+      "parentId": "sec_1",
+      "order": 90,
+      "rev": 6,
+      "runs": [
+        {
+          "text": "项目 2-1·改132·136"
+        }
+      ],
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:25Z"
+      },
+      "humanConfirmed": true
+    },
+    "tc_33": {
+      "id": "tc_33",
+      "type": "tableCell",
+      "parentId": "sec_19",
+      "order": 90,
+      "rev": 2,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:02:43Z"
+      }
+    },
+    "tc_35": {
+      "id": "tc_35",
+      "type": "tableCell",
+      "parentId": "sec_1",
+      "order": 40,
+      "rev": 2,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:02:04Z"
+      }
+    },
+    "sec_37": {
+      "id": "sec_37",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 30,
+      "rev": 1,
+      "title": "第 3 节",
+      "sectionCode": "sec3",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_SYN",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "tct_50": {
+      "id": "tct_50",
+      "type": "text",
+      "parentId": "sec_1",
+      "order": 60,
+      "rev": 6,
+      "runs": [
+        {
+          "text": "项目 3-1改13040"
+        }
+      ],
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:01Z"
+      },
+      "humanConfirmed": true
+    },
+    "n_new_6": {
+      "id": "n_new_6",
+      "type": "text",
+      "parentId": "sec_37",
+      "order": 100,
+      "rev": 6,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:03:10Z"
+      },
+      "runs": [
+        {
+          "text": "改91改3改98·103"
+        }
+      ],
+      "humanConfirmed": true
+    },
+    "n_new_9": {
+      "id": "n_new_9",
+      "type": "text",
+      "parentId": "p_5",
+      "order": 20,
+      "rev": 4,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:03:53Z"
+      },
+      "runs": [
+        {
+          "text": "新增 42·85改1261"
+        }
+      ],
+      "humanConfirmed": true
+    },
+    "n_new_10": {
+      "id": "n_new_10",
+      "type": "text",
+      "parentId": "sec_37",
+      "order": 60,
+      "rev": 2,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:01:53Z"
+      },
+      "runs": [
+        {
+          "text": "新增 44"
+        }
+      ]
+    },
+    "n_new_11": {
+      "id": "n_new_11",
+      "type": "text",
+      "parentId": "sec_19",
+      "order": 70,
+      "rev": 5,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:07Z"
+      },
+      "runs": [
+        {
+          "text": "新增 改133"
+        }
+      ],
+      "humanConfirmed": true
+    },
+    "n_new_14": {
+      "id": "n_new_14",
+      "type": "text",
+      "parentId": "sec_1",
+      "order": 70,
+      "rev": 4,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:03Z"
+      },
+      "runs": [
+        {
+          "text": "新增 6改1050"
+        }
+      ],
+      "humanConfirmed": true
+    },
+    "n_new_18": {
+      "id": "n_new_18",
+      "type": "text",
+      "parentId": "p_5",
+      "order": 50,
+      "rev": 3,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:03:33Z"
+      },
+      "runs": [
+        {
+          "text": "新改10893·116"
+        }
+      ],
+      "humanConfirmed": true
+    },
+    "n_new_19": {
+      "id": "n_new_19",
+      "type": "text",
+      "parentId": "sec_1",
+      "order": 80,
+      "rev": 2,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:23Z"
+      },
+      "runs": [
+        {
+          "text": "新增 96"
+        }
+      ]
+    },
+    "n_new_20": {
+      "id": "n_new_20",
+      "type": "text",
+      "parentId": "p_5",
+      "order": 60,
+      "rev": 3,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:09Z"
+      },
+      "runs": [
+        {
+          "text": "改128增 99·134"
+        }
+      ],
+      "humanConfirmed": true
+    },
+    "n_new_24": {
+      "id": "n_new_24",
+      "type": "text",
+      "parentId": "p_5",
+      "order": 70,
+      "rev": 1,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:03:37Z"
+      },
+      "runs": [
+        {
+          "text": "新增 118"
+        }
+      ]
+    },
+    "n_new_25": {
+      "id": "n_new_25",
+      "type": "text",
+      "parentId": "sec_37",
+      "order": 120,
+      "rev": 2,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:31Z"
+      },
+      "runs": [
+        {
+          "text": "新增 123"
+        }
+      ]
+    },
+    "n_new_26": {
+      "id": "n_new_26",
+      "type": "text",
+      "parentId": "p_5",
+      "order": 90,
+      "rev": 1,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:03:49Z"
+      },
+      "runs": [
+        {
+          "text": "新增 124"
+        }
+      ]
+    },
+    "n_new_27": {
+      "id": "n_new_27",
+      "type": "text",
+      "parentId": "sec_19",
+      "order": 130,
+      "rev": 2,
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:04:21Z"
+      },
+      "runs": [
+        {
+          "text": "新增 138"
+        }
+      ]
+    }
+  },
+  "revisions": [
+    {
+      "rev": 1,
+      "at": "2026-10-08T01:00:00Z",
+      "actorId": "DR_SYN",
+      "op": "create",
+      "targetId": "n_root",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_root",
+          "value": {
+            "id": "n_root",
+            "type": "document",
+            "parentId": null,
+            "order": 0,
+            "rev": 1,
+            "provenance": {
+              "origin": "system",
+              "actorId": "synthetic",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 2,
+      "at": "2026-10-08T01:00:01Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "t_27",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/t_27",
+          "oldValue": {
+            "id": "t_27",
+            "type": "text",
+            "parentId": "p_26",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 3,
+      "at": "2026-10-08T01:00:03Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "tct_14",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/tct_14/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_14/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_14/provenance/at",
+          "value": "2026-10-08T01:00:02Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_14/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_14/runs/0/text",
+          "value": "项目 1-1·2",
+          "oldValue": "项目 1-1"
+        }
+      ]
+    },
+    {
+      "rev": 4,
+      "at": "2026-10-08T01:00:05Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "f_7",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/order",
+          "value": 50,
+          "oldValue": 20
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/parentId",
+          "value": "sec_1",
+          "oldValue": "p_5"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "system/lis"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/at",
+          "value": "2026-10-08T01:00:04Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/origin",
+          "value": "human",
+          "oldValue": "system"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 5,
+      "at": "2026-10-08T01:00:07Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_46",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/provenance/at",
+          "value": "2026-10-08T01:00:06Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/value",
+          "value": 38,
+          "oldValue": 37.1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/valueText",
+          "value": "38",
+          "oldValue": "37.1"
+        }
+      ]
+    },
+    {
+      "rev": 6,
+      "at": "2026-10-08T01:00:08Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_8",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/f_10",
+          "oldValue": {
+            "id": "f_10",
+            "type": "field",
+            "parentId": "p_8",
+            "order": 20,
+            "rev": 1,
+            "dataType": "number",
+            "value": 37.1,
+            "valueText": "37.1",
+            "unit": "℃",
+            "sourceKey": "VITAL.T2_0",
+            "tags": [
+              {
+                "system": "WS445",
+                "code": "DE05.01.000",
+                "display": "体温"
+              },
+              {
+                "system": "local",
+                "code": "LT0",
+                "display": "院内项"
+              }
+            ],
+            "provenance": {
+              "origin": "system",
+              "actorId": "system/lis",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_8",
+          "oldValue": {
+            "id": "p_8",
+            "type": "paragraph",
+            "parentId": "sec_1",
+            "order": 40,
+            "rev": 1,
+            "semantic": "presentIllness",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/t_9",
+          "oldValue": {
+            "id": "t_9",
+            "type": "text",
+            "parentId": "p_8",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tb_11",
+          "oldValue": {
+            "id": "tb_11",
+            "type": "table",
+            "parentId": "p_8",
+            "order": 90,
+            "rev": 1,
+            "colCount": 3,
+            "headerRows": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tc_13",
+          "oldValue": {
+            "id": "tc_13",
+            "type": "tableCell",
+            "parentId": "tr_12",
+            "order": 10,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tc_15",
+          "oldValue": {
+            "id": "tc_15",
+            "type": "tableCell",
+            "parentId": "tr_12",
+            "order": 20,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tc_17",
+          "oldValue": {
+            "id": "tc_17",
+            "type": "tableCell",
+            "parentId": "tr_12",
+            "order": 30,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tct_14",
+          "oldValue": {
+            "id": "tct_14",
+            "type": "text",
+            "parentId": "tc_13",
+            "order": 10,
+            "rev": 2,
+            "runs": [
+              {
+                "text": "项目 1-1·2"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:02Z"
+            },
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tct_16",
+          "oldValue": {
+            "id": "tct_16",
+            "type": "text",
+            "parentId": "tc_15",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "项目 1-2"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tct_18",
+          "oldValue": {
+            "id": "tct_18",
+            "type": "text",
+            "parentId": "tc_17",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "项目 1-3"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tr_12",
+          "oldValue": {
+            "id": "tr_12",
+            "type": "tableRow",
+            "parentId": "tb_11",
+            "order": 10,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 7,
+      "at": "2026-10-08T01:00:10Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_40",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_40/provenance/at",
+          "value": "2026-10-08T01:00:09Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_40/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_40/value",
+          "value": 37,
+          "oldValue": 36.5
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_40/valueText",
+          "value": "37",
+          "oldValue": "36.5"
+        }
+      ]
+    },
+    {
+      "rev": 8,
+      "at": "2026-10-08T01:00:12Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "f_7",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/parentId",
+          "value": "sec_19",
+          "oldValue": "sec_1"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/at",
+          "value": "2026-10-08T01:00:11Z",
+          "oldValue": "2026-10-08T01:00:04Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 9,
+      "at": "2026-10-08T01:00:14Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:00:13Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/value",
+          "value": 39,
+          "oldValue": 37.1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/valueText",
+          "value": "39",
+          "oldValue": "37.1"
+        }
+      ]
+    },
+    {
+      "rev": 10,
+      "at": "2026-10-08T01:00:16Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_38",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/p_38/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_38/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_38/provenance/at",
+          "value": "2026-10-08T01:00:15Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_38/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_38/semantic",
+          "value": "body_9",
+          "oldValue": "presentIllness"
+        }
+      ]
+    },
+    {
+      "rev": 11,
+      "at": "2026-10-08T01:00:18Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "t_21",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/t_21/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_21/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_21/provenance/at",
+          "value": "2026-10-08T01:00:17Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_21/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_21/runs/0/text",
+          "value": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·10",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ]
+    },
+    {
+      "rev": 12,
+      "at": "2026-10-08T01:00:20Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_1",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_1",
+          "value": {
+            "id": "n_new_1",
+            "type": "text",
+            "parentId": "p_41",
+            "order": 30,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:41Z"
+            },
+            "runs": [
+              {
+                "text": "新增 11·23"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 13,
+      "at": "2026-10-08T01:00:22Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_2",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_2",
+          "value": {
+            "id": "n_new_2",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 30,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:21Z"
+            },
+            "runs": [
+              {
+                "text": "新增 12"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 14,
+      "at": "2026-10-08T01:00:24Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/order",
+          "value": 60,
+          "oldValue": 20
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/parentId",
+          "value": "sec_19",
+          "oldValue": "p_26"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "system/lis"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:00:23Z",
+          "oldValue": "2026-10-08T01:00:13Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/origin",
+          "value": "human",
+          "oldValue": "system"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 15,
+      "at": "2026-10-08T01:00:26Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_3",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_3",
+          "value": {
+            "id": "n_new_3",
+            "type": "text",
+            "parentId": "p_26",
+            "order": 100,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:51Z"
+            },
+            "runs": [
+              {
+                "text": "新增改29"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 16,
+      "at": "2026-10-08T01:00:28Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_25",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_25/provenance/at",
+          "value": "2026-10-08T01:00:27Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_25/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_25/value",
+          "value": 37,
+          "oldValue": 36.8
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_25/valueText",
+          "value": "37",
+          "oldValue": "36.8"
+        }
+      ]
+    },
+    {
+      "rev": 17,
+      "at": "2026-10-08T01:00:30Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_4",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_4",
+          "value": {
+            "id": "n_new_4",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 40,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:29Z"
+            },
+            "runs": [
+              {
+                "text": "新增 16"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 18,
+      "at": "2026-10-08T01:00:32Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "tct_52",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/tct_52/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_52/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_52/provenance/at",
+          "value": "2026-10-08T01:00:31Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_52/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_52/runs/0/text",
+          "value": "项目 3-改17",
+          "oldValue": "项目 3-2"
+        }
+      ]
+    },
+    {
+      "rev": 19,
+      "at": "2026-10-08T01:00:34Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tb_29",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tb_29/order",
+          "value": 50,
+          "oldValue": 90
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tb_29/parentId",
+          "value": "sec_37",
+          "oldValue": "p_26"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tb_29/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tb_29/provenance/at",
+          "value": "2026-10-08T01:00:33Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tb_29/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 20,
+      "at": "2026-10-08T01:00:36Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_5",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_5",
+          "value": {
+            "id": "n_new_5",
+            "type": "text",
+            "parentId": "p_41",
+            "order": 40,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:35Z"
+            },
+            "runs": [
+              {
+                "text": "新增 19"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 21,
+      "at": "2026-10-08T01:00:37Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "t_42",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/t_42",
+          "oldValue": {
+            "id": "t_42",
+            "type": "text",
+            "parentId": "p_41",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 22,
+      "at": "2026-10-08T01:00:39Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_3",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_3/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_3/provenance/at",
+          "value": "2026-10-08T01:00:38Z",
+          "oldValue": "2026-10-08T01:00:25Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_3/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_3/runs/0/text",
+          "value": "新增改21 14",
+          "oldValue": "新增 14"
+        }
+      ]
+    },
+    {
+      "rev": 23,
+      "at": "2026-10-08T01:00:40Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "tct_52",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/tct_52",
+          "oldValue": {
+            "id": "tct_52",
+            "type": "text",
+            "parentId": "tc_51",
+            "order": 10,
+            "rev": 2,
+            "runs": [
+              {
+                "text": "项目 3-改17"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:31Z"
+            },
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 24,
+      "at": "2026-10-08T01:00:42Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_1",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_1/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_1/provenance/at",
+          "value": "2026-10-08T01:00:41Z",
+          "oldValue": "2026-10-08T01:00:19Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_1/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_1/runs/0/text",
+          "value": "新增 11·23",
+          "oldValue": "新增 11"
+        }
+      ]
+    },
+    {
+      "rev": 25,
+      "at": "2026-10-08T01:00:44Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_41",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/p_41/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/provenance/at",
+          "value": "2026-10-08T01:00:43Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/semantic",
+          "value": "body_24",
+          "oldValue": "physicalExam"
+        }
+      ]
+    },
+    {
+      "rev": 26,
+      "at": "2026-10-08T01:00:46Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_20",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/p_20/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/provenance/at",
+          "value": "2026-10-08T01:00:45Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/semantic",
+          "value": "body_25",
+          "oldValue": "presentIllness"
+        }
+      ]
+    },
+    {
+      "rev": 27,
+      "at": "2026-10-08T01:00:47Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "n_new_4",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_4",
+          "oldValue": {
+            "id": "n_new_4",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 40,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:29Z"
+            },
+            "runs": [
+              {
+                "text": "新增 16"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 28,
+      "at": "2026-10-08T01:00:48Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "tct_34",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/tct_34",
+          "oldValue": {
+            "id": "tct_34",
+            "type": "text",
+            "parentId": "tc_33",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "项目 2-2"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 29,
+      "at": "2026-10-08T01:00:50Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/actorId",
+          "value": "system/lis",
+          "oldValue": "DR_T"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:00:49Z",
+          "oldValue": "2026-10-08T01:00:23Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/origin",
+          "value": "system",
+          "oldValue": "human"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/value",
+          "value": 38,
+          "oldValue": 39
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/valueText",
+          "value": "38",
+          "oldValue": "39"
+        }
+      ]
+    },
+    {
+      "rev": 30,
+      "at": "2026-10-08T01:00:52Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_3",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_3/provenance/at",
+          "value": "2026-10-08T01:00:51Z",
+          "oldValue": "2026-10-08T01:00:38Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_3/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_3/runs/0/text",
+          "value": "新增改29",
+          "oldValue": "新增改21 14"
+        }
+      ]
+    },
+    {
+      "rev": 31,
+      "at": "2026-10-08T01:00:54Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_41",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/provenance/at",
+          "value": "2026-10-08T01:00:53Z",
+          "oldValue": "2026-10-08T01:00:43Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/semantic",
+          "value": "body_30",
+          "oldValue": "body_24"
+        }
+      ]
+    },
+    {
+      "rev": 32,
+      "at": "2026-10-08T01:00:56Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "p_26",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/order",
+          "value": 60,
+          "oldValue": 40
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/parentId",
+          "value": "sec_37",
+          "oldValue": "sec_19"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/provenance/at",
+          "value": "2026-10-08T01:00:55Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 33,
+      "at": "2026-10-08T01:00:58Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_6",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_6",
+          "value": {
+            "id": "n_new_6",
+            "type": "text",
+            "parentId": "sec_37",
+            "order": 100,
+            "rev": 6,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:10Z"
+            },
+            "runs": [
+              {
+                "text": "改91改3改98·103"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 34,
+      "at": "2026-10-08T01:01:00Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_7",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_7",
+          "value": {
+            "id": "n_new_7",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 40,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:15Z"
+            },
+            "runs": [
+              {
+                "text": "新增 改740"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 35,
+      "at": "2026-10-08T01:01:02Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_8",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_8",
+          "value": {
+            "id": "n_new_8",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 40,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:01Z"
+            },
+            "runs": [
+              {
+                "text": "新增 34"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 36,
+      "at": "2026-10-08T01:01:04Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_44",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/p_44/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/provenance/at",
+          "value": "2026-10-08T01:01:03Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/semantic",
+          "value": "body_35",
+          "oldValue": "presentIllness"
+        }
+      ]
+    },
+    {
+      "rev": 37,
+      "at": "2026-10-08T01:01:06Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_25",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_25/provenance/at",
+          "value": "2026-10-08T01:01:05Z",
+          "oldValue": "2026-10-08T01:00:27Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_25/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 38,
+      "at": "2026-10-08T01:01:08Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_6",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_6/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/provenance/at",
+          "value": "2026-10-08T01:01:07Z",
+          "oldValue": "2026-10-08T01:00:57Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/runs/0/text",
+          "value": "新改37",
+          "oldValue": "新增 32"
+        }
+      ]
+    },
+    {
+      "rev": 39,
+      "at": "2026-10-08T01:01:09Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_23",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/f_25",
+          "oldValue": {
+            "id": "f_25",
+            "type": "field",
+            "parentId": "p_23",
+            "order": 20,
+            "rev": 3,
+            "dataType": "number",
+            "value": 37,
+            "valueText": "37",
+            "unit": "℃",
+            "sourceKey": "VITAL.T1_0",
+            "tags": [
+              {
+                "system": "WS445",
+                "code": "DE05.01.000",
+                "display": "体温"
+              },
+              {
+                "system": "local",
+                "code": "LT0",
+                "display": "院内项"
+              }
+            ],
+            "provenance": {
+              "origin": "system",
+              "actorId": "system/lis",
+              "at": "2026-10-08T01:01:05Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_23",
+          "oldValue": {
+            "id": "p_23",
+            "type": "paragraph",
+            "parentId": "sec_19",
+            "order": 30,
+            "rev": 1,
+            "semantic": "physicalExam",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/t_24",
+          "oldValue": {
+            "id": "t_24",
+            "type": "text",
+            "parentId": "p_23",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 40,
+      "at": "2026-10-08T01:01:11Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "t_45",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/t_45/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_45/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_45/provenance/at",
+          "value": "2026-10-08T01:01:10Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_45/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_45/runs/0/text",
+          "value": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·39",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ]
+    },
+    {
+      "rev": 41,
+      "at": "2026-10-08T01:01:13Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "tct_50",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/tct_50/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/provenance/at",
+          "value": "2026-10-08T01:01:12Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/runs/0/text",
+          "value": "项目 3-1·40",
+          "oldValue": "项目 3-1"
+        }
+      ]
+    },
+    {
+      "rev": 42,
+      "at": "2026-10-08T01:01:15Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_4",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_4/provenance/at",
+          "value": "2026-10-08T01:01:14Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_4/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_4/value",
+          "value": 39,
+          "oldValue": 36.5
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_4/valueText",
+          "value": "39",
+          "oldValue": "36.5"
+        }
+      ]
+    },
+    {
+      "rev": 43,
+      "at": "2026-10-08T01:01:17Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_9",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_9",
+          "value": {
+            "id": "n_new_9",
+            "type": "text",
+            "parentId": "p_5",
+            "order": 20,
+            "rev": 4,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:53Z"
+            },
+            "runs": [
+              {
+                "text": "新增 42·85改1261"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 44,
+      "at": "2026-10-08T01:01:19Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "t_21",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/t_21/provenance/at",
+          "value": "2026-10-08T01:01:18Z",
+          "oldValue": "2026-10-08T01:00:17Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_21/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_21/runs/0/text",
+          "value": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最改43温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·10",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·10"
+        }
+      ]
+    },
+    {
+      "rev": 45,
+      "at": "2026-10-08T01:01:21Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_10",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_10",
+          "value": {
+            "id": "n_new_10",
+            "type": "text",
+            "parentId": "sec_37",
+            "order": 60,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:53Z"
+            },
+            "runs": [
+              {
+                "text": "新增 44"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 46,
+      "at": "2026-10-08T01:01:23Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_11",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_11",
+          "value": {
+            "id": "n_new_11",
+            "type": "text",
+            "parentId": "sec_19",
+            "order": 70,
+            "rev": 5,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:04:07Z"
+            },
+            "runs": [
+              {
+                "text": "新增 改133"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 47,
+      "at": "2026-10-08T01:01:25Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_11",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_11/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/provenance/at",
+          "value": "2026-10-08T01:01:24Z",
+          "oldValue": "2026-10-08T01:01:22Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/runs/0/text",
+          "value": "新增 45·46",
+          "oldValue": "新增 45"
+        }
+      ]
+    },
+    {
+      "rev": 48,
+      "at": "2026-10-08T01:01:27Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_12",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_12",
+          "value": {
+            "id": "n_new_12",
+            "type": "text",
+            "parentId": "sec_19",
+            "order": 100,
+            "rev": 4,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:39Z"
+            },
+            "runs": [
+              {
+                "text": "新增 改119"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 49,
+      "at": "2026-10-08T01:01:29Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_46",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/provenance/at",
+          "value": "2026-10-08T01:01:28Z",
+          "oldValue": "2026-10-08T01:00:06Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/value",
+          "value": 37,
+          "oldValue": 38
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/valueText",
+          "value": "37",
+          "oldValue": "38"
+        }
+      ]
+    },
+    {
+      "rev": 50,
+      "at": "2026-10-08T01:01:31Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_26",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/p_26/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/provenance/at",
+          "value": "2026-10-08T01:01:30Z",
+          "oldValue": "2026-10-08T01:00:55Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_26/semantic",
+          "value": "body_49",
+          "oldValue": "presentIllness"
+        }
+      ]
+    },
+    {
+      "rev": 51,
+      "at": "2026-10-08T01:01:33Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_44",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/provenance/at",
+          "value": "2026-10-08T01:01:32Z",
+          "oldValue": "2026-10-08T01:01:03Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/semantic",
+          "value": "body_50",
+          "oldValue": "body_35"
+        }
+      ]
+    },
+    {
+      "rev": 52,
+      "at": "2026-10-08T01:01:35Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_11",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/order",
+          "value": 70,
+          "oldValue": 50
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/parentId",
+          "value": "sec_19",
+          "oldValue": "p_20"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/provenance/at",
+          "value": "2026-10-08T01:01:34Z",
+          "oldValue": "2026-10-08T01:01:24Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 53,
+      "at": "2026-10-08T01:01:37Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tct_50",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/order",
+          "value": 80,
+          "oldValue": 10
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/parentId",
+          "value": "sec_19",
+          "oldValue": "tc_49"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/provenance/at",
+          "value": "2026-10-08T01:01:36Z",
+          "oldValue": "2026-10-08T01:01:12Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 54,
+      "at": "2026-10-08T01:01:39Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "t_6",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/t_6/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/provenance/at",
+          "value": "2026-10-08T01:01:38Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/runs/0/text",
+          "value": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·53",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ]
+    },
+    {
+      "rev": 55,
+      "at": "2026-10-08T01:01:41Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_44",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/provenance/at",
+          "value": "2026-10-08T01:01:40Z",
+          "oldValue": "2026-10-08T01:01:32Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_44/semantic",
+          "value": "body_54",
+          "oldValue": "body_50"
+        }
+      ]
+    },
+    {
+      "rev": 56,
+      "at": "2026-10-08T01:01:42Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_26",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_3",
+          "oldValue": {
+            "id": "n_new_3",
+            "type": "text",
+            "parentId": "p_26",
+            "order": 100,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:51Z"
+            },
+            "runs": [
+              {
+                "text": "新增改29"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_26",
+          "oldValue": {
+            "id": "p_26",
+            "type": "paragraph",
+            "parentId": "sec_37",
+            "order": 60,
+            "rev": 3,
+            "semantic": "body_49",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:30Z"
+            },
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 57,
+      "at": "2026-10-08T01:01:44Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_46",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/provenance/at",
+          "value": "2026-10-08T01:01:43Z",
+          "oldValue": "2026-10-08T01:01:28Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/value",
+          "value": 39,
+          "oldValue": 37
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_46/valueText",
+          "value": "39",
+          "oldValue": "37"
+        }
+      ]
+    },
+    {
+      "rev": 58,
+      "at": "2026-10-08T01:01:46Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_12",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_12/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/provenance/at",
+          "value": "2026-10-08T01:01:45Z",
+          "oldValue": "2026-10-08T01:01:26Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/runs/0/text",
+          "value": "新增 改57",
+          "oldValue": "新增 47"
+        }
+      ]
+    },
+    {
+      "rev": 59,
+      "at": "2026-10-08T01:01:47Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "tct_36",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/tct_36",
+          "oldValue": {
+            "id": "tct_36",
+            "type": "text",
+            "parentId": "tc_35",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "项目 2-3"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 60,
+      "at": "2026-10-08T01:01:48Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_38",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/f_40",
+          "oldValue": {
+            "id": "f_40",
+            "type": "field",
+            "parentId": "p_38",
+            "order": 20,
+            "rev": 2,
+            "dataType": "number",
+            "value": 37,
+            "valueText": "37",
+            "unit": "℃",
+            "sourceKey": "VITAL.T0_0",
+            "tags": [
+              {
+                "system": "WS445",
+                "code": "DE05.01.000",
+                "display": "体温"
+              },
+              {
+                "system": "local",
+                "code": "LT0",
+                "display": "院内项"
+              }
+            ],
+            "provenance": {
+              "origin": "system",
+              "actorId": "system/lis",
+              "at": "2026-10-08T01:00:09Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_38",
+          "oldValue": {
+            "id": "p_38",
+            "type": "paragraph",
+            "parentId": "sec_37",
+            "order": 20,
+            "rev": 2,
+            "semantic": "body_9",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:15Z"
+            },
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/t_39",
+          "oldValue": {
+            "id": "t_39",
+            "type": "text",
+            "parentId": "p_38",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 61,
+      "at": "2026-10-08T01:01:50Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_5",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/p_5/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/provenance/at",
+          "value": "2026-10-08T01:01:49Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/semantic",
+          "value": "body_60",
+          "oldValue": "physicalExam"
+        }
+      ]
+    },
+    {
+      "rev": 62,
+      "at": "2026-10-08T01:01:52Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "t_6",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/order",
+          "value": 90,
+          "oldValue": 10
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/parentId",
+          "value": "sec_19",
+          "oldValue": "p_5"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/provenance/at",
+          "value": "2026-10-08T01:01:51Z",
+          "oldValue": "2026-10-08T01:01:38Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_6/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 63,
+      "at": "2026-10-08T01:01:54Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_10",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_10/order",
+          "value": 60,
+          "oldValue": 30
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_10/parentId",
+          "value": "sec_37",
+          "oldValue": "p_5"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_10/provenance/at",
+          "value": "2026-10-08T01:01:53Z",
+          "oldValue": "2026-10-08T01:01:20Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_10/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 64,
+      "at": "2026-10-08T01:01:56Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_13",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_13",
+          "value": {
+            "id": "n_new_13",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 50,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:28Z"
+            },
+            "runs": [
+              {
+                "text": "新增 63·81"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 65,
+      "at": "2026-10-08T01:01:58Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "t_3",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/t_3/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/provenance/at",
+          "value": "2026-10-08T01:01:57Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/runs/0/text",
+          "value": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·64",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。"
+        }
+      ]
+    },
+    {
+      "rev": 66,
+      "at": "2026-10-08T01:02:00Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "p_41",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/order",
+          "value": 100,
+          "oldValue": 30
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/parentId",
+          "value": "sec_19",
+          "oldValue": "sec_37"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/provenance/at",
+          "value": "2026-10-08T01:01:59Z",
+          "oldValue": "2026-10-08T01:00:53Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_41/rev",
+          "value": 4,
+          "oldValue": 3
+        }
+      ]
+    },
+    {
+      "rev": 67,
+      "at": "2026-10-08T01:02:01Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "n_new_8",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_8",
+          "oldValue": {
+            "id": "n_new_8",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 40,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:01Z"
+            },
+            "runs": [
+              {
+                "text": "新增 34"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 68,
+      "at": "2026-10-08T01:02:03Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_14",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_14",
+          "value": {
+            "id": "n_new_14",
+            "type": "text",
+            "parentId": "sec_1",
+            "order": 70,
+            "rev": 4,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:04:03Z"
+            },
+            "runs": [
+              {
+                "text": "新增 6改1050"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 69,
+      "at": "2026-10-08T01:02:05Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tc_35",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tc_35/order",
+          "value": 40,
+          "oldValue": 30
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_35/parentId",
+          "value": "sec_1",
+          "oldValue": "tr_30"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_35/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_35/provenance/at",
+          "value": "2026-10-08T01:02:04Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_35/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 70,
+      "at": "2026-10-08T01:02:06Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_41",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/f_43",
+          "oldValue": {
+            "id": "f_43",
+            "type": "field",
+            "parentId": "p_41",
+            "order": 20,
+            "rev": 1,
+            "dataType": "number",
+            "value": 36.8,
+            "valueText": "36.8",
+            "unit": "℃",
+            "sourceKey": "VITAL.T1_0",
+            "tags": [
+              {
+                "system": "WS445",
+                "code": "DE05.01.000",
+                "display": "体温"
+              },
+              {
+                "system": "local",
+                "code": "LT0",
+                "display": "院内项"
+              }
+            ],
+            "provenance": {
+              "origin": "system",
+              "actorId": "system/lis",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_1",
+          "oldValue": {
+            "id": "n_new_1",
+            "type": "text",
+            "parentId": "p_41",
+            "order": 30,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:41Z"
+            },
+            "runs": [
+              {
+                "text": "新增 11·23"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_5",
+          "oldValue": {
+            "id": "n_new_5",
+            "type": "text",
+            "parentId": "p_41",
+            "order": 40,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:35Z"
+            },
+            "runs": [
+              {
+                "text": "新增 19"
+              }
+            ]
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_41",
+          "oldValue": {
+            "id": "p_41",
+            "type": "paragraph",
+            "parentId": "sec_19",
+            "order": 100,
+            "rev": 4,
+            "semantic": "body_30",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:59Z"
+            },
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 71,
+      "at": "2026-10-08T01:02:08Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_7",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_7/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_7/provenance/at",
+          "value": "2026-10-08T01:02:07Z",
+          "oldValue": "2026-10-08T01:00:59Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_7/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_7/runs/0/text",
+          "value": "新增 33·70",
+          "oldValue": "新增 33"
+        }
+      ]
+    },
+    {
+      "rev": 72,
+      "at": "2026-10-08T01:02:10Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_15",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_15",
+          "value": {
+            "id": "n_new_15",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 50,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:09Z"
+            },
+            "runs": [
+              {
+                "text": "新增 71"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 73,
+      "at": "2026-10-08T01:02:12Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "t_45",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/t_45/provenance/at",
+          "value": "2026-10-08T01:02:11Z",
+          "oldValue": "2026-10-08T01:01:10Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_45/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_45/runs/0/text",
+          "value": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·39·72",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·39"
+        }
+      ]
+    },
+    {
+      "rev": 74,
+      "at": "2026-10-08T01:02:14Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_11",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/provenance/at",
+          "value": "2026-10-08T01:02:13Z",
+          "oldValue": "2026-10-08T01:01:34Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/runs/0/text",
+          "value": "新增 45·4改736",
+          "oldValue": "新增 45·46"
+        }
+      ]
+    },
+    {
+      "rev": 75,
+      "at": "2026-10-08T01:02:16Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_7",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_7/provenance/at",
+          "value": "2026-10-08T01:02:15Z",
+          "oldValue": "2026-10-08T01:02:07Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_7/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_7/runs/0/text",
+          "value": "新增 改740",
+          "oldValue": "新增 33·70"
+        }
+      ]
+    },
+    {
+      "rev": 76,
+      "at": "2026-10-08T01:02:18Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "p_2",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/order",
+          "value": 70,
+          "oldValue": 20
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/parentId",
+          "value": "sec_37",
+          "oldValue": "sec_1"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/provenance/at",
+          "value": "2026-10-08T01:02:17Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 77,
+      "at": "2026-10-08T01:02:20Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_16",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_16",
+          "value": {
+            "id": "n_new_16",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 60,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:22Z"
+            },
+            "runs": [
+              {
+                "text": "新改110·104"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 78,
+      "at": "2026-10-08T01:02:22Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "p_20",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/order",
+          "value": 80,
+          "oldValue": 20
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/parentId",
+          "value": "sec_37",
+          "oldValue": "sec_19"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/provenance/at",
+          "value": "2026-10-08T01:02:21Z",
+          "oldValue": "2026-10-08T01:00:45Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_20/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 79,
+      "at": "2026-10-08T01:02:24Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:02:23Z",
+          "oldValue": "2026-10-08T01:00:49Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 5,
+          "oldValue": 4
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/value",
+          "value": 37,
+          "oldValue": 38
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/valueText",
+          "value": "37",
+          "oldValue": "38"
+        }
+      ]
+    },
+    {
+      "rev": 80,
+      "at": "2026-10-08T01:02:25Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "t_6",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/t_6",
+          "oldValue": {
+            "id": "t_6",
+            "type": "text",
+            "parentId": "sec_19",
+            "order": 90,
+            "rev": 3,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·53"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:51Z"
+            },
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 81,
+      "at": "2026-10-08T01:02:27Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_4",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_4/provenance/at",
+          "value": "2026-10-08T01:02:26Z",
+          "oldValue": "2026-10-08T01:01:14Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_4/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 82,
+      "at": "2026-10-08T01:02:29Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_13",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_13/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_13/provenance/at",
+          "value": "2026-10-08T01:02:28Z",
+          "oldValue": "2026-10-08T01:01:55Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_13/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_13/runs/0/text",
+          "value": "新增 63·81",
+          "oldValue": "新增 63"
+        }
+      ]
+    },
+    {
+      "rev": 83,
+      "at": "2026-10-08T01:02:31Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tct_50",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/order",
+          "value": 90,
+          "oldValue": 80
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/parentId",
+          "value": "sec_37",
+          "oldValue": "sec_19"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/provenance/at",
+          "value": "2026-10-08T01:02:30Z",
+          "oldValue": "2026-10-08T01:01:36Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/rev",
+          "value": 4,
+          "oldValue": 3
+        }
+      ]
+    },
+    {
+      "rev": 84,
+      "at": "2026-10-08T01:02:33Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_5",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/provenance/at",
+          "value": "2026-10-08T01:02:32Z",
+          "oldValue": "2026-10-08T01:01:49Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/semantic",
+          "value": "body_83",
+          "oldValue": "body_60"
+        }
+      ]
+    },
+    {
+      "rev": 85,
+      "at": "2026-10-08T01:02:35Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tct_32",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/order",
+          "value": 80,
+          "oldValue": 10
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/parentId",
+          "value": "sec_19",
+          "oldValue": "tc_31"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/provenance/at",
+          "value": "2026-10-08T01:02:34Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 86,
+      "at": "2026-10-08T01:02:37Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_9",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_9/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/provenance/at",
+          "value": "2026-10-08T01:02:36Z",
+          "oldValue": "2026-10-08T01:01:16Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/runs/0/text",
+          "value": "新增 42·85",
+          "oldValue": "新增 42"
+        }
+      ]
+    },
+    {
+      "rev": 87,
+      "at": "2026-10-08T01:02:38Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "t_45",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/t_45",
+          "oldValue": {
+            "id": "t_45",
+            "type": "text",
+            "parentId": "p_44",
+            "order": 10,
+            "rev": 3,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·39·72"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:11Z"
+            },
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 88,
+      "at": "2026-10-08T01:02:40Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_6",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/order",
+          "value": 100,
+          "oldValue": 30
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/parentId",
+          "value": "sec_37",
+          "oldValue": "p_2"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/provenance/at",
+          "value": "2026-10-08T01:02:39Z",
+          "oldValue": "2026-10-08T01:01:07Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 89,
+      "at": "2026-10-08T01:02:42Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_22",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_22/provenance/at",
+          "value": "2026-10-08T01:02:41Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_22/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_22/value",
+          "value": 38,
+          "oldValue": 36.5
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_22/valueText",
+          "value": "38",
+          "oldValue": "36.5"
+        }
+      ]
+    },
+    {
+      "rev": 90,
+      "at": "2026-10-08T01:02:44Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tc_33",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tc_33/order",
+          "value": 90,
+          "oldValue": 20
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_33/parentId",
+          "value": "sec_19",
+          "oldValue": "tr_30"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_33/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "DR_SYN"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_33/provenance/at",
+          "value": "2026-10-08T01:02:43Z",
+          "oldValue": "2026-10-08T01:00:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tc_33/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 91,
+      "at": "2026-10-08T01:02:46Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_17",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_17",
+          "value": {
+            "id": "n_new_17",
+            "type": "text",
+            "parentId": "p_44",
+            "order": 100,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:45Z"
+            },
+            "runs": [
+              {
+                "text": "新增 90"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 92,
+      "at": "2026-10-08T01:02:48Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_6",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/provenance/at",
+          "value": "2026-10-08T01:02:47Z",
+          "oldValue": "2026-10-08T01:02:39Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/runs/0/text",
+          "value": "改91改37",
+          "oldValue": "新改37"
+        }
+      ]
+    },
+    {
+      "rev": 93,
+      "at": "2026-10-08T01:02:50Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/order",
+          "value": 50,
+          "oldValue": 60
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/parentId",
+          "value": "sec_1",
+          "oldValue": "sec_19"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "system/lis"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:02:49Z",
+          "oldValue": "2026-10-08T01:02:23Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/origin",
+          "value": "human",
+          "oldValue": "system"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 6,
+          "oldValue": 5
+        }
+      ]
+    },
+    {
+      "rev": 94,
+      "at": "2026-10-08T01:02:52Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_18",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_18",
+          "value": {
+            "id": "n_new_18",
+            "type": "text",
+            "parentId": "p_5",
+            "order": 50,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:33Z"
+            },
+            "runs": [
+              {
+                "text": "新改10893·116"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 95,
+      "at": "2026-10-08T01:02:53Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_44",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/f_46",
+          "oldValue": {
+            "id": "f_46",
+            "type": "field",
+            "parentId": "p_44",
+            "order": 20,
+            "rev": 4,
+            "dataType": "number",
+            "value": 39,
+            "valueText": "39",
+            "unit": "℃",
+            "sourceKey": "VITAL.T2_0",
+            "tags": [
+              {
+                "system": "WS445",
+                "code": "DE05.01.000",
+                "display": "体温"
+              },
+              {
+                "system": "local",
+                "code": "LT0",
+                "display": "院内项"
+              }
+            ],
+            "provenance": {
+              "origin": "system",
+              "actorId": "system/lis",
+              "at": "2026-10-08T01:01:43Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_17",
+          "oldValue": {
+            "id": "n_new_17",
+            "type": "text",
+            "parentId": "p_44",
+            "order": 100,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:45Z"
+            },
+            "runs": [
+              {
+                "text": "新增 90"
+              }
+            ]
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_44",
+          "oldValue": {
+            "id": "p_44",
+            "type": "paragraph",
+            "parentId": "sec_37",
+            "order": 40,
+            "rev": 4,
+            "semantic": "body_54",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:40Z"
+            },
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tb_47",
+          "oldValue": {
+            "id": "tb_47",
+            "type": "table",
+            "parentId": "p_44",
+            "order": 90,
+            "rev": 1,
+            "colCount": 3,
+            "headerRows": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tc_49",
+          "oldValue": {
+            "id": "tc_49",
+            "type": "tableCell",
+            "parentId": "tr_48",
+            "order": 10,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tc_51",
+          "oldValue": {
+            "id": "tc_51",
+            "type": "tableCell",
+            "parentId": "tr_48",
+            "order": 20,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tc_53",
+          "oldValue": {
+            "id": "tc_53",
+            "type": "tableCell",
+            "parentId": "tr_48",
+            "order": 30,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tct_54",
+          "oldValue": {
+            "id": "tct_54",
+            "type": "text",
+            "parentId": "tc_53",
+            "order": 10,
+            "rev": 1,
+            "runs": [
+              {
+                "text": "项目 3-3"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/tr_48",
+          "oldValue": {
+            "id": "tr_48",
+            "type": "tableRow",
+            "parentId": "tb_47",
+            "order": 10,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_SYN",
+              "at": "2026-10-08T01:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "rev": 96,
+      "at": "2026-10-08T01:02:55Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_12",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/order",
+          "value": 100,
+          "oldValue": 40
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/parentId",
+          "value": "sec_19",
+          "oldValue": "p_5"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/provenance/at",
+          "value": "2026-10-08T01:02:54Z",
+          "oldValue": "2026-10-08T01:01:45Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/rev",
+          "value": 3,
+          "oldValue": 2
+        }
+      ]
+    },
+    {
+      "rev": 97,
+      "at": "2026-10-08T01:02:57Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_19",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_19",
+          "value": {
+            "id": "n_new_19",
+            "type": "text",
+            "parentId": "sec_1",
+            "order": 80,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:04:23Z"
+            },
+            "runs": [
+              {
+                "text": "新增 96"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 98,
+      "at": "2026-10-08T01:02:59Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_2",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/p_2/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/provenance/at",
+          "value": "2026-10-08T01:02:58Z",
+          "oldValue": "2026-10-08T01:02:17Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/semantic",
+          "value": "body_97",
+          "oldValue": "presentIllness"
+        }
+      ]
+    },
+    {
+      "rev": 99,
+      "at": "2026-10-08T01:03:01Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_6",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/provenance/at",
+          "value": "2026-10-08T01:03:00Z",
+          "oldValue": "2026-10-08T01:02:47Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/rev",
+          "value": 5,
+          "oldValue": 4
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/runs/0/text",
+          "value": "改91改3改98",
+          "oldValue": "改91改37"
+        }
+      ]
+    },
+    {
+      "rev": 100,
+      "at": "2026-10-08T01:03:03Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_20",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_20",
+          "value": {
+            "id": "n_new_20",
+            "type": "text",
+            "parentId": "p_5",
+            "order": 60,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:04:09Z"
+            },
+            "runs": [
+              {
+                "text": "改128增 99·134"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 101,
+      "at": "2026-10-08T01:03:05Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_14",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_14/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/provenance/at",
+          "value": "2026-10-08T01:03:04Z",
+          "oldValue": "2026-10-08T01:02:02Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/runs/0/text",
+          "value": "新增 67·100",
+          "oldValue": "新增 67"
+        }
+      ]
+    },
+    {
+      "rev": 102,
+      "at": "2026-10-08T01:03:07Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_9",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/provenance/at",
+          "value": "2026-10-08T01:03:06Z",
+          "oldValue": "2026-10-08T01:02:36Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/runs/0/text",
+          "value": "新增 42·85·101",
+          "oldValue": "新增 42·85"
+        }
+      ]
+    },
+    {
+      "rev": 103,
+      "at": "2026-10-08T01:03:09Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_21",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_21",
+          "value": {
+            "id": "n_new_21",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 70,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:08Z"
+            },
+            "runs": [
+              {
+                "text": "新增 102"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 104,
+      "at": "2026-10-08T01:03:11Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_6",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/provenance/at",
+          "value": "2026-10-08T01:03:10Z",
+          "oldValue": "2026-10-08T01:03:00Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/rev",
+          "value": 6,
+          "oldValue": 5
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_6/runs/0/text",
+          "value": "改91改3改98·103",
+          "oldValue": "改91改3改98"
+        }
+      ]
+    },
+    {
+      "rev": 105,
+      "at": "2026-10-08T01:03:13Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_16",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_16/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_16/provenance/at",
+          "value": "2026-10-08T01:03:12Z",
+          "oldValue": "2026-10-08T01:02:19Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_16/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_16/runs/0/text",
+          "value": "新增 76·104",
+          "oldValue": "新增 76"
+        }
+      ]
+    },
+    {
+      "rev": 106,
+      "at": "2026-10-08T01:03:15Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_14",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/provenance/at",
+          "value": "2026-10-08T01:03:14Z",
+          "oldValue": "2026-10-08T01:03:04Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/runs/0/text",
+          "value": "新增 6改1050",
+          "oldValue": "新增 67·100"
+        }
+      ]
+    },
+    {
+      "rev": 107,
+      "at": "2026-10-08T01:03:17Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_2",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/provenance/at",
+          "value": "2026-10-08T01:03:16Z",
+          "oldValue": "2026-10-08T01:02:58Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/semantic",
+          "value": "body_106",
+          "oldValue": "body_97"
+        }
+      ]
+    },
+    {
+      "rev": 108,
+      "at": "2026-10-08T01:03:18Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "n_new_15",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_15",
+          "oldValue": {
+            "id": "n_new_15",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 50,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:09Z"
+            },
+            "runs": [
+              {
+                "text": "新增 71"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 109,
+      "at": "2026-10-08T01:03:20Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_18",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_18/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_18/provenance/at",
+          "value": "2026-10-08T01:03:19Z",
+          "oldValue": "2026-10-08T01:02:51Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_18/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_18/runs/0/text",
+          "value": "新改10893",
+          "oldValue": "新增 93"
+        }
+      ]
+    },
+    {
+      "rev": 110,
+      "at": "2026-10-08T01:03:21Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "n_new_21",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_21",
+          "oldValue": {
+            "id": "n_new_21",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 70,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:08Z"
+            },
+            "runs": [
+              {
+                "text": "新增 102"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 111,
+      "at": "2026-10-08T01:03:23Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_16",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_16/provenance/at",
+          "value": "2026-10-08T01:03:22Z",
+          "oldValue": "2026-10-08T01:03:12Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_16/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_16/runs/0/text",
+          "value": "新改110·104",
+          "oldValue": "新增 76·104"
+        }
+      ]
+    },
+    {
+      "rev": 112,
+      "at": "2026-10-08T01:03:25Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_22",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_22",
+          "value": {
+            "id": "n_new_22",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 70,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:24Z"
+            },
+            "runs": [
+              {
+                "text": "新增 111"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 113,
+      "at": "2026-10-08T01:03:27Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tct_50",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/order",
+          "value": 60,
+          "oldValue": 90
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/parentId",
+          "value": "sec_1",
+          "oldValue": "sec_37"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/provenance/at",
+          "value": "2026-10-08T01:03:26Z",
+          "oldValue": "2026-10-08T01:02:30Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/rev",
+          "value": 5,
+          "oldValue": 4
+        }
+      ]
+    },
+    {
+      "rev": 114,
+      "at": "2026-10-08T01:03:29Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "tct_32",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/tct_32/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/provenance/at",
+          "value": "2026-10-08T01:03:28Z",
+          "oldValue": "2026-10-08T01:02:34Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/runs/0/text",
+          "value": "项目 2-1·113",
+          "oldValue": "项目 2-1"
+        }
+      ]
+    },
+    {
+      "rev": 115,
+      "at": "2026-10-08T01:03:31Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_23",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_23",
+          "value": {
+            "id": "n_new_23",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 70,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:45Z"
+            },
+            "runs": [
+              {
+                "text": "新增 改12214"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 116,
+      "at": "2026-10-08T01:03:32Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_20",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/f_22",
+          "oldValue": {
+            "id": "f_22",
+            "type": "field",
+            "parentId": "p_20",
+            "order": 20,
+            "rev": 2,
+            "dataType": "number",
+            "value": 38,
+            "valueText": "38",
+            "unit": "℃",
+            "sourceKey": "VITAL.T0_0",
+            "tags": [
+              {
+                "system": "WS445",
+                "code": "DE05.01.000",
+                "display": "体温"
+              },
+              {
+                "system": "local",
+                "code": "LT0",
+                "display": "院内项"
+              }
+            ],
+            "provenance": {
+              "origin": "system",
+              "actorId": "system/lis",
+              "at": "2026-10-08T01:02:41Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_13",
+          "oldValue": {
+            "id": "n_new_13",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 50,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:28Z"
+            },
+            "runs": [
+              {
+                "text": "新增 63·81"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_16",
+          "oldValue": {
+            "id": "n_new_16",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 60,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:22Z"
+            },
+            "runs": [
+              {
+                "text": "新改110·104"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_2",
+          "oldValue": {
+            "id": "n_new_2",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 30,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:00:21Z"
+            },
+            "runs": [
+              {
+                "text": "新增 12"
+              }
+            ]
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_22",
+          "oldValue": {
+            "id": "n_new_22",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 70,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:24Z"
+            },
+            "runs": [
+              {
+                "text": "新增 111"
+              }
+            ]
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_7",
+          "oldValue": {
+            "id": "n_new_7",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 40,
+            "rev": 3,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:15Z"
+            },
+            "runs": [
+              {
+                "text": "新增 改740"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_20",
+          "oldValue": {
+            "id": "p_20",
+            "type": "paragraph",
+            "parentId": "sec_37",
+            "order": 80,
+            "rev": 3,
+            "semantic": "body_25",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:02:21Z"
+            },
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/t_21",
+          "oldValue": {
+            "id": "t_21",
+            "type": "text",
+            "parentId": "p_20",
+            "order": 10,
+            "rev": 3,
+            "runs": [
+              {
+                "text": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最改43温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·10"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:01:18Z"
+            },
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 117,
+      "at": "2026-10-08T01:03:34Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_18",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_18/provenance/at",
+          "value": "2026-10-08T01:03:33Z",
+          "oldValue": "2026-10-08T01:03:19Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_18/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_18/runs/0/text",
+          "value": "新改10893·116",
+          "oldValue": "新改10893"
+        }
+      ]
+    },
+    {
+      "rev": 118,
+      "at": "2026-10-08T01:03:36Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/order",
+          "value": 110,
+          "oldValue": 50
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/parentId",
+          "value": "sec_19",
+          "oldValue": "sec_1"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:03:35Z",
+          "oldValue": "2026-10-08T01:02:49Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 7,
+          "oldValue": 6
+        }
+      ]
+    },
+    {
+      "rev": 119,
+      "at": "2026-10-08T01:03:38Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_24",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_24",
+          "value": {
+            "id": "n_new_24",
+            "type": "text",
+            "parentId": "p_5",
+            "order": 70,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:37Z"
+            },
+            "runs": [
+              {
+                "text": "新增 118"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 120,
+      "at": "2026-10-08T01:03:40Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_12",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/provenance/at",
+          "value": "2026-10-08T01:03:39Z",
+          "oldValue": "2026-10-08T01:02:54Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_12/runs/0/text",
+          "value": "新增 改119",
+          "oldValue": "新增 改57"
+        }
+      ]
+    },
+    {
+      "rev": 121,
+      "at": "2026-10-08T01:03:42Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "t_3",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/provenance/at",
+          "value": "2026-10-08T01:03:41Z",
+          "oldValue": "2026-10-08T01:01:57Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/t_3/runs/0/text",
+          "value": "患者3天前改120明显胸闷气促，否认药物及食物过敏史。既往体健。·64",
+          "oldValue": "患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。既往体健。·64"
+        }
+      ]
+    },
+    {
+      "rev": 122,
+      "at": "2026-10-08T01:03:44Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_2",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/provenance/at",
+          "value": "2026-10-08T01:03:43Z",
+          "oldValue": "2026-10-08T01:03:16Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/rev",
+          "value": 5,
+          "oldValue": 4
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/semantic",
+          "value": "body_121",
+          "oldValue": "body_106"
+        }
+      ]
+    },
+    {
+      "rev": 123,
+      "at": "2026-10-08T01:03:46Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_23",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_23/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_23/provenance/at",
+          "value": "2026-10-08T01:03:45Z",
+          "oldValue": "2026-10-08T01:03:30Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_23/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_23/runs/0/text",
+          "value": "新增 改12214",
+          "oldValue": "新增 114"
+        }
+      ]
+    },
+    {
+      "rev": 124,
+      "at": "2026-10-08T01:03:48Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_25",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_25",
+          "value": {
+            "id": "n_new_25",
+            "type": "text",
+            "parentId": "sec_37",
+            "order": 120,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:04:31Z"
+            },
+            "runs": [
+              {
+                "text": "新增 123"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 125,
+      "at": "2026-10-08T01:03:50Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_26",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_26",
+          "value": {
+            "id": "n_new_26",
+            "type": "text",
+            "parentId": "p_5",
+            "order": 90,
+            "rev": 1,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:49Z"
+            },
+            "runs": [
+              {
+                "text": "新增 124"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 126,
+      "at": "2026-10-08T01:03:52Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_5",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/provenance/at",
+          "value": "2026-10-08T01:03:51Z",
+          "oldValue": "2026-10-08T01:02:32Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/semantic",
+          "value": "body_125",
+          "oldValue": "body_83"
+        }
+      ]
+    },
+    {
+      "rev": 127,
+      "at": "2026-10-08T01:03:54Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_9",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/provenance/at",
+          "value": "2026-10-08T01:03:53Z",
+          "oldValue": "2026-10-08T01:03:06Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_9/runs/0/text",
+          "value": "新增 42·85改1261",
+          "oldValue": "新增 42·85·101"
+        }
+      ]
+    },
+    {
+      "rev": 128,
+      "at": "2026-10-08T01:03:56Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "p_2",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/order",
+          "value": 120,
+          "oldValue": 70
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/parentId",
+          "value": "sec_19",
+          "oldValue": "sec_37"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/provenance/at",
+          "value": "2026-10-08T01:03:55Z",
+          "oldValue": "2026-10-08T01:03:43Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_2/rev",
+          "value": 6,
+          "oldValue": 5
+        }
+      ]
+    },
+    {
+      "rev": 129,
+      "at": "2026-10-08T01:03:58Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_20",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_20/humanConfirmed",
+          "value": true
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_20/provenance/at",
+          "value": "2026-10-08T01:03:57Z",
+          "oldValue": "2026-10-08T01:03:02Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_20/rev",
+          "value": 2,
+          "oldValue": 1
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_20/runs/0/text",
+          "value": "改128增 99",
+          "oldValue": "新增 99"
+        }
+      ]
+    },
+    {
+      "rev": 130,
+      "at": "2026-10-08T01:04:00Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_5",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/provenance/at",
+          "value": "2026-10-08T01:03:59Z",
+          "oldValue": "2026-10-08T01:03:51Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/rev",
+          "value": 5,
+          "oldValue": 4
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/semantic",
+          "value": "body_129",
+          "oldValue": "body_125"
+        }
+      ]
+    },
+    {
+      "rev": 131,
+      "at": "2026-10-08T01:04:02Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "tct_50",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/provenance/at",
+          "value": "2026-10-08T01:04:01Z",
+          "oldValue": "2026-10-08T01:03:26Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/rev",
+          "value": 6,
+          "oldValue": 5
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_50/runs/0/text",
+          "value": "项目 3-1改13040",
+          "oldValue": "项目 3-1·40"
+        }
+      ]
+    },
+    {
+      "rev": 132,
+      "at": "2026-10-08T01:04:04Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_14",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/order",
+          "value": 70,
+          "oldValue": 40
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/parentId",
+          "value": "sec_1",
+          "oldValue": "p_2"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/provenance/at",
+          "value": "2026-10-08T01:04:03Z",
+          "oldValue": "2026-10-08T01:03:14Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_14/rev",
+          "value": 4,
+          "oldValue": 3
+        }
+      ]
+    },
+    {
+      "rev": 133,
+      "at": "2026-10-08T01:04:06Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "tct_32",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/provenance/at",
+          "value": "2026-10-08T01:04:05Z",
+          "oldValue": "2026-10-08T01:03:28Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/runs/0/text",
+          "value": "项目 2-1·改132",
+          "oldValue": "项目 2-1·113"
+        }
+      ]
+    },
+    {
+      "rev": 134,
+      "at": "2026-10-08T01:04:08Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_new_11",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/provenance/at",
+          "value": "2026-10-08T01:04:07Z",
+          "oldValue": "2026-10-08T01:02:13Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/rev",
+          "value": 5,
+          "oldValue": 4
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_11/runs/0/text",
+          "value": "新增 改133",
+          "oldValue": "新增 45·4改736"
+        }
+      ]
+    },
+    {
+      "rev": 135,
+      "at": "2026-10-08T01:04:10Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "n_new_20",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_20/provenance/at",
+          "value": "2026-10-08T01:04:09Z",
+          "oldValue": "2026-10-08T01:03:57Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_20/rev",
+          "value": 3,
+          "oldValue": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_20/runs/0/text",
+          "value": "改128增 99·134",
+          "oldValue": "改128增 99"
+        }
+      ]
+    },
+    {
+      "rev": 136,
+      "at": "2026-10-08T01:04:12Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_7",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/actorId",
+          "value": "system/lis",
+          "oldValue": "DR_T"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/at",
+          "value": "2026-10-08T01:04:11Z",
+          "oldValue": "2026-10-08T01:00:11Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/origin",
+          "value": "system",
+          "oldValue": "human"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/rev",
+          "value": 4,
+          "oldValue": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/value",
+          "value": 37,
+          "oldValue": 36.8
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/valueText",
+          "value": "37",
+          "oldValue": "36.8"
+        }
+      ]
+    },
+    {
+      "rev": 137,
+      "at": "2026-10-08T01:04:14Z",
+      "actorId": "DR_T",
+      "op": "insert",
+      "targetId": "tct_32",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/provenance/at",
+          "value": "2026-10-08T01:04:13Z",
+          "oldValue": "2026-10-08T01:04:05Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/rev",
+          "value": 5,
+          "oldValue": 4
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/runs/0/text",
+          "value": "项目 2-1·改132·136",
+          "oldValue": "项目 2-1·改132"
+        }
+      ]
+    },
+    {
+      "rev": 138,
+      "at": "2026-10-08T01:04:16Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/actorId",
+          "value": "system/lis",
+          "oldValue": "DR_T"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:04:15Z",
+          "oldValue": "2026-10-08T01:03:35Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/origin",
+          "value": "system",
+          "oldValue": "human"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 8,
+          "oldValue": 7
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/value",
+          "value": 39,
+          "oldValue": 37
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/valueText",
+          "value": "39",
+          "oldValue": "37"
+        }
+      ]
+    },
+    {
+      "rev": 139,
+      "at": "2026-10-08T01:04:18Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_new_27",
+      "patch": [
+        {
+          "op": "add",
+          "path": "/nodes/n_new_27",
+          "value": {
+            "id": "n_new_27",
+            "type": "text",
+            "parentId": "sec_19",
+            "order": 130,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:04:21Z"
+            },
+            "runs": [
+              {
+                "text": "新增 138"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "rev": 140,
+      "at": "2026-10-08T01:04:20Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_5",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/provenance/at",
+          "value": "2026-10-08T01:04:19Z",
+          "oldValue": "2026-10-08T01:03:59Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/rev",
+          "value": 6,
+          "oldValue": 5
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/semantic",
+          "value": "body_139",
+          "oldValue": "body_129"
+        }
+      ]
+    },
+    {
+      "rev": 141,
+      "at": "2026-10-08T01:04:22Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_27",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_27/order",
+          "value": 130,
+          "oldValue": 80
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_27/parentId",
+          "value": "sec_19",
+          "oldValue": "p_2"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_27/provenance/at",
+          "value": "2026-10-08T01:04:21Z",
+          "oldValue": "2026-10-08T01:04:17Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_27/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 142,
+      "at": "2026-10-08T01:04:24Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_19",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_19/order",
+          "value": 80,
+          "oldValue": 60
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_19/parentId",
+          "value": "sec_1",
+          "oldValue": "p_2"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_19/provenance/at",
+          "value": "2026-10-08T01:04:23Z",
+          "oldValue": "2026-10-08T01:02:56Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_19/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 143,
+      "at": "2026-10-08T01:04:26Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "tct_32",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/order",
+          "value": 90,
+          "oldValue": 80
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/parentId",
+          "value": "sec_1",
+          "oldValue": "sec_19"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/provenance/at",
+          "value": "2026-10-08T01:04:25Z",
+          "oldValue": "2026-10-08T01:04:13Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/tct_32/rev",
+          "value": 6,
+          "oldValue": 5
+        }
+      ]
+    },
+    {
+      "rev": 144,
+      "at": "2026-10-08T01:04:28Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/parentId",
+          "value": "sec_37",
+          "oldValue": "sec_19"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/actorId",
+          "value": "DR_T",
+          "oldValue": "system/lis"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:04:27Z",
+          "oldValue": "2026-10-08T01:04:15Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/origin",
+          "value": "human",
+          "oldValue": "system"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 9,
+          "oldValue": 8
+        }
+      ]
+    },
+    {
+      "rev": 145,
+      "at": "2026-10-08T01:04:30Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_7",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/provenance/at",
+          "value": "2026-10-08T01:04:29Z",
+          "oldValue": "2026-10-08T01:04:11Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_7/rev",
+          "value": 5,
+          "oldValue": 4
+        }
+      ]
+    },
+    {
+      "rev": 146,
+      "at": "2026-10-08T01:04:32Z",
+      "actorId": "DR_T",
+      "op": "move",
+      "targetId": "n_new_25",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_25/order",
+          "value": 120,
+          "oldValue": 80
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_25/parentId",
+          "value": "sec_37",
+          "oldValue": "p_5"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_25/provenance/at",
+          "value": "2026-10-08T01:04:31Z",
+          "oldValue": "2026-10-08T01:03:47Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_new_25/rev",
+          "value": 2,
+          "oldValue": 1
+        }
+      ]
+    },
+    {
+      "rev": 147,
+      "at": "2026-10-08T01:04:34Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "p_5",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/provenance/at",
+          "value": "2026-10-08T01:04:33Z",
+          "oldValue": "2026-10-08T01:04:19Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/rev",
+          "value": 7,
+          "oldValue": 6
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/p_5/semantic",
+          "value": "body_146",
+          "oldValue": "body_139"
+        }
+      ]
+    },
+    {
+      "rev": 148,
+      "at": "2026-10-08T01:04:36Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/actorId",
+          "value": "system/lis",
+          "oldValue": "DR_T"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:04:35Z",
+          "oldValue": "2026-10-08T01:04:27Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/origin",
+          "value": "system",
+          "oldValue": "human"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 10,
+          "oldValue": 9
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/value",
+          "value": 37,
+          "oldValue": 39
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/valueText",
+          "value": "37",
+          "oldValue": "39"
+        }
+      ]
+    },
+    {
+      "rev": 149,
+      "at": "2026-10-08T01:04:38Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "f_28",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/provenance/at",
+          "value": "2026-10-08T01:04:37Z",
+          "oldValue": "2026-10-08T01:04:35Z"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/rev",
+          "value": 11,
+          "oldValue": 10
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/value",
+          "value": 38,
+          "oldValue": 37
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/f_28/valueText",
+          "value": "38",
+          "oldValue": "37"
+        }
+      ]
+    },
+    {
+      "rev": 150,
+      "at": "2026-10-08T01:04:39Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "n_new_12",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_12",
+          "oldValue": {
+            "id": "n_new_12",
+            "type": "text",
+            "parentId": "sec_19",
+            "order": 100,
+            "rev": 4,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:39Z"
+            },
+            "runs": [
+              {
+                "text": "新增 改119"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        }
+      ]
+    },
+    {
+      "rev": 151,
+      "at": "2026-10-08T01:04:40Z",
+      "actorId": "DR_T",
+      "op": "delete",
+      "targetId": "p_2",
+      "patch": [
+        {
+          "op": "remove",
+          "path": "/nodes/f_4",
+          "oldValue": {
+            "id": "f_4",
+            "type": "field",
+            "parentId": "p_2",
+            "order": 20,
+            "rev": 3,
+            "dataType": "number",
+            "value": 39,
+            "valueText": "39",
+            "unit": "℃",
+            "sourceKey": "VITAL.T0_0",
+            "tags": [
+              {
+                "system": "WS445",
+                "code": "DE05.01.000",
+                "display": "体温"
+              },
+              {
+                "system": "local",
+                "code": "LT0",
+                "display": "院内项"
+              }
+            ],
+            "provenance": {
+              "origin": "system",
+              "actorId": "system/lis",
+              "at": "2026-10-08T01:02:26Z"
+            }
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_new_23",
+          "oldValue": {
+            "id": "n_new_23",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 70,
+            "rev": 2,
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:45Z"
+            },
+            "runs": [
+              {
+                "text": "新增 改12214"
+              }
+            ],
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/p_2",
+          "oldValue": {
+            "id": "p_2",
+            "type": "paragraph",
+            "parentId": "sec_19",
+            "order": 120,
+            "rev": 6,
+            "semantic": "body_121",
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:55Z"
+            },
+            "humanConfirmed": true
+          }
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/t_3",
+          "oldValue": {
+            "id": "t_3",
+            "type": "text",
+            "parentId": "p_2",
+            "order": 10,
+            "rev": 3,
+            "runs": [
+              {
+                "text": "患者3天前改120明显胸闷气促，否认药物及食物过敏史。既往体健。·64"
+              }
+            ],
+            "provenance": {
+              "origin": "human",
+              "actorId": "DR_T",
+              "at": "2026-10-08T01:03:41Z"
+            },
+            "humanConfirmed": true
+          }
+        }
+      ]
+    }
+  ]
+}

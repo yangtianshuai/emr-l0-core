@@ -1,0 +1,151 @@
+{
+  "schemaVersion": "9.9.9",
+  "docId": "doc_outpatient_sample_002_invalid",
+  "docType": { "system": "WST500", "code": "WST500.2", "display": "门（急）诊病历" },
+  "patient": { "patientId": "P0002", "nameMasked": "李**", "gender": "F" },
+  "encounter": { "visitId": "V20261008002", "visitType": "outpatient" },
+  "status": "signed",
+  "createdAt": "2026-10-08T02:00:00Z",
+  "updatedAt": "2026-10-08T02:30:00Z",
+  "createdBy": "DR1002",
+  "rootId": "n_root",
+  "nodes": {
+    "n_root": {
+      "id": "n_root",
+      "type": "document",
+      "parentId": null,
+      "order": 0,
+      "rev": 1,
+      "provenance": { "origin": "system", "actorId": "emr-core", "at": "2026-10-08T02:00:00Z" }
+    },
+    "n_orphan": {
+      "id": "n_orphan",
+      "type": "text",
+      "parentId": "n_orphan",
+      "order": 99,
+      "rev": 1,
+      "runs": [{ "text": "孤儿节点：从 rootId 不可达（同时构成自引用循环）" }],
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:01:00Z" }
+    },
+    "n_sec_cc": {
+      "id": "n_sec_cc",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 10,
+      "rev": 1,
+      "title": "主诉",
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:02:00Z" }
+    },
+    "n_t_cc": {
+      "id": "n_t_cc",
+      "type": "text",
+      "parentId": "n_sec_missing",
+      "order": 10,
+      "rev": 2,
+      "runs": [{ "text": "父节点不存在，本节点将不可达。" }],
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:03:00Z" }
+    },
+    "n_f_temp_KEY": {
+      "id": "n_f_temp",
+      "type": "field",
+      "parentId": "n_sec_cc",
+      "order": 20,
+      "rev": 2,
+      "dataType": "numberr",
+      "valueText": "38.9",
+      "unit": "℃",
+      "provenance": { "origin": "system", "actorId": "system/lis", "at": "2026-10-08T02:04:00Z" }
+    },
+    "n_sec_dx": {
+      "id": "n_sec_dx",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 30,
+      "rev": 1,
+      "title": "初步诊断",
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:05:00Z" }
+    },
+    "n_f_diag": {
+      "id": "n_f_diag",
+      "type": "field",
+      "parentId": "n_sec_dx",
+      "order": 10,
+      "rev": 3,
+      "dataType": "code",
+      "value": "J18.9",
+      "valueText": "肺炎",
+      "keyContent": true,
+      "humanConfirmed": false,
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:06:00Z" }
+    },
+    "n_p_assess": {
+      "id": "n_p_assess",
+      "type": "paragraph",
+      "parentId": "n_sec_dx",
+      "order": 20,
+      "rev": 3,
+      "semantic": "assessment",
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:07:00Z" }
+    },
+    "n_t_tag": {
+      "id": "n_t_tag",
+      "type": "text",
+      "parentId": "n_p_assess",
+      "order": 30,
+      "rev": 4,
+      "runs": [{ "text": "机器绑定的数据元标签尚未人工确认（即时结构化采纳的产物）。" }],
+      "tags": [{ "system": "local", "code": "LOCAL.STRICT.1", "display": "普通数据元" }],
+      "unconfirmedTags": [{ "system": "local", "code": "LOCAL.STRICT.1", "display": "普通数据元" }],
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:09:00Z" }
+    },
+    "n_t_assess": {
+      "id": "n_t_assess",
+      "type": "text",
+      "parentId": "n_p_assess",
+      "order": 10,
+      "rev": 4,
+      "runs": [{ "text": "AI 生成的评估意见：缺少 modelId，且置信度偏低又未经人工确认。" }],
+      "provenance": {
+        "origin": "ai",
+        "promptId": "tpl-assessment-v3",
+        "confidence": 0.6,
+        "evidence": [{ "kind": "lis", "ref": "LIS:20261008-0204:WBC", "valueText": "12.1" }],
+        "at": "2026-10-08T02:08:00Z"
+      }
+    },
+    "n_sig": {
+      "id": "n_sig",
+      "type": "signatureBlock",
+      "parentId": "n_root",
+      "order": 90,
+      "rev": 5,
+      "signerRole": "author",
+      "signerId": "DR1002",
+      "signatureRef": "sig_2",
+      "provenance": { "origin": "human", "actorId": "DR1002", "at": "2026-10-08T02:30:00Z" }
+    }
+  },
+  "machineReadable": {
+    "generatedAt": "2026-10-08T02:00:00Z",
+    "generator": "l0-export/0.1",
+    "modelSchemaVersion": "0.9.0",
+    "dataElements": [
+      { "tag": { "system": "WS445", "code": "DE05.01.001", "display": "体温" }, "value": 38.9, "valueText": "38.9", "unit": "℃", "nodeId": "n_missing", "origin": "system" }
+    ]
+  },
+  "revisions": [
+    { "rev": 1, "at": "2026-10-08T02:00:00Z", "actorId": "emr-core", "op": "create", "targetId": "n_root" },
+    { "rev": 2, "at": "2026-10-08T02:03:00Z", "actorId": "DR1002", "op": "insert", "targetId": "n_t_cc" },
+    { "rev": 4, "at": "2026-10-08T02:08:00Z", "actorId": "DR1002", "op": "accept-ai", "targetId": "n_t_assess", "aiSuggestionId": "sg_0011" },
+    { "rev": 5, "at": "2026-10-08T02:30:00Z", "actorId": "DR1002", "op": "sign", "targetId": "n_sig" }
+  ],
+  "signatureRefs": [
+    {
+      "signatureRef": "sig_2",
+      "signerRole": "author",
+      "signerId": "DR1002",
+      "signedAt": "2026-10-08T02:30:00Z",
+      "covers": ["Document.xml"]
+    }
+  ]
+}

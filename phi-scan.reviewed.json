@@ -1,0 +1,340 @@
+{
+  "version": 1,
+  "note": [
+    "人工复核记录：下列命中已由人逐条回到源头看过，判定为演示 / 测试数据，不是真实患者信息。",
+    "**降级不等于隐藏** —— 每一条仍然逐条出现在 `npm run scan:phi` 的报告里（连同下面的理由与复核人），只是不再阻断退出码；",
+    "这样退出码才能变绿，而它真正的作用——'新出现的命中能拦住'——才保得住。新增命中不会自动获得此身份。",
+    "要复核新的命中：`node src/security/phi-scan.ts --fingerprints` 取指纹后手写进本文件（刻意不提供一键全量复核，那样它会变成橡皮图章）。",
+    "指纹 = sha256(规则名 ‖ 原值) 前 16 位，**不含路径与行号**：同一段合成数据出现在多个文件、或行号变动，都不会让复核失效，也不会落明文。"
+  ],
+  "reviewed": [
+    {
+      "fingerprint": "7142a964365cabfa",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/dictation/capture-self-test.ts",
+      "note": "自测夹具：阿里云一句话识别用例里那把**假 NLS token**（`NLS-TOKEN`）。它只喂给假 transport，用来钉住『token 必须走 X-NLS-Token 头、**不得进 URL**（URL 会进日志）』这条；不指向任何真实服务，也不进日志与留痕。同一指纹出现在两处（换了断言位置也不会让复核失效）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "8d08739fff70f4c4",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/dictation/capture-self-test.ts",
+      "note": "自测夹具：验证『采集配置落库后密钥不得明文落盘、且永不回显』时写进**临时夹具库**的假 ASR 密钥（`secret-token-1`）。夹具库建在内存/临时路径、跑完即弃；它正是那条断言的被测对象（被断言的对象不是真凭据，也不需要是真凭据）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "e91f70ea73eb3c2d",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts",
+      "note": "自测夹具：本地采集客户端（C3b③）那把**一次性令牌**，供 B49 起一个真客户端进程并断言『没带令牌 401 / 令牌错 401 / 对令牌才放行』。它只存在于测试进程与它会话内（真实部署里令牌由客户端启动时生成或由装机脚本给出，见 `local-capture-client.ts`），不指向任何真实环境",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "bed1ec6e62605f5f",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts",
+      "note": "自测夹具：B45 配靶子 ASR 时填的**假密钥**（`selftest-asr-token`）。靶子 ASR 是测试自己起的本地假服务（只回固定文本），这个值不会出现在任何日志、视图或审计里 —— 这正是那条用例断言的一部分（视图里不得出现密钥值）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "58df3b28f255d3b0",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts",
+      "note": "自测夹具：B49 里**故意用错**的桥令牌（`wrong-token`），用来验证『错令牌必须回 401，且错误码能与「客户端不在」分开』。它永远不会通过校验 —— 正是被测对象",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "72758b9d9c47765c",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/qc/content-engine-model-self-test.ts",
+      "note": "自测夹具：验证「模型形态的内涵类质控引擎」时用的**假 API key**（`sk-very-secret`）。它只出现在假 transport 的返回值与断言里（用来钉住『令牌不得进入错误信息』这条），不会被任何代码读取，也不指向任何真实服务",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "a83070c1bd14dbf3",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/testing/config-fixture.ts",
+      "note": "自测夹具：**测试专用**的假口令（`FIXTURE_PASSPHRASE`），只用来建临时库并密封测试数据；它不是任何环境的口令，也不会出现在运行时路径里（`openConfigFixture` 只在自测里被调用）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "1b48d01ace6a17df",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/ai/model-self-test.ts",
+      "note": "自测夹具：验证『模型密钥密封落库、读不出来不当作没配过』用的**假口令**（`cfg-pass`），只作用于临时夹具库",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "03dc0e75f0ffe5bf",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/qc/content-engine-http-self-test.ts",
+      "note": "自测夹具：验证『配了令牌就带 Authorization: Bearer …』这条断言用的**假令牌**，只在用例内部的假引擎上流转，不对应任何真实凭据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "147f0323baa41243",
+      "rule": "身份证号",
+      "where": "src/core/store-self-test.ts、src/model/identity-self-test.ts",
+      "note": "自测夹具：合成的身份证号（校验位**不通过**），7 处自测文件共用同一个号，非真实人员数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "db9155862c61656d",
+      "rule": "身份证号",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测夹具：合成号，**刻意让校验位通过**，用于验证'校验位通过'这一分支的判定；非真实人员数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "2e27c11d9b34b3ad",
+      "rule": "带标签的身份信息",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测文件头部注释里的**说明措辞**（'身份证号：…' 这类文字），不是数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "da12495818533e5d",
+      "rule": "带标签的身份信息",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测注释里的说明措辞（P1 用例说明），不是数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "b6c91fe08767989b",
+      "rule": "带标签的身份信息",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测夹具：P1 用例里的合成证件号（校验位通过），非真实数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "faf4abeb31abdcc3",
+      "rule": "带标签的身份信息",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测夹具：P1 / P7 用例里的合成证件号（校验位不通过），非真实数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "216d9bcfe4838c85",
+      "rule": "带标签的身份信息",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测夹具：P4 用例里的合成手机号，非真实数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "006b4719d5fc3127",
+      "rule": "JSON 里的姓名 / 标签字段",
+      "where": "artifacts/recipient-keys.json、docs/L0-实现任务分解与验收对照表.md、src/security/phi-scan-self-test.ts",
+      "note": "演示数据：接收方公钥目录里的标签「张医生（内科）」是**虚构角色名**；另 3 处分别是文档与自测里**引用**这个例子，不是新增数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "6919eb3675c9504a",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/ai/model-self-test.ts",
+      "note": "自测夹具：用于验证'密钥不得明文落盘'那条断言的假密钥（它正是被这条用例保护的对象）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "0e3f73da2e60b20d",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/server/http-self-test.ts",
+      "note": "自测夹具：契约用例的测试凭证；该文件里已写明'凭证只出现在测试与启动参数里，服务端内部只保留 SM3 指纹'",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "47edeeae99f82d11",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/server/http-self-test.ts",
+      "note": "自测夹具：同上（AI 侧凭证）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "b143c884507a7443",
+      "rule": "手机号",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测夹具：P4 用例里的合成手机号（用于验证'报告里不得出现明文'），非真实数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "9e2667969c4d4029",
+      "rule": "带标签的姓名",
+      "where": "src/security/phi-scan-self-test.ts",
+      "note": "自测夹具：P4 用例里的合成姓名（用于验证姓名必须打码），非真实数据",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "06f2df5698bce8ca",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/auth/user-store-self-test.ts:56",
+      "note": "自测夹具：账号仓储用例里验证『口令哈希往返保真』用的口令（correct-horse-battery）。它不是任何真实凭证、也不进任何部署；产品侧的口令一律由第一次运行时初始化、由管理员设置",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "60ea3f25b1b78067",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/auth/user-store-self-test.ts:256",
+      "note": "自测夹具：验证『重设口令后旧口令立刻失效』时用的新口令（brand-new-password）。它正是那条用例的被测对象，永远不会被部署",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "a7bfde154672b7f8",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts:56",
+      "note": "自测夹具：**测试自己造的管理员口令**（selftest-admin-password）。产品侧已经**没有任何内置口令**（这一轮把内置演示口令整个去掉了），测试是在初始化接口上现建账号 —— 所以这条口令只存在于测试进程里",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "aebd0f949ff09360",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts:59",
+      "note": "自测夹具：测试用的**质控员与医生账号**共用的口令（selftest-role-password）。角色现在来自账号（落在测试自己的临时库里），不再来自环境变量里的角色口令",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "2f68bd11637716da",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts:62",
+      "note": "自测夹具：验证『登录失败有代价』用的**独立账号**口令（selftest-brute-password）。用独立账号是为了不把 ADMIN 那个限流桶一起打满（测试自身的污染）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "b0b84188b7f9a592",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts:64",
+      "note": "自测夹具：严格模式实例注入的**部署凭据**（即 L0_ADMIN_TOKEN 的值）。它现在只是『初始化时必须同时给出』的凭据、**不再是登录口令**；注入它是为了证明那一档真的拦住了任意访问者",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "eeb6d07c4e5646a0",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts:2890",
+      "note": "自测夹具：验证『初始化入口是一次性的』时用的假口令（nobody-nobody-1），它对应的账号故意不存在 —— 那次调用必须被 E_ALREADY_INITIALIZED 拒掉",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "9f8ce742cf5805ea",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts:2980",
+      "note": "自测夹具：验证登录失败限流时**故意用错**的口令（wrong-password）。它永远不会通过校验，正是被测对象",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "b306dd009dbc0aee",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts:3338",
+      "note": "自测夹具：B43 里「质控员试图新增账号」用的口令（sneaky-password-1）。那次请求**必须被拒**（角色不够），所以这个账号永远建不出来 —— 口令不是凭证，是被拒请求的一部分",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "8fbcba5037d76bf1",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/demo/ui-self-test.ts（B31）",
+      "note": "自测夹具：验证『换密钥不改变生效配置指纹』用的合成密钥，非真实凭证 —— 它正是那条用例的被测对象",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-10"
+    },
+    {
+      "fingerprint": "4c92974b6084fa2b",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/storage/storage-self-test.ts",
+      "note": "自测夹具：验证「口令不对时必须报错、而不是报『没有这份数据』」时**故意用错**的口令（它永远不会通过校验，正是被测对象）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-12"
+    },
+    {
+      "fingerprint": "fb14a5a1de6d5d88",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/ai/model-self-test.ts",
+      "note": "自测夹具：验证『带 markdown 围栏的模型响应能解析』时递给假 transport 的**假 API key**（值就是 `secret`）。它只出现在假 transport 的断言里，不指向任何真实服务，也不会进入日志或留痕（那条用例同时钉住『令牌不得进错误信息』）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "84f3ab70da64a5ea",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/core/server-config-self-test.ts",
+      "note": "自测夹具：服务端文件配置自测里写进**临时 JSON 文件**的假装机凭据（`deploy-token-1`），用来验证『token / user 能按文件读出来』。文件建在系统临时目录、跑完即弃；它不是任何环境的凭据，也不进服务端配置文件（那份文件在测试里由参数指定路径）",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "c2cd5bc7f3aa4b0c",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/dictation/placement-self-test.ts",
+      "note": "自测夹具：验证『外部落位服务的密钥单独一行加密落库、明文不得出现在库里那一行、界面只报是否就位』时用的假密钥（`place-secret-1`）。它只作用于临时夹具库，而且是那条断言**要求不得明文出现**的对象",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "94191ec91a9a9590",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/qc/qc-content-store-self-test.ts",
+      "note": "自测夹具：内涵质控配置落库自测里设的假引擎凭据（`qc-secret-1`），验证『凭据单独一行加密、视图只报 tokenPresent、永不回显』。临时夹具库、跑完即弃",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "0cd5a182ebcbb20d",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/qc/qc-content-store-self-test.ts",
+      "note": "自测夹具：同一个用例的第二个假凭据（`qc-secret-2`），用来验证『没传 token 时不得动凭据』（改地址不该顺手清掉密钥）。同样是临时夹具库里的假值",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "59206071b8791b24",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/sign/sign-self-test.ts",
+      "note": "自测夹具：验证『密钥只从参数来、会作为认证头送出』时递给 `createHttpSigner` 的假密钥（`secret-value`）。它只出现在假 transport 捕获的请求里，不指向任何真实签名服务",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "239841d9049096d1",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/sign/sign-self-test.ts",
+      "note": "自测夹具：签名配置落库三态用例里设的假密钥（`sk-sign-secret-1`）。这条用例正是**要求它不得以明文出现在库里那一行**（直接读库比对密文），所以它必须是个可检索的字面量 —— 否则那条断言就失去被测对象",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    },
+    {
+      "fingerprint": "4d7043d84bcf31fa",
+      "rule": "硬编码口令 / 令牌",
+      "where": "src/sign/sign-self-test.ts",
+      "note": "自测夹具：验证『密钥那一行解不开时不许当作「没有密钥」』时写的假密钥（`sk-recover`），随后那一行被故意损坏。它永远不会被真正使用 —— 是那条 fail-closed 断言的被测对象",
+      "reviewedBy": "assistant（回源核对，待 owner 复核）",
+      "reviewedAt": "2026-10-14"
+    }
+  ]
+}

@@ -1,0 +1,394 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.emr/schema/l0-document-model.schema.json",
+  "title": "L0 病历文档模型",
+  "description": "视图与数据分离的结构化病历文档模型；每个节点必须携带 provenance 与 rev。",
+  "type": "object",
+  "required": ["schemaVersion", "docId", "docType", "patient", "status", "createdAt", "updatedAt", "createdBy", "rootId", "nodes", "revisions"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "docId": { "type": "string", "minLength": 1 },
+    "docType": { "$ref": "#/$defs/DocTypeRef" },
+    "patient": { "$ref": "#/$defs/PatientRef" },
+    "encounter": { "$ref": "#/$defs/EncounterRef" },
+    "status": { "enum": ["draft", "reviewing", "signed", "archived", "void"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "createdBy": { "type": "string" },
+    "rootId": { "type": "string" },
+    "nodes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/Node" }
+    },
+    "machineReadable": { "$ref": "#/$defs/MachineReadableBlock" },
+    "revisions": { "type": "array", "items": { "$ref": "#/$defs/RevisionEntry" } },
+    "signatureRefs": { "type": "array", "items": { "$ref": "#/$defs/SignatureRef" } },
+    "extensions": { "type": "object" },
+    "resources": { "type": "object" }
+  },
+  "$defs": {
+    "DocTypeRef": {
+      "type": "object",
+      "required": ["system", "code", "display"],
+      "additionalProperties": false,
+      "properties": {
+        "system": { "enum": ["WST500", "WS445", "local", "custom"] },
+        "code": { "type": "string" },
+        "display": { "type": "string" }
+      }
+    },
+    "PatientRef": {
+      "type": "object",
+      "required": ["patientId"],
+      "additionalProperties": false,
+      "properties": {
+        "patientId": { "type": "string" },
+        "nameMasked": { "type": "string" },
+        "gender": { "enum": ["M", "F", "U"] },
+        "birthDate": { "type": "string" }
+      }
+    },
+    "EncounterRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "visitId": { "type": "string" },
+        "visitType": { "enum": ["outpatient", "inpatient", "emergency", "physical-exam"] },
+        "deptCode": { "type": "string" },
+        "admittedAt": { "type": "string", "format": "date-time" },
+        "dischargedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "DataElementTag": {
+      "type": "object",
+      "required": ["system", "code"],
+      "additionalProperties": false,
+      "properties": {
+        "system": { "enum": ["WS445", "WST500", "ICD10", "ICD9CM3", "LOINC", "local", "custom"] },
+        "code": { "type": "string" },
+        "display": { "type": "string" }
+      }
+    },
+    "EvidenceRef": {
+      "type": "object",
+      "required": ["kind", "ref"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["his", "lis", "pacs", "emr-prior", "guideline", "terminology", "template", "user-input", "external-doc"] },
+        "ref": { "type": "string" },
+        "field": { "type": "string" },
+        "valueText": { "type": "string" },
+        "quote": { "type": "string" },
+        "nodeId": { "type": "string" },
+        "capturedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "AiDerivation": {
+      "type": "object",
+      "required": ["editedBy", "editedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "modelId": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "suggestionId": { "type": "string" },
+        "editedBy": { "type": "string" },
+        "editedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Provenance": {
+      "type": "object",
+      "required": ["origin", "at"],
+      "additionalProperties": false,
+      "properties": {
+        "origin": { "enum": ["human", "ai", "system", "imported"] },
+        "actorId": { "type": "string" },
+        "modelId": { "type": "string" },
+        "promptId": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/EvidenceRef" } },
+        "acceptedBy": { "type": "string" },
+        "acceptedAt": { "type": "string", "format": "date-time" },
+        "suggestionId": { "type": "string" },
+        "derivedFrom": { "$ref": "#/$defs/AiDerivation" },
+        "at": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "origin": { "const": "ai" } }, "required": ["origin"] },
+          "then": { "required": ["modelId", "confidence"] }
+        }
+      ]
+    },
+    "NodeBase": {
+      "type": "object",
+      "required": ["id", "type", "parentId", "order", "rev", "provenance"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string" },
+        "parentId": { "type": ["string", "null"] },
+        "order": { "type": "integer" },
+        "rev": { "type": "integer", "minimum": 1 },
+        "provenance": { "$ref": "#/$defs/Provenance" },
+        "keyContent": { "type": "boolean" },
+        "humanConfirmed": { "type": "boolean" },
+        "tags": { "type": "array", "items": { "$ref": "#/$defs/DataElementTag" } },
+        "styleRef": { "type": "string" },
+        "presentation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "keepWithNext": { "type": "boolean" },
+            "pageBreakBefore": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "TextRun": {
+      "type": "object",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "text": { "type": "string" },
+        "marks": { "type": "array", "items": { "enum": ["bold", "italic", "underline", "sup", "sub", "highlight"] } },
+        "tags": { "type": "array", "items": { "$ref": "#/$defs/DataElementTag" } }
+      }
+    },
+    "Node": {
+      "allOf": [{ "$ref": "#/$defs/NodeBase" }],
+      "unevaluatedProperties": false,
+      "oneOf": [
+        {
+          "properties": { "type": { "const": "document" } },
+          "required": ["type"]
+        },
+        {
+          "properties": {
+            "type": { "const": "section" },
+            "title": { "type": "string" },
+            "sectionCode": { "type": "string" },
+            "required": { "type": "boolean" }
+          },
+          "required": ["type"]
+        },
+        {
+          "properties": {
+            "type": { "const": "paragraph" },
+            "semantic": { "type": "string" },
+            "align": { "enum": ["left", "center", "right", "justify"] }
+          },
+          "required": ["type"]
+        },
+        {
+          "properties": { "type": { "const": "text" }, "runs": { "type": "array", "items": { "$ref": "#/$defs/TextRun" } } },
+          "required": ["type", "runs"]
+        },
+        {
+          "properties": {
+            "type": { "const": "field" },
+            "dataType": { "enum": ["text", "number", "date", "code", "boolean", "expression"] },
+            "value": {},
+            "valueText": { "type": "string" },
+            "unit": { "type": "string" },
+            "required": { "type": "boolean" },
+            "valueSet": { "type": "array", "items": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string" }, "display": { "type": "string" } } } },
+            "sourceKey": { "type": "string" },
+            "sampledAt": { "type": "string", "format": "date-time" },
+            "referenceRange": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "low": { "type": "number" },
+                "high": { "type": "number" },
+                "text": { "type": "string" },
+                "unit": { "type": "string" }
+              }
+            }
+          },
+          "required": ["type", "dataType", "value"]
+        },
+        {
+          "properties": {
+            "type": { "const": "control" },
+            "controlKind": { "enum": ["menstrualHistory", "odontogram", "vitalSignsChart", "scaleScore", "labTrend", "custom"] },
+            "payload": { "type": "object" }
+          },
+          "required": ["type", "controlKind", "payload"]
+        },
+        {
+          "properties": { "type": { "const": "table" }, "colCount": { "type": "integer", "minimum": 1 }, "headerRows": { "type": "integer", "minimum": 0 } },
+          "required": ["type"]
+        },
+        { "properties": { "type": { "const": "tableRow" } }, "required": ["type"] },
+        {
+          "properties": { "type": { "const": "tableCell" }, "colSpan": { "type": "integer", "minimum": 1 }, "rowSpan": { "type": "integer", "minimum": 1 } },
+          "required": ["type"]
+        },
+        {
+          "properties": { "type": { "const": "image" }, "resRef": { "type": "string" }, "altText": { "type": "string" }, "caption": { "type": "string" } },
+          "required": ["type", "resRef"]
+        },
+        { "properties": { "type": { "const": "listGroup" }, "ordered": { "type": "boolean" } }, "required": ["type"] },
+        { "properties": { "type": { "const": "listItem" } }, "required": ["type"] },
+        {
+          "properties": {
+            "type": { "const": "signatureBlock" },
+            "signerRole": { "enum": ["author", "reviewer", "approver", "patient"] },
+            "signerId": { "type": "string" },
+            "signatureRef": { "type": "string" }
+          },
+          "required": ["type"]
+        },
+        {
+          "properties": {
+            "type": { "const": "extension" },
+            "namespace": { "type": "string" },
+            "payload": {}
+          },
+          "required": ["type", "namespace", "payload"]
+        }
+      ]
+    },
+    "MachineDataElement": {
+      "type": "object",
+      "required": ["tag", "value", "nodeId", "origin"],
+      "additionalProperties": false,
+      "properties": {
+        "tag": { "$ref": "#/$defs/DataElementTag" },
+        "value": {},
+        "valueText": { "type": "string" },
+        "unit": { "type": "string" },
+        "nodeId": { "type": "string" },
+        "origin": { "enum": ["human", "ai", "system", "imported"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "MachineReadableBlock": {
+      "type": "object",
+      "required": ["generatedAt", "generator", "modelSchemaVersion", "dataElements"],
+      "additionalProperties": false,
+      "properties": {
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "generator": { "type": "string" },
+        "sourceHash": { "type": "string" },
+        "modelSchemaVersion": { "type": "string" },
+        "dataElements": { "type": "array", "items": { "$ref": "#/$defs/MachineDataElement" } },
+        "keyContentRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["nodeId", "present"],
+            "properties": {
+              "nodeId": { "type": "string" },
+              "tag": { "$ref": "#/$defs/DataElementTag" },
+              "present": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "RevisionEntry": {
+      "type": "object",
+      "required": ["rev", "at", "actorId", "op"],
+      "additionalProperties": false,
+      "properties": {
+        "rev": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "actorId": { "type": "string" },
+        "op": { "enum": ["create", "insert", "update", "delete", "move", "accept-ai", "reject-ai", "sign", "import", "migrate", "external", "unlock", "revert"] },
+        "targetId": { "type": "string" },
+        "unlock": {
+          "description": "解锁已签章文档：作废了哪一次签章、为什么（理由必填）",
+          "type": "object",
+          "required": ["reason", "invalidated"],
+          "properties": {
+            "reason": { "type": "string" },
+            "invalidated": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["publicKeyFingerprint", "signedAt"],
+                "properties": {
+                  "publicKeyFingerprint": { "type": "string" },
+                  "signedAt": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "revert": {
+          "description": "撤销：本条留痕撤回了第几条（历史不被篡改）",
+          "type": "object",
+          "required": ["revertedRev", "revertedOp"],
+          "properties": {
+            "revertedRev": { "type": "integer", "minimum": 1 },
+            "revertedOp": { "type": "string" }
+          }
+        },
+        "patch": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["op", "path"],
+            "properties": {
+              "op": { "enum": ["add", "remove", "replace"] },
+              "path": { "type": "string" },
+              "value": {}
+            }
+          }
+        },
+        "confirmedNodeIds": {
+          "description": "批量/子树确认覆盖的节点范围（审计要能逐条回答『他确认了哪些』）",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "acknowledgedUnconfirmed": {
+          "description": "签章时医生显式声明『已知但未逐条确认』的清单（分级放行的代价记录）",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ai", "imported"],
+          "properties": {
+            "ai": { "type": "array", "items": { "type": "string" } },
+            "imported": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "aiSuggestionId": { "type": "string" },
+        "modelId": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "beforeHash": { "type": "string" },
+        "afterHash": { "type": "string" }
+      }
+    },
+    "SignatureReference": {
+      "type": "object",
+      "description": "被签名文件的摘要条目：第三方按 path 找到文件、按 digest 独立复算",
+      "required": ["path", "digest"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "SignatureRef": {
+      "type": "object",
+      "description": "签名引用。前 5 个是“签章动作”的元数据；后 7 个是密码学材料（T18 起承载真实签名值）——成组出现，只有元数据而无签名值是最危险的产物：看起来已签、实际不可验证。",
+      "required": ["signatureRef"],
+      "additionalProperties": false,
+      "properties": {
+        "signatureRef": { "type": "string" },
+        "signerRole": { "enum": ["author", "reviewer", "approver", "patient"] },
+        "signerId": { "type": "string" },
+        "signedAt": { "type": "string", "format": "date-time" },
+        "covers": { "type": "array", "items": { "type": "string" } },
+        "algorithm": { "type": "string" },
+        "provider": { "type": "string" },
+        "publicKeyFingerprint": { "type": "string" },
+        "publicKeyBase64": { "type": "string" },
+        "signedInfoDigest": { "type": "string" },
+        "signatureValue": { "type": "string" },
+        "references": { "type": "array", "items": { "$ref": "#/$defs/SignatureReference" } }
+      }
+    }
+  }
+}

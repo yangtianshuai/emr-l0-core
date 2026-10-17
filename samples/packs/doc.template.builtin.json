@@ -1,0 +1,719 @@
+{
+  "packId": "doc.template.builtin",
+  "kind": "template",
+  "name": "核心文书模板（内置）",
+  "engineApi": "doc-template/1",
+  "vendor": "本系统内置",
+  "scope": "general",
+  "description": "门（急）诊病历 / 入院记录 / 产科门诊病历；含 5 个医学表达式控件（BMI、体表面积、平均动脉压、年龄、孕周）",
+  "items": [
+    {
+      "itemType": "expression",
+      "itemId": "expr.bmi",
+      "name": "体质指数（BMI）",
+      "unit": "kg/m²",
+      "enabled": true,
+      "description": "体重(kg) ÷ 身高(m)²，保留一位小数",
+      "expression": {
+        "kind": "fn",
+        "name": "round",
+        "args": [
+          {
+            "kind": "fn",
+            "name": "div",
+            "args": [
+              {
+                "kind": "slot",
+                "key": "weightKg"
+              },
+              {
+                "kind": "fn",
+                "name": "pow",
+                "args": [
+                  {
+                    "kind": "fn",
+                    "name": "div",
+                    "args": [
+                      {
+                        "kind": "slot",
+                        "key": "heightCm"
+                      },
+                      {
+                        "kind": "num",
+                        "value": 100
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "num",
+                    "value": 2
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "num",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "itemType": "expression",
+      "itemId": "expr.bsa",
+      "name": "体表面积（Du Bois 公式）",
+      "unit": "m²",
+      "enabled": true,
+      "description": "0.007184 × 身高(cm)^0.725 × 体重(kg)^0.425，保留三位小数",
+      "expression": {
+        "kind": "fn",
+        "name": "round",
+        "args": [
+          {
+            "kind": "fn",
+            "name": "mul",
+            "args": [
+              {
+                "kind": "num",
+                "value": 0.007184
+              },
+              {
+                "kind": "fn",
+                "name": "pow",
+                "args": [
+                  {
+                    "kind": "slot",
+                    "key": "heightCm"
+                  },
+                  {
+                    "kind": "num",
+                    "value": 0.725
+                  }
+                ]
+              },
+              {
+                "kind": "fn",
+                "name": "pow",
+                "args": [
+                  {
+                    "kind": "slot",
+                    "key": "weightKg"
+                  },
+                  {
+                    "kind": "num",
+                    "value": 0.425
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "kind": "num",
+            "value": 3
+          }
+        ]
+      }
+    },
+    {
+      "itemType": "expression",
+      "itemId": "expr.map",
+      "name": "平均动脉压（MAP）",
+      "unit": "mmHg",
+      "enabled": true,
+      "description": "(收缩压 + 2×舒张压) ÷ 3，保留一位小数",
+      "expression": {
+        "kind": "fn",
+        "name": "round",
+        "args": [
+          {
+            "kind": "fn",
+            "name": "div",
+            "args": [
+              {
+                "kind": "fn",
+                "name": "add",
+                "args": [
+                  {
+                    "kind": "slot",
+                    "key": "sbp"
+                  },
+                  {
+                    "kind": "fn",
+                    "name": "mul",
+                    "args": [
+                      {
+                        "kind": "num",
+                        "value": 2
+                      },
+                      {
+                        "kind": "slot",
+                        "key": "dbp"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "kind": "num",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "kind": "num",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "itemType": "expression",
+      "itemId": "expr.age",
+      "name": "年龄（周岁）",
+      "unit": "岁",
+      "enabled": true,
+      "description": "按患者出生日期与就诊时间计算，**只依赖上下文、不依赖填写项**",
+      "expression": {
+        "kind": "fn",
+        "name": "ageYears",
+        "args": [
+          {
+            "kind": "ctx",
+            "key": "patient.birthDate"
+          },
+          {
+            "kind": "ctx",
+            "key": "encounter.admittedAt"
+          }
+        ]
+      }
+    },
+    {
+      "itemType": "expression",
+      "itemId": "expr.gestationalWeeks",
+      "name": "孕周",
+      "unit": "周",
+      "enabled": true,
+      "description": "（就诊时间 − 末次月经）的整周数 —— 产科专科控件",
+      "expression": {
+        "kind": "fn",
+        "name": "weeksBetween",
+        "args": [
+          {
+            "kind": "slot",
+            "key": "lmpDate"
+          },
+          {
+            "kind": "ctx",
+            "key": "encounter.admittedAt"
+          }
+        ]
+      }
+    },
+    {
+      "itemType": "template",
+      "itemId": "tpl.outpatient.general",
+      "name": "门（急）诊病历 · 通用",
+      "enabled": true,
+      "docType": {
+        "system": "WST500",
+        "code": "WST500.2",
+        "display": "门（急）诊病历"
+      },
+      "description": "五个章节；体格检查带血压与体质指数、平均动脉压两个派生值",
+      "sections": [
+        {
+          "sectionCode": "chiefComplaint",
+          "title": "一、主诉",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "chiefComplaint",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.001",
+                  "display": "主诉"
+                }
+              ],
+              "keyContent": true
+            }
+          ]
+        },
+        {
+          "sectionCode": "presentIllness",
+          "title": "二、现病史",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "presentIllness",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.002",
+                  "display": "现病史"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "physicalExam",
+          "title": "三、体格检查",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "physicalExam",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.004",
+                  "display": "体格检查"
+                }
+              ]
+            },
+            {
+              "slot": "field",
+              "key": "heightCm",
+              "dataType": "number",
+              "unit": "cm",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.020",
+                  "display": "身高"
+                }
+              ],
+              "required": true
+            },
+            {
+              "slot": "field",
+              "key": "weightKg",
+              "dataType": "number",
+              "unit": "kg",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.021",
+                  "display": "体重"
+                }
+              ],
+              "required": true
+            },
+            {
+              "slot": "field",
+              "key": "sbp",
+              "dataType": "number",
+              "unit": "mmHg",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.010",
+                  "display": "收缩压"
+                }
+              ]
+            },
+            {
+              "slot": "field",
+              "key": "dbp",
+              "dataType": "number",
+              "unit": "mmHg",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.011",
+                  "display": "舒张压"
+                }
+              ]
+            },
+            {
+              "slot": "expression",
+              "key": "bmi",
+              "useExpression": "expr.bmi",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.02.001",
+                  "display": "体质指数"
+                }
+              ]
+            },
+            {
+              "slot": "expression",
+              "key": "map",
+              "useExpression": "expr.map",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.02.002",
+                  "display": "平均动脉压"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "auxiliaryExam",
+          "title": "四、辅助检查",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "auxiliaryExam",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.005",
+                  "display": "辅助检查"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "diagnosis",
+          "title": "五、初步诊断",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "diagnosis",
+              "keyContent": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "itemType": "template",
+      "itemId": "tpl.admission.general",
+      "name": "入院记录 · 通用",
+      "enabled": true,
+      "docType": {
+        "system": "WST500",
+        "code": "WST500.1",
+        "display": "入院记录"
+      },
+      "description": "一般项目带「年龄」派生值（纯上下文）；体格检查带体质指数与体表面积",
+      "sections": [
+        {
+          "sectionCode": "generalInfo",
+          "title": "一、一般项目",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "generalInfo",
+              "text": "患者 {{patient.nameMasked}}，{{patient.gender}}，就诊科室 {{encounter.deptCode}}。"
+            },
+            {
+              "slot": "expression",
+              "key": "age",
+              "useExpression": "expr.age",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE02.01.026",
+                  "display": "年龄"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "chiefComplaint",
+          "title": "二、主诉",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "chiefComplaint",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.001",
+                  "display": "主诉"
+                }
+              ],
+              "keyContent": true
+            }
+          ]
+        },
+        {
+          "sectionCode": "presentIllness",
+          "title": "三、现病史",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "presentIllness",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.002",
+                  "display": "现病史"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "pastHistory",
+          "title": "四、既往史",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "pastHistory",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.003",
+                  "display": "既往史"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "physicalExam",
+          "title": "五、体格检查",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "physicalExam",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.004",
+                  "display": "体格检查"
+                }
+              ]
+            },
+            {
+              "slot": "field",
+              "key": "temperature",
+              "dataType": "number",
+              "unit": "℃",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.001",
+                  "display": "体温"
+                }
+              ]
+            },
+            {
+              "slot": "field",
+              "key": "heightCm",
+              "dataType": "number",
+              "unit": "cm",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.020",
+                  "display": "身高"
+                }
+              ],
+              "required": true
+            },
+            {
+              "slot": "field",
+              "key": "weightKg",
+              "dataType": "number",
+              "unit": "kg",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.021",
+                  "display": "体重"
+                }
+              ],
+              "required": true
+            },
+            {
+              "slot": "expression",
+              "key": "bmi",
+              "useExpression": "expr.bmi",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.02.001",
+                  "display": "体质指数"
+                }
+              ]
+            },
+            {
+              "slot": "expression",
+              "key": "bsa",
+              "useExpression": "expr.bsa",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.02.003",
+                  "display": "体表面积"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "diagnosis",
+          "title": "六、入院诊断",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "diagnosis",
+              "keyContent": true
+            }
+          ]
+        },
+        {
+          "sectionCode": "plan",
+          "title": "七、诊疗计划",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "plan",
+              "keyContent": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "itemType": "template",
+      "itemId": "tpl.obstetric.outpatient",
+      "name": "产科门诊病历",
+      "enabled": true,
+      "docType": {
+        "system": "WST500",
+        "code": "WST500.2",
+        "display": "门（急）诊病历"
+      },
+      "description": "专科模板示例：末次月经 → 孕周由控件算出；体格检查带体质指数",
+      "sections": [
+        {
+          "sectionCode": "chiefComplaint",
+          "title": "一、主诉",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "chiefComplaint",
+              "tags": [
+                {
+                  "system": "WST500",
+                  "code": "WST500.2.001",
+                  "display": "主诉"
+                }
+              ],
+              "keyContent": true
+            }
+          ]
+        },
+        {
+          "sectionCode": "presentIllness",
+          "title": "二、现病史",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "presentIllness"
+            }
+          ]
+        },
+        {
+          "sectionCode": "obstetricHistory",
+          "title": "三、月经婚育史",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "obstetricHistory"
+            },
+            {
+              "slot": "field",
+              "key": "lmpDate",
+              "dataType": "date",
+              "unit": "日期",
+              "tags": [
+                {
+                  "system": "local",
+                  "code": "OB.LMP",
+                  "display": "末次月经"
+                }
+              ],
+              "required": true
+            },
+            {
+              "slot": "expression",
+              "key": "gestationalWeeks",
+              "useExpression": "expr.gestationalWeeks",
+              "tags": [
+                {
+                  "system": "local",
+                  "code": "OB.GA",
+                  "display": "孕周"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "physicalExam",
+          "title": "四、体格检查",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "physicalExam"
+            },
+            {
+              "slot": "field",
+              "key": "heightCm",
+              "dataType": "number",
+              "unit": "cm",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.020",
+                  "display": "身高"
+                }
+              ],
+              "required": true
+            },
+            {
+              "slot": "field",
+              "key": "weightKg",
+              "dataType": "number",
+              "unit": "kg",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.01.021",
+                  "display": "体重"
+                }
+              ],
+              "required": true
+            },
+            {
+              "slot": "expression",
+              "key": "bmi",
+              "useExpression": "expr.bmi",
+              "tags": [
+                {
+                  "system": "WS445",
+                  "code": "DE05.02.001",
+                  "display": "体质指数"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "sectionCode": "diagnosis",
+          "title": "五、初步诊断",
+          "slots": [
+            {
+              "slot": "text",
+              "key": "diagnosis",
+              "keyContent": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

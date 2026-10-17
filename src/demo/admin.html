@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>管理后台 · 能力配置</title>
+<link rel="stylesheet" href="/ui.css" />
+</head>
+<body>
+<!--
+  管理后台（独立入口）。
+
+  配置内容：部署参数，包括模型地址、签名服务、授权源信任根、落位策略，与具体病历无关。
+
+  登录：独立的登录页（/login）。未登录访问本页时服务端 302 到 /login?next=/admin
+  （见 demo-server 的 /admin 路由），因此本页不含登录控件，未登录者拿不到配置体。
+
+  会话：由服务端校验；配置写入端点的 adminId 只来自登录会话，不采信请求自报身份。
+  账号与口令存在本机数据库（`admin_users`）；装机凭据与密封口令在服务端配置文件 `server-config.json`，
+  口令永远不出现在任何页面与日志里（只报来源）。
+
+  布局：左栏放导航与身份（品牌与环境标识、四个分区、公众号二维码、当前身份与退出），
+  右栏放内容，页头只留标题与一行说明。
+
+  与医生端的关系：医生端保留只读的接入状态，并用链接指向本页。
+-->
+<div class="admin-shell">
+    <!-- 左栏：品牌（含环境标识）、分区、公众号二维码、当前身份与退出 -->
+  <aside class="admin-side">
+    <div class="admin-brand">
+            <!-- 产品 LOGO（emr-l0-core）：内联 SVG 而不是图片文件 —— 零额外请求、颜色走令牌
+           （暗色主题自动跟随）、改一行立刻生效（图片文件做不到最后一条，而本页与脚本同为 no-store）。
+           图形 = 项目名里的 "l0"：把名字本身刻在主色→AI 紫的渐变方块上 ——
+           名字就是标识，不必再猜一个符号去解释它（"0" 用外白内透做环，
+           孔里露出来的正是方块自己那层渐变）。与 login.html 里那枚是同一份图形，改图形两处一起改。 -->
+      <div class="admin-brand-row">
+        <svg class="admin-brand-logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="emrBrandGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+              <stop class="brand-stop-a" offset="0" />
+              <stop class="brand-stop-b" offset="1" />
+            </linearGradient>
+          </defs>
+          <rect x="0" y="0" width="32" height="32" rx="9" fill="url(#emrBrandGrad)" />
+                <!-- L：一竖一横拼出来，交叉处两段同色，接缝看不出来 -->
+          <rect class="brand-mark" x="6.3" y="9" width="3.1" height="14" rx="1.55" />
+          <rect class="brand-mark" x="6.3" y="19.9" width="8.4" height="3.1" rx="1.55" />
+                <!-- 0：外白内透就是环 —— 孔里填的是同一个渐变（同一套 userSpaceOnUse 坐标），
+               所以它与周围的方块严丝合缝，不是另配的一块颜色 -->
+          <rect class="brand-mark" x="16.3" y="9" width="9.4" height="14" rx="4.7" />
+          <rect x="19.4" y="12" width="3.2" height="8" rx="1.6" fill="url(#emrBrandGrad)" />
+        </svg>
+                <!-- 右半边：两行字（这是什么 / 在哪套环境）连成一块，才与左边那枚标识配成"一个牌子" -->
+        <div class="admin-brand-text">
+          <div class="admin-brand-name">管理后台</div>
+                <!-- 环境标识：常驻显示，现场无需再问 "这是哪套环境" -->
+          <div class="muted admin-brand-sub" id="sideEnv">环境：—</div>
+        </div>
+      </div>
+    </div>
+
+        <!-- 分区导航：竖排文字，不引入图标体系 -->
+    <nav class="side-nav" role="tablist" aria-label="管理后台分区">
+      <button class="side-btn active" role="tab" data-admin-view="config" aria-selected="true">能力配置</button>
+            <!-- 基础数据排在能力配置之后：它与能力配置同类（"先配好才用得起来"），
+           而账号管理属日常操作，运行状态与审计是"回看" -->
+      <button class="side-btn" role="tab" data-admin-view="master" aria-selected="false">基础数据</button>
+            <!-- 账号管理排在能力配置之后：它属日常操作，不同于审计与运行状态 -->
+      <button class="side-btn" role="tab" data-admin-view="accounts" aria-selected="false">账号管理</button>
+      <button class="side-btn" role="tab" data-admin-view="health" aria-selected="false">运行状态</button>
+      <button class="side-btn" role="tab" data-admin-view="audit" aria-selected="false">审计与安全</button>
+      <button class="side-btn" role="tab" data-admin-view="system" aria-selected="false">系统信息</button>
+    </nav>
+
+    <div class="side-foot">
+            <!-- 这一格放品牌与联系方式；二维码必须压在白底上（深色主题下会扫不出来），见 ui.css 的 .side-qr -->
+      <div class="side-qr">
+        <img src="/hongyi-ai-qr.jpg" alt="宏医AI 公众号二维码" width="112" height="112" />
+        <div class="side-qr-label">关注宏医AI</div>
+      </div>
+            <!-- 这一格只放"现在是谁"与唯一出口。鉴权模式不在这里重复：
+           它属于部署参数，已经常驻在「系统信息 → 系统策略」与启动日志里 -->
+      <div class="side-user">
+        <div class="muted" id="adminWho"></div>
+        <button id="logoutBtn" title="退出登录，吊销这台浏览器的会话">退出</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="admin-body">
+    <header class="admin-head">
+      <div>
+        <h1 class="admin-title" id="viewTitle">能力配置</h1>
+        <div class="muted" id="viewSub">这里配置的是部署参数：模型地址、签名服务、授权源、落位策略。</div>
+      </div>
+        </header>
+
+    <div id="loginStatus" class="muted cfg-status" aria-live="polite"></div>
+
+    <!-- 配置体不再 hidden：本页只在登录后下发，显隐由服务端处理 -->
+  <section id="adminApp">
+    <div class="admin-view active" data-admin-view-pane="config">
+    <div class="cfg-tabs" role="tablist" aria-label="配置分类">
+      <button class="cfg-tab active" role="tab" data-cfg-tab="model" id="cfgTabModel" aria-controls="cfgPaneModel" aria-selected="true">模型接入</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="voice" id="cfgTabVoice" aria-controls="cfgPaneVoice" aria-selected="false">语音</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="previsit" id="cfgTabPrevisit" aria-controls="cfgPanePrevisit" aria-selected="false">预问诊</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="templates" id="cfgTabTemplates" aria-controls="cfgPaneTemplates" aria-selected="false">模板库</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="packs" id="cfgTabPacks" aria-controls="cfgPanePacks" aria-selected="false">规则库</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="qc" id="cfgTabQc" aria-controls="cfgPaneQc" aria-selected="false">质控</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="sign" id="cfgTabSign" aria-controls="cfgPaneSign" aria-selected="false">电子签名</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="reading" id="cfgTabReading" aria-controls="cfgPaneReading" aria-selected="false">受控阅读</button>
+    </div>
+
+    <div class="cfg-pane active" data-cfg-pane="model" role="tabpanel" id="cfgPaneModel" aria-labelledby="cfgTabModel">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>模型接入</b><span class="chip ok">可配置</span></div>
+      <div class="cfg-grid">
+        <span>产出方式</span><select id="cfgFormat">
+          <option value="offline">离线模板（不外呼，默认）</option>
+          <option value="openai-compatible">在线（OpenAI 兼容）</option>
+        </select>
+        <span>模型名</span><input id="cfgModel" placeholder="qwen-med-7b（会写进留痕的 modelId）" />
+        <span>服务地址</span><input id="cfgEndpoint" placeholder="http://127.0.0.1:11434/v1" />
+        <span>API Key</span><input id="cfgApiKey" type="password" placeholder="留空 = 不修改（已配置的 API Key 永不回显）" />
+        <span>超时(ms)</span><input id="cfgTimeout" type="number" placeholder="20000" />
+        <span>最大条数</span><input id="cfgMaxItems" type="number" placeholder="20" />
+      </div>
+      <div id="cfgStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions">
+                <!-- 保存用 primary（蓝）而非 ai（紫）：紫色是 "AI 产出内容" 的专用色 -->
+        <button class="primary" id="cfgSave">保存</button>
+        <button id="cfgTest">测试连接</button>
+                <!-- 危险操作靠右独立：清除 API Key 不可撤销，与「保存」分开 -->
+        <span class="danger-zone"><button class="danger" id="cfgClearKey">清除 API Key</button></span>
+      </div>
+    </div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="voice" role="tabpanel" id="cfgPaneVoice" aria-labelledby="cfgTabVoice">
+    <!-- 采集与落位**合成一页**：它们是同一条链路的两段（音频进来 → 文本落到章节）。
+         分成两页会让人以为"语音转写"只管落位、"语音采集"是另一件事，
+         于是"我改了地址为什么没生效"这类误会就有了土壤。
+         顺序也按链路走：**先采集，后落位**。 -->
+    <div class="cfg-group">
+      <div class="cfg-head"><b>语音采集（录音 → 识别）</b><span class="chip" id="cfgCaptureChip">—</span></div>
+      <div class="cfg-grid">
+        <span>识别服务</span><select id="cfgCaptureKind"></select>
+        <span>服务地址</span><input id="cfgCaptureEndpoint" placeholder="留空 = 未配置：采集入口随之不可用" />
+        <span>模型标识</span><input id="cfgCaptureModel" placeholder="须带版本/日期，如 local/asr-zh-med:0.9@2026-09" />
+        <span id="cfgCaptureKeyLabel">凭据</span><input id="cfgCaptureKey" type="password" placeholder="留空 = 不修改（已配置的凭据永不回显）" />
+        <span id="cfgCaptureSecretLabel">次凭据</span><input id="cfgCaptureSecret" type="password" placeholder="留空 = 不修改" />
+        <span id="cfgCaptureAppKeyLabel">AppKey</span><input id="cfgCaptureAppKey" placeholder="阿里云的 AppKey（不是密钥，随配置落库）" />
+        <span>上传超时(ms)</span><input id="cfgCaptureSubmitTimeout" type="number" placeholder="15000（公有云建议上调）" />
+        <span>轮询间隔(ms)</span><input id="cfgCapturePollInterval" type="number" placeholder="1000（只对院内服务有效）" />
+        <span>单段预算(ms)</span><input id="cfgCapturePollTimeout" type="number" placeholder="90000（超时是唯一的终止条件）" />
+        <span>静音判停(ms)</span><input id="cfgCaptureSilence" type="number" placeholder="800（一句说完就发）" />
+        <span>最长时长(s)</span><input id="cfgCaptureMaxSeconds" type="number" placeholder="30（长时间不静音就强制切）" />
+        <span>最短时长(s)</span><input id="cfgCaptureMinSeconds" type="number" placeholder="1（低于它按误触丢弃）" />
+        <span>音频留存</span><select id="cfgCaptureRetain">
+          <option value="false">不留存（默认：转写完成或失败即删临时文件）</option>
+          <option value="true">留存（争议时可回放；录音含患者信息，需自行评估存储与扫描）</option>
+        </select>
+      </div>
+      <div class="muted" id="cfgCaptureProtocol"></div>
+      <!-- 公有云：音频出院。平时不出现，选了公有云才出现，且**必须勾上才能保存** -->
+      <div class="cloud-warn" id="cfgCaptureCloudWarn" hidden>
+        <b>音频会发往院外。</b>当前选的是公有云服务，而录音里必然含患者信息 ——
+        <b>只能用不含患者信息的音频做联调</b>。改这一格会进管理审计。
+        <label class="cloud-ack"><input type="checkbox" id="cfgCaptureAck" /> 我确认：本次只用于联调，音频不含患者信息</label>
+      </div>
+      <div id="cfgCaptureStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions">
+        <button class="primary" id="cfgCaptureSave" title="保存采集配置（本卡片）">保存</button>
+        <button class="danger" id="cfgCaptureClearKey">清除凭据</button>
+        <button class="danger" id="cfgCaptureClearSecret">清除次凭据</button>
+      </div>
+    </div>
+
+    <div class="cfg-group">
+      <div class="cfg-head"><b>语音落位（文本 → 章节）</b><span class="chip ok">策略可配置</span></div>
+      <div class="cfg-grid">
+        <span>落位策略</span><select id="cfgPlaceStrategy" title="只影响建议的初始落点，不影响门控档位">
+          <option value="ordered">按顺序（第 i 段 → 第 i 个候选节点）</option>
+          <option value="section-title">按章节词（文本提到章节才落）</option>
+          <option value="term-table">按关键词表（命中即落）</option>
+          <option value="external">外部落位服务（把段落位交给指定服务）</option>
+        </select>
+        <span>听写置信度上限</span><input id="cfgPlaceCeiling" type="number" step="0.01" min="0.01" max="0.89" placeholder="0.85（必须小于 0.90）" />
+        <span>限定章节</span><input id="cfgPlaceSections" placeholder="逗号分隔，如 sec1,主诉；留空 = 全文文本节点" />
+        <span>服务地址</span><input id="cfgPlaceEndpoint" placeholder="http://127.0.0.1:9100/place（仅“外部落位服务”需要）" />
+        <span>超时(ms)</span><input id="cfgPlaceTimeout" type="number" placeholder="20000" />
+        <span>密钥</span><input id="cfgPlaceApiKey" type="password" placeholder="留空 = 不修改（已配置的密钥永不回显）" />
+      </div>
+      <textarea id="cfgPlaceTerms" rows="3" class="cfg-terms" placeholder="每行一条：主诉=t_1&#10;现病史=t_2"></textarea>
+      <!-- 即时结构化（V4）：命中即**提议**把这一段绑成某个数据元，医生在右栏采纳才落笔。
+           未命中、或词表为空时一条都不产 —— 标签会进机读信息被下游直接消费，猜错比不打更糟。 -->
+      <textarea id="cfgPlaceStructure" rows="3" class="cfg-terms" placeholder="结构化词表（每行一条）：体温=WS445:DE05.01.001:体温&#10;格式：词=体系:编码[:显示名]；留空 = 不做任何数据元提议"></textarea>
+      <div id="cfgPlaceStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions">
+        <button class="primary" id="cfgPlaceSave" title="保存落位配置（本卡片）">保存</button>
+        <!-- 清除密钥不可撤销：这里配的是外部落位服务的凭据 -->
+        <button class="danger" id="cfgPlaceClearKey">清除密钥</button>
+      </div>
+    </div>
+    </div>
+
+    <!-- 预问诊接入：外部系统（HIS 预问诊端 / 患者端）往本系统写"患者自述"的唯一入口。
+         密钥存在库里时只留哈希（连管理员也取不回原文），所以这一格永远不回显。
+         位置紧跟「语音接入」：两者都是"把外面的东西接进来"，与后面的模板/规则库不是一类。 -->
+    <div class="cfg-pane" data-cfg-pane="previsit" role="tabpanel" id="cfgPanePrevisit" aria-labelledby="cfgTabPrevisit">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>预问诊（机对机）</b><span class="chip" id="cfgPrevisitChip">—</span></div>
+      <div class="cfg-grid">
+        <span>校验</span>
+        <select id="cfgPrevisitEnabled">
+          <option value="true">要求密钥（推荐）</option>
+          <option value="false">不校验（谁都能写）</option>
+        </select>
+        <span>接入密钥</span>
+        <input id="cfgPrevisitKey" type="password" placeholder="留空 = 不修改（已配置的密钥永不回显）" />
+      </div>
+      <div class="muted">外部系统调用 <code>POST /api/previsit/intake</code> 时，把密钥放在请求头
+        <code>X-Previsit-Key</code>。</div>
+      <div id="cfgPrevisitStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions">
+        <button class="primary" id="cfgPrevisitSave">保存</button>
+        <button class="danger" id="cfgPrevisitClearKey">清除密钥</button>
+      </div>
+    </div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="templates" role="tabpanel" id="cfgPaneTemplates" aria-labelledby="cfgTabTemplates">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>模板库</b><span class="chip">库是唯一来源</span></div>
+      <!-- 与「规则库」同一套包机制（同一张表、同一条载入入口、同一套指纹），
+           差别只在条目形状：这里装的是文书骨架，那里装的是质控规则。
+           分成两页是因为它们回答的是两个问题："能开哪几种文书" 与 "按哪些规则判"。
+           医学表达式控件**不混在这张表里**：它是被文书引用的独立内容、**比模板更基础**，
+           2026-10-16 起在「基础数据 → 表达式控件」那一页单独维护（原先挂在本页右上角）。
+           措辞上刻意不写"这台机器"：这里的配置是**整个部署**的（库里一份，所有终端同此）。 -->
+      <div class="row mt6 tpl-toolbar">
+        <span>模板名称</span>
+        <input type="search" id="tplSearchName" placeholder="按名称筛选（不区分大小写）"
+          title="按模板名称筛：留空 = 全列。科室与状态是给人读的列，不做条件。" />
+        <button class="primary" id="btnCreateTemplate" title="新建一份文书骨架：默认是草稿，定稿后在行上点「发布」">新建文书</button>
+      </div>
+      <div id="tplPackItems"></div>
+    </div>
+    <div class="form-actions"><span class="muted" id="tplPackStatus"></span></div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="packs" role="tabpanel" id="cfgPanePacks" aria-labelledby="cfgTabPacks">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>规则库</b><span class="chip">库是唯一来源</span></div>
+      <!-- 独立成页签（原先挂在「质控」下）是因为它不是质控的子功能：
+           它是质控判定的内容来源，而质控那页只管"交给谁判"。
+           2026-10-16 起条目可以逐条新建与修改（此前只能整包载入 + 开关条目），
+           同日**撤销了整包载入入口**（含"贴 JSON 载入"）：判定标准只在库里维护，
+           不从别处搬文件进来 —— 与模板页撤掉导入同一条理由；
+           改的仍是**包内容**，口径与"换一份包"完全一样 —— 内容指纹变、前后指纹进审计；
+           而判定机制与级别上限**没有**跟着开放（内核用例 R9/R10 守着这条边界）。
+           原先页面上那整段"责任与流程"说明**已撤掉**，页面上只留标题、告警与表格：
+           口径没变，只是不再占用版面 —— 那些话在 docs/L0-管理后台功能清单.md 里；
+           而"这里能做什么"由表格与抽屉自己讲：能改哪些字段、级别只有 info / warn、
+           新建出来默认停用，都在控件与提示语里写得出来。
+           包摘要那一行（`名称 · rule · 契约 qc-rule/1 · 交付方`）、内容 / 生效指纹、
+           包存储来源三组 chip **也都撤掉了** —— 它们是给接口与审计读的元数据，
+           摆在页头只是占版面。剩下这一格只在"一个规则包都没有"时说话
+           （见 `renderKnowledgePacks`）。 -->
+           <div class="muted" id="qcPackSummary"></div>
+
+      <div class="row mt6 tpl-toolbar">
+        <span>规则名称 / 规则号</span>
+        <input type="search" id="ruleSearchKeyword" placeholder="按标题或规则号筛选（不区分大小写）"
+          title="按标题或规则号筛：留空 = 全列。级别与判定方式是给人读的列，不做条件。" />
+        <button class="primary" id="btnCreateRule"
+          title="新建一条规则：新建出来默认停用（下一轮质控不跑它），确认无误后在那一行点「启用」">新建规则</button>
+      </div>
+      <div id="qcPackItems"></div>
+    </div>
+
+    <div class="form-actions"><span class="muted" id="qcPackStatus"></span></div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="qc" role="tabpanel" id="cfgPaneQc" aria-labelledby="cfgTabQc">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>形式类质控（含时限类）</b><span class="chip ok">规则来自「规则库」</span></div>
+      <!-- 这一块**只读**：形式类与时限类规则的内容在「规则库」页（包里），
+           这里能做的只有"看现在跑了哪几条"——摆成可编辑的样子会让人以为这里改得动判定标准。 -->
+      <div class="muted mb6">来源：<b>规则库</b>（形式类与时限类规则包）。要增删规则、改判定依据，去「规则库」页载入或停用条目；这里只显示当前生效的清单。</div>
+      <div class="cfg-grid">
+        <span>生效规则</span><span class="muted" id="cfgFormRules">加载中…</span>
+        <span>启用条数</span><span class="muted" id="cfgFormRuleCount">—</span>
+        <span>一致性检查</span><span class="muted">规则内置，暂不可配</span>
+      </div>
+    </div>
+
+    <div class="cfg-group">
+      <div class="cfg-head"><b>内涵类质控（规则清单 + 引擎）</b><span class="chip warn">判定在进程之外</span></div>
+      <div class="cfg-grid">
+        <span>引擎形态</span><select id="cfgQcKind">
+          <option value="none">none（不接入：如实报"跑不了"，不假装跑过）</option>
+          <option value="model">model（用「能力配置」里那一个模型）</option>
+          <option value="http">http（外部引擎，需填地址）</option>
+        </select>
+        <span>服务地址</span><input id="cfgQcUrl" placeholder="http://127.0.0.1:9200/qc（仅 http 形态需要）" />
+        <span>期望引擎标识</span><input id="cfgQcEngineId" placeholder="qc-engine-1（可选：产出对不上就整份拒收）" />
+        <span>凭据</span><input id="cfgQcToken" type="password" placeholder="留空 = 不修改（已配置的永不回显）" />
+      </div>
+      <div class="muted section-label">规则清单（JSON 数组，一次整份替换；逐条校验，坏的那条会报出来）</div>
+      <textarea id="cfgQcRules" rows="6" class="cfg-terms" placeholder='[{"ruleId":"r-1","title":"缺记录时间","severity":"warn","requirement":"病程记录应含记录时间"}]'></textarea>
+      <div id="cfgQcStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions">
+        <button class="primary" id="cfgQcContentSave">保存</button>
+        <button class="danger" id="cfgQcTokenClear">清除凭据</button>
+      </div>
+    </div>
+    </div><!-- /质控：这一行的闭合不能少。少了它，后面「电子签名 / 受控阅读」两个子页签、
+            以及「账号管理 / 运行状态 / 审计与安全 / 系统信息」四个一级分区会被整体嵌进
+            「能力配置」里 —— 而能力配置非激活时是 display:none，于是切过去只看得到页头，
+            内容区一片空白（所有 id 都在，任何 id 检查都发现不了） -->
+
+    <div class="cfg-pane" data-cfg-pane="sign" role="tabpanel" id="cfgPaneSign" aria-labelledby="cfgTabSign">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>医院签名服务</b><span class="chip ok">可配置</span></div>
+      <div class="cfg-grid">
+        <span>服务地址</span><input id="cfgSignEndpoint" placeholder="https://sign.hospital.local/api/sign" />
+        <span>超时(ms)</span><input id="cfgSignTimeout" type="number" placeholder="20000" />
+        <span>密钥/印章标识</span><input id="cfgSignKeyId" placeholder="seal-01（多证书时用）" />
+      </div>
+      <div class="muted section-label">认证（密钥填<b>值</b>本身：单独一行加密入库，永不回显）</div>
+      <div class="cfg-grid">
+        <span>请求头名</span><input id="cfgSignAuthHeader" placeholder="Authorization" />
+        <span>前缀</span><input id="cfgSignAuthScheme" placeholder="Bearer " />
+        <span>密钥</span><input id="cfgSignApiKey" type="password" placeholder="留空 = 不修改（已配置的密钥永不回显）" />
+      </div>
+      <div class="muted section-label">请求映射（字段名支持 a.b 点路径，会写成嵌套结构）</div>
+      <div class="cfg-grid">
+        <span>待签字段</span><input id="cfgSignToSignField" placeholder="data.content" />
+        <span>待签编码</span><select id="cfgSignToSignEncoding">
+          <option value="base64">base64</option>
+          <option value="hex">hex</option>
+        </select>
+        <span>摘要字段</span><input id="cfgSignDigestField" placeholder="data.digest（可选）" />
+        <span>算法字段</span><input id="cfgSignAlgorithmField" placeholder="data.alg（可选）" />
+        <span>标识字段</span><input id="cfgSignKeyIdField" placeholder="data.keyId（可选）" />
+        <span>附加字段</span><input id="cfgSignExtra" placeholder='{"appId":"emr"}（可选）' />
+      </div>
+      <div class="muted section-label">响应映射</div>
+      <div class="cfg-grid">
+        <span>签名路径</span><input id="cfgSignSignaturePath" placeholder="data.signature" />
+        <span>签名编码</span><select id="cfgSignSignatureEncoding">
+          <option value="base64">base64</option>
+          <option value="hex">hex</option>
+        </select>
+        <span>公钥路径</span><input id="cfgSignPublicKeyPath" placeholder="data.publicKey（SPKI base64）" />
+        <span>证书路径</span><input id="cfgSignCertificatePath" placeholder="data.certificate（可选）" />
+      </div>
+      <div class="muted section-label">身份核对</div>
+      <div class="cfg-grid">
+        <span>期望指纹</span><input id="cfgSignFingerprint" placeholder="64 位十六进制；先点「测试签名」，再把实际指纹填进来" />
+        <span>预置公钥</span><input id="cfgSignPublicKey" placeholder="SPKI base64（签章必需：先点「测试签名」拿到指纹）" />
+      </div>
+      <div id="cfgSignStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions">
+        <button class="primary" id="cfgSignSave">保存</button>
+        <!-- 清除密钥不可撤销：这里配的是签名服务的凭据 -->
+        <button class="danger" id="cfgSignClearKey">清除密钥</button>
+        <!-- 「测试签名」会外呼，属辅助动作：排在保存之后 -->
+        <button id="cfgSignTest">测试签名</button>
+      </div>
+    </div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="reading" role="tabpanel" id="cfgPaneReading" aria-labelledby="cfgTabReading">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>授权平台</b><span class="chip ok">可配置</span></div>
+      <div class="cfg-grid">
+        <span>平台地址</span><input id="cfgAuthEndpoint" placeholder="https://authz.hospital.local/api/reading（协议待接入）" />
+        <span>平台签发公钥</span><input id="cfgAuthPublicKey" placeholder="SPKI base64；粘贴后指纹自动派生" />
+        <span>信任指纹</span><input id="cfgAuthFingerprint" placeholder="64 位十六进制（给了公钥可留空）" />
+      </div>
+      <div id="cfgAuthStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions"><button class="primary" id="cfgAuthSave">保存</button></div>
+    </div>
+
+    <div id="cfgAuthImport">
+      <div class="muted section-label">导入授权凭据</div>
+      <textarea id="cfgAuthCredential" rows="4" class="cfg-terms" placeholder='{"grant":{...},"publicKeyBase64":"...","signatureValue":"..."}'></textarea>
+      <div id="cfgAuthImportStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="row"><button class="primary" id="cfgAuthImportBtn">导入并验签</button></div>
+    </div>
+
+    <div id="cfgDelivery">
+      <div class="muted section-label">接收方公钥目录（交付目标）</div>
+      <div class="field-grid">
+        <label class="field"><span>标签</span><input id="rkLabel" placeholder="给对方起的名称，如「会诊终端A」。仅作标签，不构成身份证明" /></label>
+      </div>
+      <div class="row mb6"><button id="btnImportKey">导入公钥</button></div>
+      <input id="rkText" class="wide" placeholder="粘贴接收方公钥（PEM 或 base64；点某行的“导出公钥”可回填到这里）" />
+      <div id="rkBody"></div>
+    </div>
+    </div>
+
+    </div><!-- /能力配置 -->
+
+        <!-- ------------------------------ 基础数据 ------------------------------
+     整个部署共用的主数据，各占一个子页签（与「能力配置」同一套造型）：
+       ① 科室字典 —— 模板的「适用科室」、就诊科室的显示都读它，
+          所以它不放在「模板库」那一页（它比模板更基础：先有科室，才谈得上"限哪个科"）；
+       ② 文书类型 —— 「新建文书」的类型选项与质控规则定位文书的依据都读它，
+          同理不放在模板里（类型写在各份模板里各写一遍，就会出现三种写法而规则一条都判不到）；
+       ③ 表达式控件 —— 文书的槽位引用它（一份公式被多份文书引用，改一处处处生效）。
+          2026-10-16 从「模板库」右上角那个按钮挪到这里：它比模板更基础（先有控件，
+          才谈得上一份文书去引用它），摆在模板页里等于把它当成模板的附属物；
+       ④ 专科控件 —— 「这一格长什么样、填什么」（月经史 / 牙位图 / 体温单 / 量表评分 / 化验趋势）。
+          与③紧挨着摆，正因为两者最容易混：③回答"这个值怎么算"（标量、无界面），
+          它回答"这个控件长什么样、填什么"（结构、有界面）；控件里**不带公式**，
+          要算的格子一律引用③。**不预置内置控件**：随产品发版的是形状，控件由本院自建；
+       ⑤ 判定方式 —— 规则库里的每一条规则都要从它里面挑一种（"按什么判"就在这一页）。
+          它与前四份**不同类**：它是**库级资产**（全院一份、不属于任何包），
+          任何包的规则都能引用它；出厂那 6 条只在首次启动时写进库里一次，
+          之后与本院自己建的完全同级：可改、可删、被引用时拒删。
+          2026-10-16 加它，是因为在此之前"这个系统到底会判什么"只能靠逐条点开规则才看得见，
+          而它恰恰是业务方与质控员最该一眼看全的东西：有哪几条、各要什么参数、有没有人在用。
+     它们**都不做导入**：都是本院自己维护的东西，不是别处搬来的文件。 -->
+    <div class="admin-view" data-admin-view-pane="master">
+      <!-- 子页签：与「能力配置」同一套造型（.cfg-tabs / .cfg-tab / .cfg-pane）与同一条理由 ——
+           每一份各自是一屏（说明 + 清单 + 保存），平铺在一起时，"保存"按钮离它要保存的那份清单
+           隔着整整一块别的配置，改完往上找按钮的路上很容易点错。 -->
+      <div class="cfg-tabs" role="tablist" aria-label="基础数据分类">
+        <button class="cfg-tab active" role="tab" data-cfg-tab="dept" id="cfgTabDept" aria-controls="cfgPaneDept" aria-selected="true">科室字典</button>
+        <button class="cfg-tab" role="tab" data-cfg-tab="docTypes" id="cfgTabDocTypes" aria-controls="cfgPaneDocTypes" aria-selected="false">文书类型</button>
+        <button class="cfg-tab" role="tab" data-cfg-tab="expressions" id="cfgTabExpressions" aria-controls="cfgPaneExpressions" aria-selected="false">表达式控件</button>
+        <button class="cfg-tab" role="tab" data-cfg-tab="ctrlDefs" id="cfgTabCtrlDefs" aria-controls="cfgPaneCtrlDefs" aria-selected="false">专科控件</button>
+        <button class="cfg-tab" role="tab" data-cfg-tab="predicates" id="cfgTabPredicates" aria-controls="cfgPanePredicates" aria-selected="false">判定方式</button>
+      </div>
+
+      <div class="cfg-pane active" data-cfg-pane="dept" role="tabpanel" id="cfgPaneDept" aria-labelledby="cfgTabDept">
+      <div class="cfg-group">
+        <div class="cfg-head"><b>科室字典</b><span class="chip" id="deptChip">—</span>
+          <button class="push" id="deptRefresh">刷新</button></div>
+        <div class="chiplines" id="deptSummary"></div>
+        <div id="deptBody"></div>
+        <div class="form-actions">
+          <button class="primary" id="deptSave">保存</button>
+          <button class="secondary" id="deptAdd">新增一行</button>
+          <span class="muted cfg-status" id="deptStatus" aria-live="polite"></span>
+        </div>
+      </div>
+      </div><!-- /科室字典 -->
+
+      <div class="cfg-pane" data-cfg-pane="docTypes" role="tabpanel" id="cfgPaneDocTypes" aria-labelledby="cfgTabDocTypes">
+      <div class="cfg-group">
+        <div class="cfg-head"><b>文书类型</b><span class="chip" id="docTypeChip">—</span>
+          <button class="push" id="docTypeRefresh">刷新</button></div>
+        <div class="chiplines" id="docTypeSummary"></div>
+        <div id="docTypeBody"></div>
+        <div class="form-actions">
+          <button class="primary" id="docTypeSave">保存</button>
+          <button class="secondary" id="docTypeAdd">新增一行</button>
+          <span class="muted cfg-status" id="docTypeStatus" aria-live="polite"></span>
+        </div>
+      </div>
+      </div><!-- /文书类型 -->
+
+      <div class="cfg-pane" data-cfg-pane="expressions" role="tabpanel" id="cfgPaneExpressions" aria-labelledby="cfgTabExpressions">
+      <!-- 这一页是**被引用**的内容：一份公式被多份文书引用，改一处处处生效。
+           2026-10-16 从「模板库」右上角那个按钮挪到这里 —— 它本来就是基础数据
+           （先有控件，才谈得上一份文书去引用它），摆在模板页里等于把它当成模板的附属物。
+           表里给的是"叫什么、公式长什么样、还开不开得动"；改动动作（编辑 / 开关 / 删除）
+           都在行尾 —— 点「编辑」进**二级抽屉（左侧）**改公式，改完这一屏还在。 -->
+      <div class="cfg-group">
+        <div class="cfg-head"><b>表达式控件</b><span class="chip" id="exprCatalogSummary">—</span>
+          <button class="push" id="exprCatalogRefresh">刷新</button>
+          <button class="primary" id="btnNewExpression"
+            title="新建一个医学表达式控件：公式在这里是结构（选函数 / 选填写项 / 填数字），不是文本">新建</button></div>
+        <div id="exprCatalogBody"></div>
+        <div class="form-actions"><span class="muted cfg-status" id="exprCatalogStatus" aria-live="polite"></span></div>
+      </div>
+      </div><!-- /表达式控件 -->
+
+      <div class="cfg-pane" data-cfg-pane="ctrlDefs" role="tabpanel" id="cfgPaneCtrlDefs" aria-labelledby="cfgTabCtrlDefs">
+      <!-- 与「表达式控件」的分工（两页紧邻，正是为了让这个分工摆在眼前）：
+           表达式控件回答"这个值**怎么算**"（标量、无界面），专科控件回答"这个控件**长什么样、填什么**"
+           （结构、有界面）。两者都进包、都是纯声明 —— 控件里没有任何可执行内容，
+           "怎么算"一律推给表达式控件（同一件事只有一处口径）。
+           **不预置内置控件**：随产品发版的是**形状**（形状决定渲染器，而渲染器是代码），
+           控件本身由本院按专科自建 —— 于是代码里只有几个形状，包里可以有几百个控件。 -->
+      <div class="cfg-group">
+        <div class="cfg-head"><b>专科控件</b><span class="chip" id="ctrlCatalogSummary">—</span>
+          <button class="push" id="ctrlCatalogRefresh">刷新</button>
+          <button class="primary" id="btnNewControl"
+            title="新建一个专科控件：形状决定用哪个渲染器（量表评分 / 时序 / 行列表 / 勾选清单），字段决定填什么 —— 要算的格子引用「表达式控件」里的那一份">新建</button></div>
+        <div id="ctrlCatalogBody"></div>
+        <div class="form-actions"><span class="muted cfg-status" id="ctrlCatalogStatus" aria-live="polite"></span></div>
+      </div>
+      </div><!-- /专科控件 -->
+
+      <div class="cfg-pane" data-cfg-pane="predicates" role="tabpanel" id="cfgPanePredicates" aria-labelledby="cfgTabPredicates">
+      <!-- 这一页两组：判定方式（一张表，全部可改可删）· 字段与算子表（内核固定）。
+           原先还有第三组"内核判法"，它与判定方式是同一件事的两处摆法（6 条逐条对应），
+           也已并进那张表 —— 规则库引用的是**判定方式**，不再面对"内核判法"这一层。 -->
+      <div class="cfg-group">
+        <div class="cfg-head"><b>判定方式</b><span class="chip" id="conditionLibChip">—</span>
+          <button class="push" id="conditionLibRefresh">刷新</button>
+          <button class="primary" id="btnCreateCondition"
+            title="新建一条判定方式：它是一份被多条规则引用的资产 —— 改一处，引它的规则一起变">新建</button></div>
+        <div class="chiplines" id="conditionLibSummary"></div>
+        <div id="conditionLibraryBody"></div>
+        <div class="form-actions"><span class="muted cfg-status" id="conditionLibStatus" aria-live="polite"></span></div>
+      </div>
+      <div class="cfg-group">
+        <div class="cfg-head"><b>自定义条件能拼哪些格</b><span class="chip" id="conditionChip">—</span></div>
+        <div id="conditionBody"></div>
+      </div>
+      </div><!-- /判定方式 -->
+    </div>
+
+    <!-- ------------------------------ 账号管理 ------------------------------
+         口令只以哈希存在库里：本页可设置、修改、停用、删除，但任何一处都不回显口令，
+         输入框在保存后立即清空。 -->
+    <div class="admin-view" data-admin-view-pane="accounts">
+      <div class="cfg-group">
+        <div class="cfg-head"><b>后台账号</b><span class="chip" id="acctChip">—</span>
+          <button class="push" id="acctRefresh">刷新</button></div>
+        <div class="chiplines" id="acctSummary"></div>
+        <div class="muted">口令只以哈希保存在数据库（<code>admin_users</code>），<b>本页与任何接口都不回显</b>。
+          角色决定可执行的操作：管理员额外拥有「改部署参数」与「发账号」两类动作。</div>
+        <div id="acctBody"></div>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>新增账号</b><span class="muted">由管理员创建</span></div>
+        <div class="cfg-grid">
+          <span>账号</span><input id="acctNewName" placeholder="字母、数字与 . _ @ -，2~32 位，如 dr-zhang" />
+          <span>口令</span><input id="acctNewPassword" type="password" placeholder="至少 8 位；保存后立刻清空，不再回显" autocomplete="new-password" />
+          <span>角色</span><select id="acctNewRole">
+            <option value="admin">管理员（改部署参数 + 发账号）</option>
+            <option value="qc">质控员（改判定标准，不动病历）</option>
+            <option value="clinician">医生（写病历、签章、导出）</option>
+            <option value="viewer">只读（看审计与状态）</option>
+          </select>
+        </div>
+        <div id="acctStatus" class="muted cfg-status" aria-live="polite"></div>
+        <div class="form-actions"><button class="primary" id="acctCreate">新增</button></div>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>重设口令</b><span class="muted">不显示旧口令</span></div>
+        <div class="cfg-grid">
+          <span>账号</span><input id="acctPwdName" placeholder="要重设口令的账号名（点列表里那行的「重设口令」可回填）" />
+          <span>新口令</span><input id="acctPwdValue" type="password" placeholder="至少 8 位" autocomplete="new-password" />
+        </div>
+        <div id="acctPwdStatus" class="muted cfg-status" aria-live="polite"></div>
+        <div class="form-actions"><button class="primary" id="acctPasswd">重设口令</button></div>
+      </div>
+
+      <div class="muted admin-note">
+        <b>以下限制在数据层强制</b>：最后一个<b>能登录的管理员</b>不能被删除、停用或降级；
+        不能停用或删除自己；口令不短于 8 位。<br>
+        改口令、改角色、停用、删除都会立即吊销该账号已登录的会话（会话是内存中的独立副本，不随库改动更新）。
+        修改自己的口令例外：当前浏览器会换发一张新会话，无需重新登录。
+      </div>
+    </div>
+
+    <!-- ------------------------------ 运行状态 ------------------------------ -->
+    <div class="admin-view grid2" data-admin-view-pane="health">
+      <div class="cfg-group">
+        <div class="cfg-head"><b>签名服务</b><span class="chip" id="healthSignChip">—</span></div>
+        <div class="muted chiplines" id="healthSign"></div>
+                <!-- "还缺哪几格" 单独一行显示，对应下面的输入项 -->
+        <div class="muted" id="healthSignMissing"></div>
+        <div class="muted" id="healthSignLast"></div>
+        <div id="healthSignStatus" class="muted cfg-status" aria-live="polite"></div>
+        <div class="form-actions">
+          <button class="primary" id="healthSignTest">现在测一次</button>
+        </div>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>AI 模型</b><span class="chip" id="healthModelChip">—</span></div>
+        <div class="muted" id="healthModel"></div>
+        <div class="muted" id="healthModelLast"></div>
+      </div>
+
+      <div class="cfg-group span2">
+        <div class="cfg-head"><b>进程与容量</b><span class="muted">当前进程与数据量</span></div>
+                <!-- 指标条只放服务端 counts 返回的真实数字 -->
+        <div class="metric-row" id="healthMetrics"></div>
+        <div class="kv" id="healthCounts"></div>
+      </div>
+
+      <div class="muted admin-note">
+        本页记录的是手动测试的历史结果，没有定时采样与告警，可查看上次测试的时间与状态。
+        可用性监测由部署侧负责。
+      </div>
+    </div>
+
+    <!-- ---------------------------- 审计与安全 ----------------------------
+         上下排列（不再左右分栏）：范围在上、记录在下。审计的范围是"读这份记录时必须先知道的事"，
+         并排放在右栏时，人往往会先读完记录才发现右边那张单子，顺序反了。 -->
+    <div class="admin-view" data-admin-view-pane="audit">
+      <div class="cfg-group">
+        <div class="cfg-head"><b>审计范围</b><span class="chip warn">与下面的记录一并阅读</span></div>
+        <ul class="admin-list" id="auditBoundary"></ul>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>动作审计</b><span class="muted" id="auditCount">—</span>
+          <button class="push" id="auditRefresh">刷新</button></div>
+                <!-- 链校验结果：改过历史时指出断在第几条 -->
+        <div class="chiplines" id="auditChain"></div>
+        <div class="muted">配置变更记录<b>改动字段与前后取值</b>，可用于按原样改回。登录成功与失败也记在这里。</div>
+        <div id="auditBody"></div>
+      </div>
+    </div>
+
+    <!-- ------------------------------ 系统信息 ------------------------------ -->
+    <div class="admin-view grid2" data-admin-view-pane="system">
+      <div class="cfg-group">
+        <div class="cfg-head"><b>运行环境</b><span class="muted">用于现场排查</span></div>
+        <div class="kv" id="sysInfo"></div>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>系统策略</b><span class="chip warn">改完需重启服务</span></div>
+        <div class="muted chiplines" id="cfgSysPolicyCurrent">加载中…</div>
+        <div class="cfg-grid">
+          <span>鉴权模式</span><select id="cfgSysAuthMode">
+            <option value="open">open（演示：医生端写病历不鉴权）</option>
+            <option value="strict">strict（生产：写操作要求会话并按角色判定）</option>
+          </select>
+          <span>会话寿命(分钟)</span><input id="cfgSysSessionTtl" type="number" placeholder="480" />
+          <span>登录限流(同身份)</span><input id="cfgSysRateActor" type="number" placeholder="5" />
+          <span>登录限流(同来源)</span><input id="cfgSysRateSource" type="number" placeholder="20" />
+          <span>AI 限流(每分钟)</span><input id="cfgSysRateAi" type="number" placeholder="120" />
+          <span>导出限流(每分钟)</span><input id="cfgSysRateExport" type="number" placeholder="30" />
+          <span>锚定节奏(每 N 条)</span><input id="cfgSysAnchorEvery" type="number" placeholder="1" />
+          <span>锚点种子</span><input id="cfgSysAnchorSeed" type="password" placeholder="留空 = 不修改（已配置的永不回显）" />
+        </div>
+        <div id="cfgSysPolicyStatus" class="muted cfg-status" aria-live="polite"></div>
+        <div class="form-actions">
+          <button class="primary" id="cfgSysPolicySave">保存系统策略</button>
+          <span class="danger-zone"><button class="danger" id="cfgSysSeedClear">清除锚点种子</button></span>
+        </div>
+        <div class="muted mt6">
+          这几项落在服务进程的<b>内存结构</b>上（会话表 / 限流器 / 锚点签名者），所以保存后要
+          <b>重启服务</b>才生效 —— 其余配置（模型 / 采集 / 落位 / 质控）改完立即生效。
+          原先它们在环境变量里，因此"改名、改值、忘重启"三种错法长得一模一样。
+        </div>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>生效配置指纹</b><span class="muted">用于比对配置是否一致</span></div>
+        <div class="muted">对<b>白名单内的配置字段</b>取值后取哈希（SHA-256 前 16 位）。密钥值不在白名单内，
+          因此<b>更换密钥不改变指纹，是否配置密钥会改变指纹</b>。比对时把这几行提供给对方即可。</div>
+        <div class="kv" id="sysFingerprints"></div>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>工作区</b><span class="chip warn">破坏性动作</span></div>
+        <div class="muted">
+          清空的是<b>病历本身</b>：全部患者与文书（含留痕）、已落盘的旁挂数据（AI 建议 / 标注）、
+          阅读授权登记；清完按出厂演示数据重新播种。
+          <b>不在清理范围内</b>：账号、能力配置、系统策略、知识资产（模板 / 规则 / 控件）、管理审计 ——
+          重置之后最该查得到的，恰恰是"谁在什么时候清空了这台机器"。
+        </div>
+        <div class="muted mt6">
+          这是唯一一个<b>两种模式都要求管理员身份</b>的破坏性动作（医生端不设入口：那里没有登录入口，
+          摆了就是个永远点不动的按钮）。医生端已打开的页面建议刷新 —— 它手里的版本号还是重置之前的。
+        </div>
+        <div id="cfgWorkspaceResetStatus" class="muted cfg-status" aria-live="polite"></div>
+        <div class="form-actions">
+          <span class="danger-zone"><button class="danger" id="cfgWorkspaceReset" title="清空全部病历与旁挂数据、阅读授权登记，随后回到出厂演示数据。不可撤销（会写进管理审计）">清空工作区并复位</button></span>
+        </div>
+      </div>
+
+      <div class="cfg-group">
+        <div class="cfg-head"><b>本页未包含的内容</b><span class="chip warn">未实现</span></div>
+        <ul class="admin-list" id="sysMissing"></ul>
+      </div>
+    </div>
+
+        <!-- 隐藏字段：值来自登录会话，不由使用者填写 -->
+    <input type="hidden" id="cfgAdmin" />
+  </section>
+
+ 
+  </main>
+</div>
+
+<!-- 文书模板的新建 / 编辑抽屉：原生 <dialog> + showModal()（top layer，不受祖先层叠上下文影响）。
+     遮罩、Esc、焦点困在框内都是内核给的；不参与左栏分区与子页签体系。
+     放在 <main> 之外：它不属于任何一个分区，关掉就回到刚才那张列表。
+     两级：本元素是**一级**，默认从右侧滑入（见 ui.css 的 dialog.drawer）；
+     二级 `#tplDrawer2` 带 `.from-left`，从左侧滑入。 -->
+<dialog class="drawer" id="tplDrawer" aria-labelledby="tplDrawerTitle" aria-describedby="tplDrawerDesc">
+  <div class="drawer-head">
+    <div>
+      <h3 id="tplDrawerTitle">文书模板</h3>
+      <div class="muted" id="tplDrawerDesc"></div>
+    </div>
+    <button id="tplDrawerClose" aria-label="关闭" title="关闭（也可按 Esc 或点左侧阴影；没保存的改动不会留下）">×</button>
+  </div>
+  <div id="tplDrawerBody"></div>
+</dialog>
+
+<!-- 二级抽屉：与一级**对开**（它从左侧滑入）。用于"在一级里再开一层"的场景，
+     今天只有一处：从医学表达式控件表格里点「编辑 / 新建」进公式表单。
+     两级同时摆在屏上，标题栏各自还在，改完这一条还知道自己站在表的哪一行。
+     一级关上时二级一定跟着关（见 admin.js 的 close 清理）。 -->
+<dialog class="drawer from-left" id="tplDrawer2" aria-labelledby="tplDrawer2Title" aria-describedby="tplDrawer2Desc">
+  <div class="drawer-head">
+    <div>
+      <h3 id="tplDrawer2Title">表达式控件</h3>
+      <div class="muted" id="tplDrawer2Desc"></div>
+    </div>
+    <button id="tplDrawer2Close" aria-label="关闭" title="关闭（也可按 Esc 或点右侧阴影；没保存的改动不会留下）">×</button>
+  </div>
+  <div id="tplDrawer2Body"></div>
+</dialog>
+
+<!-- 质控规则的新建 / 编辑抽屉：与文书模板那两级同一套做法（原生 <dialog> + showModal()，
+     遮罩 / Esc / 焦点困在框内都是内核给的）。规则只开一层 —— 一条规则的字段就那么多，
+     摆得下，不必"左一层右一层"。
+     单开一个、而不是复用 #tplDrawer：两个页签各自记住"正在编辑哪一条"，
+     复用会让"切到模板页再切回来"把另一页那一屏的内容带过来。 -->
+<dialog class="drawer" id="ruleDrawer" aria-labelledby="ruleDrawerTitle" aria-describedby="ruleDrawerDesc">
+  <div class="drawer-head">
+    <div>
+      <h3 id="ruleDrawerTitle">质控规则</h3>
+      <div class="muted" id="ruleDrawerDesc"></div>
+    </div>
+    <button id="ruleDrawerClose" aria-label="关闭" title="关闭（也可按 Esc 或点左侧阴影；没保存的改动不会留下）">×</button>
+  </div>
+  <div id="ruleDrawerBody"></div>
+</dialog>
+
+<!-- 具名条件（条件库）的新建 / 编辑抽屉：与规则抽屉同一套做法（原生 <dialog> + showModal()）。
+     单开一个、而不是复用 #ruleDrawer：条件改的是**被多条规则引用的共用资产** ——
+     抽屉里要一并摆出"会影响哪几条规则"，与"改某一条规则"不是同一件事。 -->
+<dialog class="drawer" id="conditionDrawer" aria-labelledby="conditionDrawerTitle" aria-describedby="conditionDrawerDesc">
+  <div class="drawer-head">
+    <div>
+      <h3 id="conditionDrawerTitle">具名条件</h3>
+      <div class="muted" id="conditionDrawerDesc"></div>
+    </div>
+    <button id="conditionDrawerClose" aria-label="关闭" title="关闭（也可按 Esc 或点左侧阴影；没保存的改动不会留下）">×</button>
+  </div>
+  <div id="conditionDrawerBody"></div>
+</dialog>
+
+<!-- 自定义弹框先于 admin.js：与医生端共用同一份（dialog.js），系统弹框一处都不出现 -->
+<script src="/dialog.js"></script>
+<!-- 正文渲染：模板预览要画"医生点开之后那一屏"，用的就是医生端那一份渲染与那一份样式 -->
+<script src="/doc-view.js"></script>
+<script src="/admin.js"></script>
+</body>
+</html>

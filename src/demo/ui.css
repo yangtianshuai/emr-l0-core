@@ -1,0 +1,1999 @@
+/* ============================================================================
+   电子病历编辑器 · Demo 界面样式（从 ui.html 拆出，架构：令牌 → 基础 → 布局 → 组件 → 浮层 → 工具）
+   ---------------------------------------------------------------------------
+   与 ui-self-test 锁定的纪律保持一致（改这里的结构前先读测试）：
+     · 三栏 + 整页滚动，内容全部铺开：不引入任何 max-height / 内部滚动（A9）
+     · 正文 ≥ 14px、次要色保持对比度（A12/A15）
+     · 焦点永远可见（:focus-visible）
+     · 抽屉用原生 <dialog> + showModal()（top layer），不自造遮罩
+     · 页签栏可换行，不横向裁切；未选面板靠状态圆点传达
+   ========================================================================== */
+
+/* ------------------------------- ① 令牌层 -------------------------------
+   颜色 / 间距 / 字号 / 圆角 / 动效全部令牌化：暗色模式与后续主题只是换一组令牌，
+   组件层不出现裸色值（review 时一眼能看出"这个颜色没走令牌"）。 */
+:root {
+  color-scheme: light;
+  /* 中性色 */
+  --bg: #f4f6f9;
+  --bg-grad: linear-gradient(180deg, #eef2f7 0%, var(--bg) 280px);
+  --card: #ffffff;
+  --card-2: #f8fafc;      /* 次级表面：表头、斑马纹、静态块 */
+  --field: #fcfdff;       /* 输入底色 */
+  --line: #e4e8ee;
+  --line-strong: #c7ced8;
+  --text: #1b2430;
+  /* 面向临床的可读性基线：医生年龄普遍偏大，#6b7280 ≈ 4.8:1 太淡。
+     这条不"好看"，但它决定医生愿不愿意一直盯着这个界面看。 */
+  --muted: #5a6472;
+  /* 语义色 */
+  --primary: #2563eb;
+  --ai: #7c3aed;
+  --ok: #059669;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --focus: #93c5fd;
+  --focus-strong: #60a5fa;
+  /* 顶栏：两套主题共用深色渐变，天然兼容暗色 */
+  --hdr-grad: linear-gradient(120deg, #1e3a8a, #4c1d95);
+  /* 产品 LOGO（emr-l0-core）里的"书页"：两套主题下都是白 —— 它压在渐变方块上，
+     不随主题反转（暗色下反转成深色就糊进方块里了）。仍走令牌，
+     免得组件层出现裸色值。 */
+  --brand-sheet: #ffffff;
+  /* 色彩淡染（chip / 提示 / 高亮的底·边·字），暗色主题整组替换 */
+  --tint-neutral-bg: #f1f5f9;  --tint-neutral-bd: #e2e8f0;  --tint-neutral-tx: #475569;
+  --tint-primary-bg: #eff6ff;  --tint-primary-bd: #bfdbfe;  --tint-primary-tx: #1d4ed8;
+  --tint-ai-bg: #f5f3ff;       --tint-ai-bd: #ddd6fe;       --tint-ai-tx: #6d28d9;
+  --tint-ok-bg: #ecfdf5;       --tint-ok-bd: #a7f3d0;       --tint-ok-tx: #047857;
+  --tint-warn-bg: #fffbeb;     --tint-warn-bd: #fde68a;     --tint-warn-tx: #b45309;
+  --tint-danger-bg: #fef2f2;   --tint-danger-bd: #fecaca;   --tint-danger-tx: #b91c1c;
+  /* 内容节点淡染（关键内容 / AI 来源） */
+  --node-key-bg: #fffdf7;      --node-key-bd: #fde68a;
+  --node-ai-bg: #faf8ff;       --node-ai-bd: #e9d5ff;
+  /* 圆角 / 阴影 / 动效 */
+  /* 14px：管理后台与管理端的卡片用同一个半径，两个界面同属一套语言 */
+  --radius: 14px;
+  --radius-sm: 9px;
+  --radius-xs: 7px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 4px 16px rgba(16, 24, 40, .05);
+  --shadow-lg: 0 24px 60px rgba(15, 23, 42, .22);
+  --t: 160ms;
+  /* 间距刻度（4 的倍数）：凡写 margin/padding 优先取刻度 */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px;
+  /* 字号刻度：正文 ≥ 14px 是可读性底线（A12） */
+  --fs-xs: 11px; --fs-sm: 12.5px; --fs-md: 14px; --fs-lg: 15px; --fs-xl: 18px;
+  /* 顶栏高度。它是 `position: static`、高度由内容决定（患者卡片 + 一排动作按钮），
+     窗口一窄就折成两行（78 → 128）—— CSS 读不到"内容撑了多高"，
+     所以这个值由 ui.js 的 `syncHeaderHeight()` 量完写回来，这里只是它的兜底。
+     依赖它的东西有三样：进行中指示条、提示条、右栏吸附位置。 */
+  --header-h: 78px;
+  /* 右栏的吸附位置 = 内容顶线：顶栏高度 + main 的上留白。
+     "右栏一路伸到视口底部上方 14px"（见 .col.rail）也按它算，
+     所以这一条必须与顶栏真实高度一致，不能拍一个数。 */
+  --rail-top: calc(var(--header-h) + 14px);
+  /* 右栏下缘与视口下缘之间留的这一段 */
+  --rail-bottom-gap: 14px;
+  /* 贴右菜单条的宽度。它由 `main` 的右留白让出来（见 main 的 padding 与 .col.rail .tabbar）：
+     条子挂在右栏右缘、占的这一段必须先从栅格里扣掉，否则它会盖住面板右侧 */
+  --railtabs-w: 88px;
+  /* 右栏（工作面板）这一列的宽度。写成变量而不是散在 `grid-template-columns` 里，
+     是因为它有两个消费者：栅格自己，以及"面板收起后把这一列让给正文"
+     （见 `main.rail-folded`）。让给正文这件事一旦要改，只改这一处。 */
+  --rail-col: 404px;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1420;
+  --bg-grad: var(--bg);
+  --card: #171e2e;
+  --card-2: #1c2436;
+  --field: #131a2a;
+  --line: #2c3550;
+  --line-strong: #43507a;
+  --text: #e6eaf2;
+  --muted: #9aa5b8;
+  --primary: #6d9eff;
+  --ai: #a78bfa;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --focus: #7dabff;
+  --focus-strong: #93c5fd;
+  --tint-neutral-bg: rgba(255, 255, 255, .06); --tint-neutral-bd: rgba(255, 255, 255, .16); --tint-neutral-tx: #b6c0d4;
+  --tint-primary-bg: rgba(109, 158, 255, .13); --tint-primary-bd: rgba(109, 158, 255, .38); --tint-primary-tx: #93c5fd;
+  --tint-ai-bg: rgba(167, 139, 250, .14);      --tint-ai-bd: rgba(167, 139, 250, .38);      --tint-ai-tx: #c4b5fd;
+  --tint-ok-bg: rgba(52, 211, 153, .12);       --tint-ok-bd: rgba(52, 211, 153, .38);       --tint-ok-tx: #6ee7b7;
+  --tint-warn-bg: rgba(251, 191, 36, .12);     --tint-warn-bd: rgba(251, 191, 36, .38);     --tint-warn-tx: #fcd34d;
+  --tint-danger-bg: rgba(248, 113, 113, .12);  --tint-danger-bd: rgba(248, 113, 113, .38);  --tint-danger-tx: #fca5a5;
+  --node-key-bg: rgba(251, 191, 36, .07);      --node-key-bd: rgba(251, 191, 36, .32);
+  --node-ai-bg: rgba(167, 139, 250, .08);      --node-ai-bd: rgba(167, 139, 250, .32);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, .55);
+}
+
+/* ------------------------------- ② 基础 -------------------------------
+   不锁死视口高度：内容有多长就铺多长，整页滚动。
+   只有顶栏 sticky 停留在顶部（导航需要），其余一律不做内部滚动。 */
+* { box-sizing: border-box; }
+html { min-height: 100%; background: var(--bg); }
+body {
+  margin: 0; min-height: 100vh;
+  background: var(--bg-grad);
+  color: var(--text);
+  font: var(--fs-md)/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  transition: background var(--t), color var(--t);
+}
+::placeholder { color: color-mix(in srgb, var(--muted) 65%, transparent); }
+
+/* 控件刻度：统一圆角与过渡。:where() 特异性为 0，只统一"没人特别定过"的共性，
+   局部有意为之的样式（如 header select）仍然优先。 */
+:where(button, input, select, textarea) {
+  font: inherit; font-size: var(--fs-sm); border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--card); color: var(--text);
+  transition: border-color var(--t), box-shadow var(--t), background var(--t), transform var(--t);
+}
+:where(input:not([type=range]):not([type=file]):not([type=checkbox]), select) { min-height: 34px; padding: 6px 10px; }
+:where(textarea) { padding: 10px 12px; line-height: 1.75; }
+:where(button) { min-height: 32px; padding: 5px 12px; font-weight: 500; cursor: pointer; }
+:where(button:hover:not(:disabled)) { border-color: var(--line-strong); transform: translateY(-1px); }
+:where(button:disabled), :where(input, select, textarea):disabled { opacity: .45; cursor: not-allowed; }
+:where(input, select, textarea):disabled { background: var(--card-2); color: var(--muted); opacity: 1; }
+/* 焦点必须永远看得见：键盘用户靠它判断"我现在在哪一格"。
+   :focus-visible 而非 :focus，鼠标点击不必留下描边。
+   只用边框变色，不用 outline：outline 画在边框之外，与边框叠成"双线框"，看着脏；
+   而边框本身变色已经足够显眼。 */
+:where(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none; border-color: var(--focus-strong);
+}
+/* 例外：复选框没有可着色的边框（外观由 UA 绘制），只改 border-color 等于没有焦点提示，用外环兜底 */
+input[type="checkbox"]:focus-visible { box-shadow: 0 0 0 2px var(--focus); }
+input[type="checkbox"] { accent-color: var(--primary); width: 14px; height: 14px; }
+
+/* 滚动条：窄而含蓄（不抢内容注意力），但仍看得出可滚 */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border: 3px solid transparent; background-clip: content-box; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
+
+/* ------------------------------- ③ 顶栏 ------------------------------- */
+header {
+  z-index: 30;
+  background: var(--hdr-grad); color: #fff;
+  padding: 10px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, .18);
+}
+.patient-card {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: rgba(255, 255, 255, .13); border: 1px solid rgba(255, 255, 255, .18);
+  padding: 7px 14px; border-radius: 10px;
+}
+.patient-card .name { font-size: var(--fs-lg); font-weight: 700; }
+.patient-card .meta { font-size: var(--fs-xs); opacity: .9; }
+.patient-card .divider { width: 1px; height: 26px; background: rgba(255, 255, 255, .25); }
+.patient-card .doc-title { font-size: 13px; font-weight: 600; }
+.hdr-actions { margin-left: auto; display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+/* 这里原先是医生端「操作者」卡片与顶栏身份显示的样式（.op-who / .op-form / .op-actions）。
+   登录控件整块摘掉之后它们不再有使用者，一并删除 —— 留着的话，
+   下次改登录页样式时会以为这些还能用。 */
+header select {
+  font: inherit; font-size: 12.5px; padding: 6px 9px; border-radius: var(--radius-xs);
+  border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .14); color: #fff;
+}
+/* 下拉项要带自己的底色：color-scheme:dark 下原生下拉列表会用深色底，
+   只写 color 就成了"深底深字"（选项看不清） */
+header select option { color: #1f2937; background: #fff; }
+/* 顶栏两套主题共用深色渐变，按钮底色是固定浅色，所以文字色也必须同时固定为深色。
+   只给 background 不给 color 时，文字色会落到全局 :where(button){ color: var(--text) }，
+   暗色下 --text 变浅，就成了"白底浅字"，顶栏按钮的文字直接看不见。 */
+header button { background: rgba(255, 255, 255, .9); border-color: transparent; color: #1f2937; }
+header button.primary { background: #f59e0b; border-color: #f59e0b; color: #1f2937; }
+header .icon-btn { width: 32px; min-width: 32px; padding: 5px 0; text-align: center; font-size: 14px; }
+.badge-status { background: rgba(255, 255, 255, .18); padding: 4px 11px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 600; }
+
+/* 全局进行中指示：任何请求都有回执。细条 + 滑动动画，不弹窗、不打断。 */
+.busy-bar {
+  position: fixed; top: var(--header-h); left: 0; right: 0; height: 3px; z-index: 60;
+  background: color-mix(in srgb, var(--ai) 18%, transparent); overflow: hidden;
+}
+.busy-bar[hidden] { display: none; }
+.busy-bar::before {
+  content: ""; display: block; height: 100%; width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--ai), transparent);
+  animation: busy-slide 1s linear infinite;
+}
+@keyframes busy-slide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+
+/* ------------------------------- ④ 布局 -------------------------------
+   三栏：左（病历树导航）· 中（正文，居中纸张视图）· 右（工作页签）。
+   三栏都按内容自然撑高，整页滚动；不做列内滚动，保证任何内容都能完整看到。 */
+/* 主区**不设最大宽度**：原先是封顶 1760px 居中，2K 屏上两侧各留 400px 空白
+   （实测 2560 视口：main 1760 / 左右各 400），看着像"没铺开"。
+   现在三栏铺满窗口：左栏贴左、右栏（连页签条）贴右，中栏正文随之拉宽
+   （见 `.doc-wrap`，它也不再限宽）。 */
+main {
+  width: 100%;
+  display: grid; grid-template-columns: 238px minmax(0, 1fr) var(--rail-col);
+  align-items: start; gap: 14px;
+  /* 右留白 = 页签条宽度，而且**恰好等于**它的宽度：条子钉在 `main` 的右缘（见 .col.rail .tabbar），
+     留多一分就出现一条缝（"页签和内容没连在一起"），留少一分就压住面板右侧内容 */
+  padding: 14px var(--railtabs-w) 14px 16px;
+}
+.col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* 右栏：贴壁工作栏。面板体不滚动，内容全部展开。
+   "内容显示全"优先于"永远钉在视口里"：宁可滚一下，也不要滚动条和截断。
+   align-self: start 是 grid 子项使用 sticky 的前提（默认 stretch 会让 sticky 失效）。
+   吸附位置用 `--rail-top`（= 顶栏真实高度 + main 的上留白），与它在文档流里的位置**同一个值** ——
+   这样吸附发生时它不会往上跳一格（此前的 62px 是拍出来的，实测顶栏有 78px）。 */
+.col.rail {
+  position:relative; align-self: start; gap: 0;
+  /* 一路伸到视口底部上方 14px（`--rail-bottom-gap`）：右栏是"贴壁工作栏"，
+     内容比视口短时就该把这一列铺满，否则下半屏是一整块背景色，看着像没做完。
+     用 min-height 而不是 height：内容更长时（门控日志 / 指标与留痕）照旧自然长高、
+     整页滚动，绝不逼出面板内滚动条（A6 守的就是这条）。 */
+  min-height: calc(100dvh - var(--rail-top) - var(--rail-bottom-gap));
+}
+/* 正文**不限宽**：中栏多宽，正文就多宽。
+   原先封顶 940px 居中做"纸张"观感，但主区铺满窗口之后，宽屏上正文两侧会留下
+   一大片空白（2560 下每侧约 420px），看上去像"正文被压窄了"。
+   现在由栅格决定行长：窗口变宽，正文跟着变宽。 */
+.doc-wrap { width: 100%; display: flex; flex-direction: column; gap: 12px; }
+@media (max-width: 1500px) { :root { --rail-col: 360px; } main { grid-template-columns: 216px minmax(0, 1fr) var(--rail-col); } }
+@media (max-width: 1180px) {
+  main { grid-template-columns: 1fr; }
+  /* 单栏堆叠时取消贴壁，避免右栏卡在屏幕中间；
+     此时右栏在页面最下方，"铺满视口"没有意义（只会把这一列撑出一大段空白），一并取消 */
+  .col.rail { position: static; min-height: 0; }
+}
+
+/* 面板收起后的栅格：右栏这一列**让给正文**（宽度归零）。
+   为什么不直接 `display: none` 掉右栏：页签条挂在 `.col.rail` 的右缘（`left: 100%`），
+   那一列一消失，条子就没了锚点。宽度归零则条子落回原位 —— 它本来就在这一列的右边。
+   收了一栏却把 404px 空白留在右边，比不收更难看，所以中栏必须同步变宽。
+   列间距不归零：留给"正文 ↔ 页签条"当呼吸位，也让左栏与正文之间保持原来的 14px。 */
+main.rail-folded { --rail-col: 0px; }
+/* 正文本来就不限宽（见 `.doc-wrap`），收起右栏时不必再单独解锁 —— 少一条就没法自相矛盾 */
+/* 面板不在了，"面板 + 条子拼成一块"的那道缝也没了（条子原本靠面板的 1px 边框收口）：
+   条子自己把左边缘画回来，否则它看着像一列浮在背景上的无主按钮。 */
+main.rail-folded .col.rail .tabbar { border-left: 1px solid var(--line); }
+
+/* ------------------------------- ⑤ 卡片 / 面板 / 页签 ------------------------------- */
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); overflow: hidden; transition: box-shadow var(--t);  
+  height: calc(100dvh - var(--rail-top) - var(--rail-bottom-gap));
+}
+   
+.card > h2 {
+  margin: 0; padding: 12px 16px; font-size: 13.5px; font-weight: 650;
+  border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s2);
+  letter-spacing: .2px; background: linear-gradient(180deg, var(--card), var(--card-2));
+}
+.card > h2 .sub { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+.card > h2 .right { margin-left: auto; display: flex; gap: var(--s2); align-items: center; }
+/* 正文卡标题行：高度**钉死** 46px（外加 1px 下边框）。
+   原来它是由内容撑出来的（13.5px × 1.6 行高 + 上下 12px 内边距 ≈ 45.6px），而 `.body.doc`
+   的高度是"从视口里减去它"算出来的（见下面那条里的 49px = 47 + 卡片上下边框 2px）。
+   撑高的写法有个隐患：右侧那个控件一换尺寸就悄悄多占几像素，正好把正文区底部顶出卡片
+   —— `.card` 是 `overflow:hidden`，裁掉的表现就是"滚不到底"，而且看不出是谁干的。
+   钉死高度 + flex 纵向居中之后，这条算式才有真凭据，标题行右侧也才有了一块确定的可用高度。 */
+.card > h2.doc-head { height: 46px; padding: 0 16px; }
+
+/* 编辑范式切换（卡片 / 流式）：分段控件 + 一枚滑动胶囊。
+   为什么不是下拉：它换的是"这片纸怎么落笔"，不是改一次设置。只有两个选项，
+   而"当前在哪个"必须一眼看见 —— 下拉要先展开、选完还得回头读一眼才知道自己在哪。
+   观感沿用页签那套语言（浅灰底 + 白胶囊，见 `.tabbar` / `.tab.active`）：
+   它看起来仍是这个产品里的东西，而不是贴上去的一块新东西。 */
+.seg {
+  position: relative; display: inline-flex; align-items: center; flex: 0 0 auto;
+  height: 26px; padding: 2px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 10%, var(--card-2));
+}
+/* 滑块：整组只有一枚，靠 translateX 走到当前那一段。
+   位置由**容器的 `data-mode`** 决定，JS 不量任何宽度 —— 量出来的宽度在字体加载完、
+   改字号、缩放窗口之后都会过期，而"滑块与真相错开半个字宽"是最难忍的一类错位。
+   （宽度算式与两段等宽严格对齐：`100%` 是内边距盒，减掉左右各 2px 内边距再对半分。） */
+.seg-thumb {
+  position: absolute; top: 2px; bottom: 2px; left: 2px;
+  width: calc((100% - 4px) / 2); border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .12), 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent);
+  /* 带一点回弹：滑块是"滑到位"，不是"闪到位"。仍然只花 --t（160ms），不拖慢切换。 */
+  transition: transform var(--t) cubic-bezier(.34, 1.35, .5, 1);
+}
+.seg[data-mode="flow"] .seg-thumb { transform: translateX(100%); }
+.seg-item {
+  position: relative; z-index: 1; flex: 1 1 0; min-width: 0; height: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 0 10px; border: 0; background: transparent; border-radius: 999px;
+  font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; cursor: pointer;
+}
+/* 鼠标掠过不整块跳起来：全局 button:hover 有一条 translateY(-1px)，但这里是**一个整体**
+   的两半，动的只能是滑块那一片，选项自己不该跳。 */
+.seg-item:hover { transform: none; background: transparent; }
+.seg-item:not([aria-checked="true"]):hover { color: var(--text); }
+.seg-item[aria-checked="true"] { color: var(--tint-primary-tx); font-weight: 650; }
+.seg-item svg { display: block; width: 13px; height: 13px; }
+/* 图标不是装饰：它画的就是那个选项产出的版式。未选中时细描边、半透明（只提示"还有另一种"），
+   选中时描边加粗、跟文字一起变主色 —— 一整套"我在这边"的确认。 */
+.seg-item svg * { opacity: .7; stroke-width: 1.5; transition: stroke-width var(--t), opacity var(--t); }
+.seg-item[aria-checked="true"] svg * { opacity: 1; stroke-width: 2.1; }
+/* 焦点必须永远看得见。这一组没有边框可以变色（边框在容器上、不在选项上），
+   所以用 outline 兜底：它不参与布局，不会把滑块挤歪。 */
+.seg-item:focus-visible { outline: 2px solid var(--focus-strong); outline-offset: 1px; }
+
+/* 换范式时正文是整片重画。硬切会让人怀疑"我刚写的东西没了"，
+   所以给一次 220ms"重新排过一次版"的提示：淡入 + 2px 上浮。
+   只挂在**换范式**这一个动作上：落笔也会重画正文（流式下一次落笔重画整片纸），
+   那时也放就成了"每写一个字纸面闪一下"。类名由 ui.js 的 `paperSwap()` 增删。 */
+@keyframes paper-swap { from { opacity: .35; transform: translateY(2px); } }
+.paper-swap { animation: paper-swap 220ms ease-out; }
+
+.body.doc { overflow-y:auto; height: calc(100dvh - var(--rail-top) - var(--rail-bottom-gap) - 49px);  }
+.body.flush { padding: 0; }
+.footer-note { border-top: 0; padding-top: var(--s2); }
+.muted { color: var(--muted); font-size: 13px; }
+/* "当前不可用"这类带后果的说明行：用警告色而不是灰色，
+   灰色会被读成"顺便提一句"，而"内涵质控没在跑"是要人去做点什么的事 */
+.muted.warn-text { color: var(--warn); }
+.row { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+
+/* 面板（一次只显示一个）；未显示的靠页签圆点传达状态。面板体不设内部滚动。
+   用 flex 竖排（标题行 + 正文段）而不是 block：正文段的高度**不能**再按"标题行 42px"
+   这种常量算出来 —— 标题里的状态胶囊（"最近被拒 E_MACHINE_READABLE_STALE"）一折行，
+   标题就变成 68px，而正文按 `calc(100% - 42px)` 算出的高度会顶出面板底部，
+   被 `.panel` 的 `overflow: hidden` 裁掉（现场表现就是"门控日志最后几条看不全"）。
+   交给 flex 之后，标题多高都不影响正文，正文永远拿剩下的高度。 */
+.panel {
+  display:none; flex-direction: column; background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  height: calc(100dvh - var(--rail-top) - var(--rail-bottom-gap) - 49px);
+}
+.panel.active { display: flex; }
+.ph {
+  margin: 0; padding: 12px 16px; font-size: 13.5px; font-weight: 650;
+  border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s2);
+  letter-spacing: .2px; background: linear-gradient(180deg, var(--card), var(--card-2));  
+}
+.ph .ph-badge { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+/* 标题行里的状态胶囊不换行：它是这一栏的状态点，拆成两行更难读。
+   它折行后标题行会变高 —— 没关系，正文段不再按"标题行 42px"算高度（见 `.pb`），
+   不会因此把底部内容顶出面板。标题里本来只放"共 N 条""待处理 N"这类短词，长句子归正文。 */
+.ph .ph-badge .chip { white-space: nowrap; }
+.panel .ph.divider { border-radius: 0; }
+.panel .ph .tag-note { font-weight: 400; color: var(--muted); font-size: var(--fs-sm); }
+/* 正文段：高度由内容决定，**不能**写死 `height: calc(100% - 42px)`。
+   标题行的高度是内容算出来的（状态胶囊折行就 47 → 68），而一页里还可能是多段
+   （机读信息、定稿与导出都是"标题 + 正文"重复），每段都取 `100% - 42px` 会互相顶出，
+   最后被父级 `overflow: hidden` 裁掉。`flex: 0 0 auto` = 既不拉伸也不被压缩：
+   长内容自然把面板撑高、整页滚动，不存在"被压得比内容还矮再裁掉"的路径。 */
+.pb {
+  padding: var(--s3) 14px; flex: 0 0 auto;
+  /* 这里只写 `overflow: visible`。写 `overflow-x: hidden` 会踩一个陷阱：
+     当另一个方向是 visible 时，计算值会变成 `hidden / auto` —— 它仍然是滚动容器，
+     `min-height: auto` 随之退化成 0，长内容照样会被内部滚动/裁切（A6 要的就是不许这样）。 */
+  height: calc(100dvh - var(--rail-top) - var(--rail-bottom-gap) - 50px);
+  overflow-y: auto;
+}
+/* 正文段里的长 token（内容指纹、公钥、hash）没有空格可断，一行放不下就横向溢出。
+   面板本身是 `overflow: hidden`，溢出即被裁 —— 实测"受控阅读"里的 64 位指纹就只看得见前半截。
+   允许在 token 内部断行：短标识放得下就不会断，长指纹则折到下一行。 */
+.pb code { overflow-wrap: anywhere; }
+/* 面板标题右侧的折叠按钮（由 ui.js 注入，见 initPanelToggles）：
+   点它把**整块面板**向右隐去（标题行也一起走），恢复靠再点一次该页签。 */
+.ph > .ph-toggle {
+  margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; min-width: 22px; min-height: 22px; padding: 0;
+  border: 1px solid transparent; border-radius: var(--radius-xs);
+  background: transparent; color: var(--muted);
+}
+/* 标题里已有 `.ph-badge` 时，靠右这件事由它的 `margin-left: auto` 完成；
+   按钮若再抢一次 auto，两段空档会在中间平分，右侧那组就散了 */
+.ph > .ph-badge + .ph-toggle { margin-left: 2px; }
+.ph > .ph-toggle:hover { color: var(--text); border-color: var(--line); background: var(--card); }
+.ph > .ph-toggle svg { display: block; width: 12px; height: 12px; transition: transform var(--t); transform: rotate(90deg); }
+/* 箭头指向**这一步要去的地方**：面板在时朝右（"点它收到右边去"），收到只剩页签条时
+   朝左（"点它把面板放回来"）。路径基态是向下的 chevron，右/左由 -90° / +90° 转出来。 */
+.ph > .ph-toggle[aria-expanded="true"] svg { transform: rotate(-90deg); }
+/* 收起 = 整块面板向右隐去，一个像素都不留（连标题行与它的操作按钮一起）。
+   判据只有 `is-collapsed` 一处，且不碰元素自己带的 `hidden`。 */
+.panel.active.is-collapsed { display: none; }
+/* 收起后，它的页签留一个记号（虚线框）：面板整块不在了，
+   "再点这一下能放回来"只能由页签自己说出来。
+   记号与"选中"是两件事：收起的这块没有任何内容在显示，所以它**不再**带 `.active`
+   （见 `applyPanelState()`），只留这圈虚线说明"这里点一下能放回来"。 */
+.tab.is-folded { border-style: dashed; border-color: var(--line-strong); }
+/* 产出方标识（如 `offline:qwen-audit-probe`）用等宽：它是会进留痕的标识，
+   医生在核对"这条建议由谁产出"时要能逐字对上 */
+.ai-meta b { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+/* 页签（一次只显示一个）：短标签 + 小 min-width，放不下按 flex-wrap 换行，绝不横向裁切 */
+/* 页签栏 = 分段控件的容器：浅灰底、无阴影，选中项是它上面的一枚白胶囊。
+   与管理后台的 `.cfg-tabs` 同一套语言，两个界面的"次一级导航"长得一样，
+   人就不必为同一个动作在两处各学一种样子。（A6 要求它必须能换行、且不得横向滚动。） */
+.tabbar {
+  display: flex; flex-wrap: wrap; gap: 2px; padding: 3px;
+  background: var(--card-2); border: 1px solid var(--line); border-radius: var(--radius);
+  flex: 0 0 auto;
+}
+.tab {
+  flex: 1 1 auto; min-width: 56px; display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  padding: 7px 8px; border-radius: var(--radius-xs); border: 1px solid transparent; background: transparent;
+  font-size: 12px; color: var(--muted); white-space: nowrap; cursor: pointer;
+}
+.tab:hover { background: var(--card); transform: none; }
+.tab.active {
+  background: var(--card); border-color: var(--line); color: var(--tint-primary-tx); font-weight: 650;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+}
+.tab.more { flex: 0 0 auto; min-width: 38px; font-size: var(--fs-lg); line-height: 1; color: var(--muted); }
+.tab.more.active { background: var(--card); border-color: var(--line); color: var(--tint-primary-tx); }
+/* 页签图标：文字符号靠 font-size 定大小，内联 SVG（语音那枚麦克风）也得跟得上。
+   `1em` 让它在三处自动一致 —— 横排（12px）/ 菜单（13px）/ 右栏竖排（20px），不必各写一套尺寸；
+   颜色走 `currentColor`，所以"当前页签变色"这条规则对 SVG 同样生效（emoji 做不到这一点）。 */
+.tab .ti svg { display: block; width: 1em; height: 1em; }
+/* 「⋯」图标报警：菜单里装着门控日志，有被拒记录时图标必须变红，
+   否则"日志在菜单里"实际等于"被拒原因看不见" */
+.tab.more.alert { border-color: var(--tint-danger-bd); background: var(--tint-danger-bg); color: var(--tint-danger-tx); }
+.tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); flex: 0 0 auto; }
+.tdot.warn { background: var(--warn); }
+.tdot.danger { background: var(--danger); }
+.tdot.ok { background: var(--ok); }
+
+.more-menu {
+  position: absolute; right: 4px; top: 38px; z-index: 30; min-width: 158px;
+  display: flex; flex-direction: column; gap: 2px; padding: 5px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow);
+}
+.more-menu[hidden] { display: none; }
+.more-menu .tab { justify-content: flex-start; min-width: 0; }
+.tabbar { position: relative; }
+
+/* 右栏菜单条：一整列竖排页签，**贴住面板右边**、与面板等高，并随右栏一起钉在视口里。
+   为什么不再放在栏顶：① 横排时五个常驻页签在 360~404px 的栏里必然折行
+   （"机读信息 + ⋯" 单独掉到第二行，看着像没排完）；② 它跟着面板一起滚 ——
+   面板一长（AI 助手、时间轴都是长面板），页签就滚出视口，等要用时反而找不到。
+
+   定位不从视口算，而是挂在右栏上：右栏自己就是 `position: sticky`，天然是定位上下文，
+   条子挂在它右边于是"贴住"这件事变成两条不含任何猜测的算式 ——
+   `left: 100%` 落在右栏右缘 = 面板右缘 = 主区内容右缘（`main` 的右留白正好就是条宽，
+   见 `--railtabs-w`）；`top: 10px` 就是面板自己的上外边距（见 `.panel`）；
+   再来一个 `bottom: 0`，条子就与面板**等高**：两头都齐，右栏铺到底它也跟着铺到底。
+   任何宽度、任何滚动位置上都严丝合缝。
+   此前按视口算的写法（`right: max(0px, 50% - 主区半宽)` + `top: --header-h + 24px`）
+   两头都在猜：顶栏高度随内容变（1440 宽是 78px，1280 宽折成两行后是 128px），
+   主区在更宽的屏上又会居中，条子死钉窗口右缘就离面板越来越远。 */
+.col.rail .tabbar {
+  position: absolute;
+  left: 100%; top: 0;
+  /* 高度按**视口**算，而不是跟着面板内容长：面板一长（定稿与导出实测 1154px），
+     跟着长的条子会把一列菜单项撑成 141px 一行。而且"能列几项"本来就只取决于
+     视口有多高 —— 那正是"只有高度不足才隐藏"里的"高度"。
+     底部离视口下缘 14px（`--rail-bottom-gap`），与右栏本身同一条算式。 */
+  height: calc(100dvh - var(--rail-top) - var(--rail-bottom-gap));
+  z-index: 25;
+  width: var(--railtabs-w);
+  /* 竖排 = 一列一个菜单项。这里不需要再换行：每个标签都拿到整条宽度，不存在"被裁"
+     （A6 要换行的目的是防裁切，竖排已经把那个前提消掉了）
+     而且**必须**关掉换行：`.tabbar` 默认 `flex-wrap: wrap`，竖排里换行是往**右侧**
+     再起一列 —— 装不下的项会排到条子外面（一行都看不见），既量不到也点不着。
+     装不下的项要往下溢出，再由 `layoutRailTabs()` 收进「⋯」菜单。 */
+  flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 1px;
+  padding: var(--s1) 0 var(--s1) var(--s1);
+  /* 与面板拼成一块：左缘不画自己的边框（面板那一侧的 1px 就是缝），
+     四角全平 —— 右侧收成方角，与面板右缘（同样让掉了圆角）连成一条直边 */
+  border-left: 0; border-radius: 0;
+  /* 缝上不留阴影：阴影会立刻把"这是一块"重新画成"这是两块" */
+  box-shadow: none;
+  /* 这里**不能**写 `overflow: hidden`：装不下的项由 `layoutRailTabs()` 收进「⋯」菜单，
+     而那个菜单是从条子左侧弹出去的浮层，一裁就整块看不见了。 */
+  box-shadow: var(--shadow);
+}
+/* 面板跟着右栏一起铺到底：`flex: 1` 把右栏多出来的高度全部吃进面板
+   （右栏是 min-height，内容更长时它自己长高，两者始终同高）。
+   右侧两处圆角让给菜单条：不让的话，方角条子紧贴圆角卡片，缝上会豁出一个缺口 */
+.col.rail > .panel {
+  flex: 1 1 auto;
+  border-top-right-radius: 0; border-bottom-right-radius: 0;
+}
+
+/* 菜单项：**图标在上、文字在下**（文字更小更暗）。
+   为什么这么排：竖排一列里横着放"图标 + 全称"至少要 70px 宽，条子就得加宽；
+   上下叠两行之后每个标签都能用全称，条子还能只有 88px。
+   图标给到 20px：它现在是这一列的主标记（文字只有 11px），一眼扫的是图标。
+
+   `flex: 0 0 auto` 是**必须**的：`.tab` 默认 `flex: 1 1 auto`（横排时用来把页签摊满
+   那一行），竖排里同样的行为会把每一项拉成整条高度的一部分 —— 面板一长（定稿与导出
+   实测 1154px），一行就变成 141px，图标与文字飘在中间。项按自己的高度排，多出来的
+   空间留在条子底部：要"铺到底"的是条子这一栏，不是每一项。 */
+.col.rail .tabbar > .tab {
+  position: relative; flex: 0 0 auto;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; padding: 10px 4px;
+}
+/* 装不下时被收进菜单的项，条子里那份要被真正隐藏（`.tab` 自带 inline-flex，
+   光有 `hidden` 属性盖不住它） */
+.tab[hidden] { display: none; }
+.col.rail .tabbar > .tab .ti { font-size: 20px; line-height: 1; color: var(--muted);margin-bottom: 5px; }
+.col.rail .tabbar > .tab .tl { font-size: var(--fs-xs); line-height: 1.2; color: var(--muted); }
+.col.rail .tabbar > .tab.active .ti,
+.col.rail .tabbar > .tab.active .tl { color: var(--tint-primary-tx); }
+/* 状态点钉在右上角：图标已经占了行首，点再跟着流跑会把图标挤歪 */
+.col.rail .tabbar > .tab .tdot { position: absolute; top: 5px; right: 7px; margin: 0; }
+
+/* 菜单里的页签横排：弹出层空间足够，图标与全称并排更好扫读，不必再叠成两行 */
+.col.rail .more-menu .tab { flex-direction: row; align-items: center; gap: 6px; padding: 7px 8px; }
+.col.rail .more-menu .tab .ti { font-size: 13px; line-height: 1; color: var(--muted); }
+.col.rail .more-menu .tab .tl { font-size: var(--fs-sm); color: var(--text); }
+.col.rail .more-menu .tab .tdot { position: static; margin-left: auto; }
+
+/* 弹出层：从条子**左侧**弹出（条子贴死主区右缘，往右弹就出视口了）。
+   纵向位置由 `setMoreMenu()` 对齐到「⋯」那一行 —— 条子现在是一整屏高的一列，
+   若还按 CSS 钉 `bottom`，菜单会被甩到条子底部、离按钮几百像素远。
+   这里的 `bottom` 只是脚本失效时的兜底。 */
+.col.rail .more-menu { top: auto; bottom: var(--s1); right: calc(100% - 2px); }
+
+/* 「⋯」那一行的行高与其它项看齐：一列里夹着一个矮行，看着像没排完 */
+.col.rail .tabbar > .tab.more { font-size: 22px; padding: 16px 4px; }
+
+/* 窄屏（单栏）：右栏不再贴壁（`.col.rail` 在同一个断点里变回 `position: static`），
+   没有可靠的定位上下文可挂，于是退回按视口钉 —— 从视口**下缘**钉住：
+   仍然贴右缘、仍然随时可见，但不会盖住任何东西（顶栏会折成两行、右栏又在页面最下方，
+   钉上缘就会压住折行后的第二行）。此时它与面板不再上下相邻，左缘要把
+   自己的边框拿回来（圆角不加：条子四角一律是方的）。 */
+@media (max-width: 1180px) {
+  .col.rail .tabbar {
+    position: fixed;
+    left: auto; right: 0; top: auto; bottom: 0;
+    /* 高度交回内容：这一档钉在视口下缘，再要"按视口算高度"就等于让它铺满整屏 */
+    height: auto;
+    border-left: 1px solid var(--line);
+  }
+  /* 条子不在面板右侧了，那两处"让出来"的圆角就要还给面板，
+     否则面板右上/右下会一直是方的（像被切掉一角） */
+  .col.rail > .panel { border-top-right-radius: var(--radius); border-bottom-right-radius: var(--radius); }
+}
+
+/* 最近一次被拒：就地可见，不用去日志里翻 */
+.reject-banner {
+  display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+  margin: var(--s2) 0 0; padding: var(--s2) var(--s3); border-radius: 10px;
+  background: var(--tint-danger-bg); border: 1px solid var(--tint-danger-bd); color: var(--tint-danger-tx);
+  font-size: var(--fs-sm);
+}
+.reject-banner[hidden] { display: none; }
+.reject-banner .grow { flex: 1 1 auto; }
+
+/* ------------------------------- ⑥ 病历树（左栏导航） -------------------------------
+   树不做内部滚动、不截断文本：有多少显示多少 */
+.tree { padding: 4px 6px 10px; width: 100%; }
+.trow { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--radius-xs); font-size: 12.5px; }
+.trow.patient { font-weight: 650; background: var(--card-2); cursor: pointer; }
+.trow.visit { color: var(--text); opacity: .85; padding-left: 12px; cursor: pointer; font-size: var(--fs-sm); }
+.trow.doc { padding-left: 24px; cursor: pointer; border: 1px solid transparent; }
+.trow.doc:hover { background: var(--tint-neutral-bg); }
+/* 草稿的删除入口：常驻但低调，悬停才显红 —— 病历行是每天点几十次的地方，
+   一个常亮的红按钮会让"打开病历"与"删掉病历"只差几个像素 */
+.trow.doc .doc-del { opacity: .5; }
+.trow.doc:hover .doc-del, .trow.doc.active .doc-del { opacity: 1; }
+.trow.doc .doc-del:hover { color: var(--danger); border-color: var(--tint-danger-bd); background: var(--tint-danger-bg); }
+/* 当前病历：浅底 + 左侧主色竖条，与左栏（管理后台）的选中态同一套表达 */
+.trow.doc.active {
+  position: relative; background: var(--tint-primary-bg);
+  border-color: var(--tint-primary-bd); font-weight: 600;
+}
+.trow.doc.active::before {
+  content: ''; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 3px;
+  border-radius: 2px; background: var(--primary);
+}
+/* 章节行允许换行：它可能带一段"这一章要写清什么"的提示（`.sec-hint`），
+   而那段提示必须是**下一行** —— 挤在标题后面会把标题压成半截，
+   提示本身也会被读成标题的一部分 */
+.trow.section { padding-left: 40px; color: var(--muted); font-size: 11.5px; flex-wrap: wrap; }
+.sec-hint { flex: 0 0 100%; font-size: 11px; line-height: 1.5; padding-left: 12px; opacity: .95; }
+/* 「必备」标记：比正文 chip 再小一号（它挂在 11.5px 的章节行上） */
+.chip.mini { font-size: 10px; padding: 0 6px; }
+.trow .ttl { min-width: 0; }
+.trow .actions { flex: 0 0 auto; display: flex; gap: var(--s1); margin-left: auto; }
+.mini-btn { font-size: 10px; padding: 1px 6px; min-height: 20px; margin-left: auto; flex: 0 0 auto; }
+.caret { width: 11px; display: inline-block; text-align: center; color: var(--muted); user-select: none; flex: 0 0 auto; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong); display: inline-block; flex: 0 0 auto; }
+.dot.warn { background: var(--warn); }
+.dot.ok { background: var(--ok); }
+.dot.danger { background: var(--danger); }
+
+/* ------------------------------- ⑦ 正文编辑 ------------------------------- */
+.doc { padding: 6px 4px 10px; }
+.sec {
+  margin: 14px 0 6px; font-weight: 650; font-size: var(--fs-md);
+  padding-left: 9px; border-left: 3px solid var(--primary);
+}
+.node { padding: var(--s2) 10px; border-radius: 10px; border: 1px solid transparent; }
+.node + .node { margin-top: 6px; }
+.node.key { background: var(--node-key-bg); border-color: var(--node-key-bd); }
+.node.ai-origin { background: var(--node-ai-bg); border-color: var(--node-ai-bd); }
+.node .head { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.node .rev { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); font-family: ui-monospace, monospace; }
+/* 正文编辑区是医生真正要看的内容，不小于 14px（可读性底线，A12） */
+textarea.editor, input.field { font-size: var(--fs-md); }
+textarea.editor, input.field {
+  width: 100%; line-height: 1.7; color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius-xs); padding: 7px 9px;
+  background: var(--field); resize: vertical;
+}
+/* 编辑框高度随内容自增（由 autosizeAll 写入 inline height），不出现框内滚动条 */
+textarea.editor { overflow: hidden; min-height: 54px; }
+textarea.editor:focus, input.field:focus { outline: none; border-color: var(--focus-strong); background: var(--card); }
+input.field { width: 108px; }
+
+/* 表格（生命体征单、检验结果这类"按行按列看"的内容）。
+   两条讲究：
+     · 格子里的输入框占满整格（表格里再按 108px 排一行短框，一列数字就参差不齐）；
+     · 表头吸顶、行有斑马纹：一张表常常要横向比一列数，看串行是这类表格最常见的误读。 */
+.doc-table { width: 100%; border-collapse: collapse; margin-top: 2px; font-size: var(--fs-md); }
+.doc-table th, .doc-table td {
+  border: 1px solid var(--line); padding: 5px 7px; text-align: left; vertical-align: middle;
+}
+.doc-table th { background: var(--card-2); font-weight: 600; white-space: nowrap; }
+.doc-table tbody tr:nth-child(even) td { background: var(--card-2); }
+.doc-table input.field { width: 100%; min-width: 72px; padding: 4px 6px; }
+
+/* 列表项（`listItem`）：标记在左、内容在右，内容区可编辑（与正文同一条写路径）。
+   标记为什么单独一列、不并进输入框：编号/圆点是**位置**，不是这一项的文字 ——
+   并进去之后，医生删字时会把"3."当成正文一起删掉，而列表项还在（成了一个没编号的项）。 */
+.node.li .li-row { display: flex; align-items: flex-start; gap: var(--s2); }
+.node.li .li-mark { flex: 0 0 auto; min-width: 1.6em; color: var(--muted); line-height: 1.8;
+  font-variant-numeric: tabular-nums; }
+.node.li .li-text { flex: 1 1 auto; }
+.node.li textarea.editor.li-text { min-height: 28px; width: 100%; }
+.node.li .fe { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; }
+
+/* 专科控件（量表评分 / 时序趋势 / 行列表 / 勾选清单 / 影像）。几条讲究：
+   ① 一个控件是一块**整块**内容：给它自己的边框与标题 —— 那几行属于同一件事，
+      医生要一眼看得出"这几行是一起填的"；
+   ② 量表里每格不铺满整行：一格里是"名字 + 一小格"，铺满之后人眼要横着扫半屏
+      才敢确认"这一格改的确实是那一项"；
+   ③ 趋势与网格本质就是表，直接复用 `.doc-table` 那套（吸顶表头、斑马纹）；
+   ④ 勾选框统一 14px —— 与专科控件编辑表单里的 `.tpl-check` 同一尺寸，
+      页面里所有勾选框得看起来是同一个东西。 */
+.ctrl { border: 1px solid var(--line); border-radius: var(--radius-xs); padding: var(--s2) 10px; background: var(--card); }
+.ctrl-title { font-weight: 650; font-size: var(--fs-md); margin-bottom: 6px; }
+.ctrl-scale { display: flex; flex-direction: column; gap: 4px; }
+.ctrl-line { display: flex; align-items: center; gap: var(--s2); }
+/* 名字列固定宽：不固定的话，每格名字长短不同，下面那列输入框会跟着左右错开 */
+.ctrl-name { flex: 0 0 160px; color: var(--muted); font-size: var(--fs-sm); }
+.ctrl-input { width: 120px; }
+select.ctrl-input { min-width: 120px; }
+input.ctrl-box { width: 14px; height: 14px; flex: 0 0 auto; margin: 0; }
+.ctrl-list { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s4); }
+.ctrl-item { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-md); cursor: pointer; }
+.ctrl-table .ctrl-rowhead { white-space: nowrap; color: var(--muted); font-weight: 600; }
+.ctrl-table td.ctrl-cell { text-align: center; }
+.ctrl-table .ctrl-input { width: 100%; min-width: 72px; }
+/* 只读态：与正文其余只读输入框同一处置（压背景、不压对比度） */
+select.ctrl-input.ro, select.ctrl-input:disabled { background: var(--card-2); color: var(--text); }
+
+/* 影像：一格一张，横着铺开。
+   为什么卡片而不是表格：一格要同时放"名称 + 地址 + 图"，塞进表格一行里，
+   图被压成一条缝（而判断"这是不是他的那张图"全靠看得清）。
+   预览框固定高度 + `contain`：图的长宽比各不相同，不固定的话每张卡的高度都不一样，
+   一屏三张图就会长得像三份不同的东西。 */
+.ctrl-images { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.ctrl-image-item { flex: 1 1 220px; min-width: 200px; display: flex; flex-direction: column; gap: 4px;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); padding: 6px; }
+.ctrl-image-head { display: flex; align-items: center; gap: 6px; }
+.ctrl-image-name { color: var(--muted); font-size: var(--fs-sm); }
+.ctrl-image-item .ctrl-input { width: 100%; }
+.ctrl-addr { font-size: var(--fs-sm); word-break: break-all; }
+.ctrl-shot { display: flex; align-items: center; justify-content: center; height: 132px; overflow: hidden;
+  background: var(--card-2); border-radius: var(--radius-xs); text-decoration: none; }
+.ctrl-shot img { max-width: 100%; max-height: 100%; object-fit: contain; }
+/* 空态：虚线框把它标成"这里本该有图"，而不是一块空白 —— 空白与"已加载的纯白图"分不出来 */
+.ctrl-shot.empty { border: 1px dashed var(--line); color: var(--muted); font-size: var(--fs-sm); text-align: center; padding: 0 var(--s2); }
+
+/* 正文里贴的图（`ImageNode`）：按纸上的样子画，不塞成缩略图。
+   限高 420px 只为了让"整屏截图"不至于把正文挤没 —— 点开仍是原图；
+   `contain` 是因为各科影像长宽比差异极大，`cover` 会把边缘的测量标尺裁掉。 */
+.node.img .img-shot { display: flex; align-items: center; justify-content: center; margin: var(--s2) 0 var(--s1);
+  background: var(--card-2); border-radius: var(--radius-xs); overflow: hidden; text-decoration: none; }
+.node.img .img-shot img { max-width: 100%; max-height: 420px; object-fit: contain; }
+/* 取不到 / 地址不合规：虚线框 + **原样显示地址**（"图没了"与"地址写错了"必须能分清） */
+.node.img .img-shot.empty { border: 1px dashed var(--line); color: var(--muted); font-size: var(--fs-sm);
+  padding: var(--s3); word-break: break-all; }
+.node.img .img-caption { color: var(--muted); font-size: var(--fs-sm); text-align: center; margin-bottom: var(--s1); }
+
+/* 流式视图段末的贴图入口：纸面上不该有夺目的按钮 —— 低对比，悬停才显出来。
+   但它必须一直在（不能只 hover 才出现在 DOM 里）：那是入口，不是装饰。 */
+.fp-deco .fp-image { border: 0; background: transparent; color: var(--muted); font-size: var(--fs-sm);
+  opacity: 0.35; cursor: pointer; padding: 0 4px; }
+.fp-deco:hover .fp-image { opacity: 1; }
+.fp-deco .fp-image:hover { color: var(--text); text-decoration: underline; }
+
+/* 已签章 / 已归档的正文：只读。必须看得出来是只读（否则会被当成界面卡了），
+   但又不该灰成 disabled，正文仍要能读、能选中复制。所以只压背景、不压对比度，
+   并把焦点态的"变白"一并按住（否则一点进去就恢复成可编辑的样子）。 */
+textarea.editor.ro, input.field.ro { background: var(--card-2); }
+textarea.editor.ro:focus, input.field.ro:focus { border-color: var(--line); background: var(--card-2); }
+
+/* ------------------------------- ⑧ 通用组件 ------------------------------- */
+button.primary { background: var(--primary); border-color: var(--primary); color: var(--card); font-weight: 600; }
+button.ai { background: var(--ai); border-color: var(--ai); color: #fff; font-weight: 600; }
+button.ok { background: var(--ok); border-color: var(--ok); color: #fff; font-weight: 600; }
+button.danger { color: var(--danger); border-color: var(--tint-danger-bd); }
+
+/* 长句子必须能换行。这里原来是 `white-space: nowrap`，而装它的祖先（.pb / .card / .trow）
+   都是 `overflow: hidden`，于是"最近一次拒绝：…（终端 …）""公钥目录读取失败：…"这类
+   整句提示被一路裁到右边外面 —— 界面上看上去就是"这块什么都没有"，信息等于没写。
+   换行对短标签没有任何影响（放得下就不会断），所以统一放开，不再逐个加 `.chip.wrap`。
+   `max-width: 100%` 是让它以容器宽度为界，而不是把自己撑到容器外面去。 */
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 1px var(--s2);
+  border-radius: 999px; background: var(--tint-neutral-bg); color: var(--tint-neutral-tx);
+  border: 1px solid var(--tint-neutral-bd);
+  white-space: normal; max-width: 100%; text-align: left; line-height: 1.5;
+}
+/* 明确要求换行的（多行消息）上下多给一点，否则几行字挤成一条黑带 */
+.chip.wrap { padding-block: 3px; }
+.chip.ai { background: var(--tint-ai-bg); color: var(--tint-ai-tx); border-color: var(--tint-ai-bd); }
+.chip.ok { background: var(--tint-ok-bg); color: var(--tint-ok-tx); border-color: var(--tint-ok-bd); }
+.chip.warn { background: var(--tint-warn-bg); color: var(--tint-warn-tx); border-color: var(--tint-warn-bd); }
+.chip.danger { background: var(--tint-danger-bg); color: var(--tint-danger-tx); border-color: var(--tint-danger-bd); }
+.chip.tag { background: var(--tint-primary-bg); color: var(--tint-primary-tx); border-color: var(--tint-primary-bd); font-family: ui-monospace, Consolas, monospace; }
+
+.hint {
+  background: var(--card-2); border-left: 3px solid var(--primary);
+  padding: 7px 10px; border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  font-size: var(--fs-sm); color: var(--muted);
+}
+/* 空态：统一的"这里现在没有东西"组件，比裸 muted 文本多一层"这是正常状态"的暗示。
+   `margin-top` 是必需的：空态块几乎总是紧跟在 meta / chip 行之后，
+   没有它就会贴着上一行（实测：机读信息的"缺失，需先派生"胶囊贴着下面的虚线框） */
+.empty {
+  border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 18px 16px;
+  text-align: center; color: var(--muted); font-size: var(--fs-sm); background: var(--card-2);
+  margin-top: 10px;
+}
+
+/* chip 行（`.mt6` 只给了上方间距）后面紧跟块时，下方也要呼吸：
+   `.chip` 是 inline-flex，不参与块级外边距，不显式给，就是"状态胶囊贴住内容块" */
+#machineReasons:not(:empty) { margin-bottom: 10px; }
+
+/* 全景时间轴：**竖轴**。
+   侧栏只有一掌宽，横轴会把"10:12 / 14:40 / 次日 09:00"压成一排等距标签，
+   时间差反而看不出来；竖排时一份文书一行，段落在行与行之间，读起来就是"这条线怎么走的"。
+   段的颜色只表达一件事：**这一段超过了时限**（超过才是缺口），
+   所以只有 .bad 一档，不给"接近上限"之类的中间色 —— 那会变成一条需要人记住的色阶规则 */
+.tl2 { border-left: 2px solid var(--line); margin: 2px 0 0 5px; padding-left: 12px; }
+.tl2-item { position: relative; padding: 2px 0 8px; }
+/* 圆点压在轴上，用背景色垫一圈把它"切断"，看起来才是轴上的一个节点 */
+.tl2-dot {
+  position: absolute; left: -17px; top: 8px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--line-strong); box-shadow: 0 0 0 3px var(--bg);
+}
+.tl2-item.cur .tl2-dot { background: var(--ok); }
+.tl2-title { margin-top: 4px; overflow-wrap: anywhere; }
+.tl2-seg {
+  margin: 4px 0 0; padding: 2px 0 2px 8px;
+  border-left: 2px dashed var(--line-strong);
+  color: var(--muted); font-size: 12px; overflow-wrap: anywhere;
+}
+.tl2-seg.bad { border-left-color: var(--warn); color: var(--warn); }
+
+/* 待办：一条一件。左边那条色只表示**哪一类**（超时/未签/缺口/未写入），
+   不表示严重度 —— 严重度已经在标签上写着了，再编一套色阶等于让人记两种语言 */
+.todo { border-left: 3px solid var(--line); padding: 4px 0 4px 9px; }
+.todo + .todo { margin-top: 6px; }
+.todo-timeout { border-left-color: var(--danger); }
+.todo-unsigned { border-left-color: var(--warn); }
+.todo-gap { border-left-color: var(--warn); }
+.todo-unwritten { border-left-color: var(--ai); }
+
+/* ---------------------- ⑬ 跨次就诊对比 ----------------------
+   差异段落靠**左边缘色条 + 删除线**表达"上次有 / 本次新增"：
+   只靠颜色的话，灰度打印与色弱用户读不出哪条是新的。 */
+.cmp-row {
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 6px 9px; background: var(--card);
+}
+.cmp-row + .cmp-row { margin-top: 6px; }
+.cmp-p {
+  margin-top: 4px; padding: 3px 0 3px 8px;
+  border-left: 3px solid var(--line);
+  font-size: var(--fs-sm); overflow-wrap: anywhere;
+}
+.cmp-p.add { border-left-color: var(--ok); }
+.cmp-p.del { border-left-color: var(--danger); color: var(--muted); text-decoration: line-through; }
+.cmp-p.med { border-left-color: var(--ai); }
+#comparePick { flex: 1 1 auto; min-width: 0; }
+
+/* AI 建议卡 */
+.sugg { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; background: var(--card); }
+.sugg + .sugg { margin-top: var(--s2); }
+.sugg.done { opacity: .62; background: var(--card-2); }
+/* 选中的建议必须看得见，否则 j/k 移动后不知道焦点在哪，等于没有这个功能 */
+.sugg.focused { border-color: var(--focus); background: color-mix(in srgb, var(--primary) 4%, var(--card)); box-shadow: 0 0 0 2px var(--tint-primary-bd); }
+.bar { height: 5px; border-radius: 999px; background: var(--card-2); overflow: hidden; margin: 6px 0; }
+.bar > i { display: block; height: 100%; background: linear-gradient(90deg, #8b5cf6, #6d28d9); }
+.bar > i.low { background: linear-gradient(90deg, #fca5a5, #dc2626); }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 9px; }
+.stat { background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: var(--s2) 11px; }
+.stat b { display: block; font-size: var(--fs-xl); font-weight: 700; }
+.stat span { font-size: 11.5px; color: var(--muted); }
+
+table.mini { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.mini th, table.mini td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--card-2); }
+table.mini th { color: var(--muted); font-weight: 600; }
+table.mini tbody tr:nth-child(even) { background: color-mix(in srgb, var(--card-2) 55%, transparent); }
+table.mini tbody tr:hover { background: var(--tint-primary-bg); }
+code.ok { color: var(--ok); font-weight: 600; }
+code.bad { color: var(--danger); font-weight: 600; }
+
+/* 每条门控记录 = 时间 + 结果码 + 文案。文案里会出现 `E_MACHINE_READABLE_STALE`、
+   `sourceHash=7518…` 这类长 token，它们不按空格断，一行放不下就会横向溢出 ——
+   而 `.pb` 是 `overflow-x: hidden`，溢出部分直接被裁掉（实测 "…sourceHash=7518" 后面的
+   内容看不见，等于错误原因只显示了一半）。
+   所以：允许整行换行；文案块给一个下限宽度（放不下就整块掉到下一行，而不是被压成一条竖线）；
+   它自己再允许在 token 内部断行。时间与结果码不拆行，它们是这一行的锚点。 */
+.logline { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: baseline; padding: 3px 0; border-bottom: 1px dashed var(--card-2); font-size: 12px; }
+.logline .time { color: var(--muted); font-family: ui-monospace, monospace; font-size: var(--fs-xs); white-space: nowrap; }
+.logline > code { flex: 0 0 auto; }
+.logline > span:last-child { flex: 1 1 140px; min-width: 0; overflow-wrap: anywhere; }
+.checks { display: flex; flex-direction: column; gap: 6px; }
+.check { display: flex; gap: var(--s2); align-items: baseline; font-size: var(--fs-sm); }
+.check .verdict { font-weight: 700; font-family: ui-monospace, monospace; }
+
+/* 密集表单（受控阅读等）：标签在上、控件在下，一行放不下自动换行，
+   替代原先"文字 [输入框] 文字 [输入框]"挤成一行的排法 */
+.field-grid { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: flex-end; margin-bottom: var(--s2); }
+.field-grid .field { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); color: var(--muted); }
+.field-grid .field input { width: 130px; }
+.field-grid .field input[type="number"] { width: 84px; }
+.field-grid .field select { min-width: 130px; }
+/* 接收方标签：它的占位文案是整句说明（40+ 字），130px 只显示得出前几个字。
+   这一行只有它一个字段，宽度直接按提示语整句看得全来定（两页的文案不同，
+   医生端那句 408px 是最长的，440px 是它加上内边距再留一点余量）。 */
+#rkLabel { width: 440px; max-width: 100%; }
+.checkbox-row { margin-bottom: var(--s2); }
+.checkbox-row .check { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-sm); color: var(--muted); cursor: pointer; }
+.section-label { margin: var(--s2) 0; }
+.wide { width: 100%; margin-bottom: 6px; }
+.read-env { margin-bottom: 6px; }
+.read-env input { width: 110px; }
+
+/* ------------------------------- ⑨ 配置抽屉（<dialog>） -------------------------------
+   用原生 <dialog> + showModal()：top layer 与 DOM 位置、祖先层级、overflow 全无关，
+   自带遮罩（::backdrop）、Esc 关闭、焦点困在对话框内。
+
+   弹出方向**默认在右**（一级抽屉）：抽屉是"我点了一个按钮、现在在办这件事"，
+   右进与"从列表点进去"的方向一致，也不压住左栏分区导航（那里还要能看出自己在哪一页）。
+   二级抽屉（`.from-left`，见下）从左侧滑入：两级对开，同时看得见"我在哪张表里"与"我在改哪一条"。 */
+dialog.drawer {
+  position: fixed; right: 0; top: 0; bottom: 0; left: auto; margin: 0;
+  /* 加宽到 1000px：宽度用来给"标签 - 输入"两列留余量，
+     而不是用来把三类配置堆在一屏，那正是要拆子页签的原因。 */
+  width: 1000px; max-width: 96vw;
+  /* 高度必须显式给到视口高，两个 UA 默认值都要处理（此处踩过两次，见下）：
+     ① Chrome 对 dialog 的默认 `height: fit-content`，不覆盖它，内容比视口高时元素就直接长到内容高度，
+        于是"没有溢出"、`overflow-y: auto` 失效，表现为抽屉里的内容滚不动；
+        而且 `height` 一旦确定，`top:0 + bottom:0` 会以 height 为准（over-constrained 时 bottom 被忽略）。
+     ② UA 还给 top-layer dialog 加了 `max-height: calc(100% - 6px - 2em)`，不解除就会在视口底部上方
+        约 38px 处截断，表现为"没和下边缘贴紧、下面露出一截主界面"。
+     合起来：显式 height:100dvh + max-height:none = 恰好铺满视口；内容超出时由 overflow-y 内部滚动。
+     （`max-height: none` 是解除上限，与 A9 禁止的"限高导致截断"方向相反。） */
+  height: 100vh;
+  height: 100dvh;
+  max-height: none;
+  border: none; border-left: 1px solid var(--line); border-radius: 0;
+  background: var(--card); color: inherit; padding: 0 32px 44px;
+  overflow-y: auto;
+  /* 抽屉内滚到顶/底时，不要把滚动链继续传给背景页 */
+  overscroll-behavior: contain;
+  box-shadow: var(--shadow-lg);
+  animation: drawer-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+dialog.drawer::backdrop { background: rgba(15, 23, 42, 0.38); animation: mask-in 0.2s ease-out; }
+/* 抽屉贴边齐角：四角一律直角。
+   为什么单靠上面那句简写 `border-radius: 0` 不够，内核对 top-layer dialog 会带一层兜底样式，
+   而简写只要被任何一处更具体的声明碰到，就可能出现"三个角直了、剩下一个角还有弧度"。
+   这里改用逻辑四角属性逐一显式归零，覆盖下边左右两角（border-end-*-radius）在内，
+   与书写方向无关，也不依赖简写的覆盖顺序。 */
+dialog.drawer {
+  border-radius: 0;
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+  border-end-start-radius: 0;
+  border-end-end-radius: 0;
+}
+/* 二级抽屉：从**左**侧滑入，与一级（默认在右）对开。
+   为什么二级要换边：它是"在一级那张表里点开的一条"，两级贴在同一边就会互相盖住，
+   换边之后"表在哪、正在改哪一条"同时看得见；边框也跟着换到右边。 */
+dialog.drawer.from-left {
+  left: 0; right: auto;
+  border-left: none; border-right: 1px solid var(--line);
+  animation-name: drawer-in-left;
+}
+/* 抽屉是模态：打开期间锁住背景页滚动。
+   为什么只靠 overscroll-behavior 不够：抽屉内容比视口短时，它自己根本没有可滚动区域，
+   滚轮事件不会被它消费、直接冒泡到页面，于是"在抽屉里滚，后面的页面跟着动"。
+   所以这条锁是必需品，不是保险。作用域只在 html.drawer-open，正常浏览页面时不受影响。 */
+html.drawer-open { overflow: hidden; }
+/* 标题栏吸顶：抽屉内容长，滚下去之后关闭入口必须还在 */
+.drawer-head {
+  position: sticky; top: 0; z-index: 1; background: var(--card);
+  display: flex; align-items: flex-start; gap: var(--s3);
+  padding: 20px 0 14px; margin-bottom: 14px; border-bottom: 1px solid var(--line);
+}
+.drawer-head h3 { margin: 0 0 3px; font-size: var(--fs-xl); letter-spacing: 0.2px; }
+.drawer-head .muted { font-size: var(--fs-sm); }
+.drawer-head button {
+  margin-left: auto; width: 32px; height: 32px; flex: 0 0 auto; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--card); cursor: pointer;
+  font-size: var(--fs-xl); line-height: 1; color: var(--muted);
+}
+.drawer-head button:hover { background: var(--card-2); color: var(--text); }
+/* 这条的特异性高于上面的 :where 规则，必须一起改，否则配置抽屉里的控件仍是 outline */
+.cfg-grid input:focus-visible, .cfg-grid select:focus-visible { outline: none; border-color: var(--focus-strong); }
+/* 一级从右侧进来（滑入方向与抽屉所在的那一边一致），二级从左侧进来 */
+@keyframes drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes drawer-in-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes mask-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* --------------------- ⑩ 自定义弹框（确认 / 提示 / 一句话） ---------------------
+   替代 window.confirm / alert / prompt（实现在 dialog.js，医生端与管理后台共用）。
+   为什么不用系统弹框：它不受本页样式控制，也不与触发它的按钮发生任何视觉联系；
+   按钮还只有"确定 / 取消"两个词，而这里要确认的动作是删除 / 撤稿 / 清除 ——
+   按钮上写动作本身，人才不用回头再读一遍上面的句子。
+   与抽屉同源：原生 <dialog> + showModal()，遮罩与 Esc 由内核给。 */
+dialog.app-dialog {
+  width: 520px; max-width: 92vw; margin: auto; padding: 22px 24px 18px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--card); color: var(--text); box-shadow: var(--shadow-lg);
+  animation: dialog-in 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+  /* 列容器：正文区要能在**框内**滚（见 `.app-dialog-detail`）。
+     弹框的高度上限取自浏览器对 <dialog> 的默认约束 —— 本页**不覆盖**它，
+     也不写任何数值高度：内容多长由内容自己决定，撑不下时由正文区收缩并滚动。 */
+  display: flex; flex-direction: column;
+}
+/* 关掉之后必须先"不显示"，上面那句 `display: flex` 才有意义。
+   内核给 `<dialog>` 的默认样式是 `dialog:not([open]) { display: none }`，它属于浏览器自带样式表，
+   而这里写的是页面自己的样式 —— 页面样式一律胜过浏览器默认，于是 `display: flex` 一旦声明，
+   就**永远**生效：`close()` 只是摘掉 `open` 属性，框还照样摆在页面上（表现为点了取消、框还在）。
+   所以把"没 open 就不显示"在这里显式补回来，且必须写在 `display: flex` 之后、选择器带上 `:not([open])`。 */
+dialog.app-dialog:not([open]) { display: none; }
+dialog.app-dialog::backdrop { background: rgba(15, 23, 42, 0.42); animation: mask-in 0.16s ease-out; }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(-8px) scale(0.98); } to { opacity: 1; transform: none; } }
+/* 背景滚动锁：弹框比视口短时，滚轮会落到背景页上（与 html.drawer-open 同一条理由）。
+   两者是独立的：弹框可能在抽屉之上打开（从抽屉里删一条），各加各的、各解各的。 */
+html.dialog-open { overflow: hidden; }
+/* 标题就是"要做什么"，用正文级字号；正文里那些"会影响 / 不影响"要能逐行读 */
+/* 标题与动作条**不收缩**（flex: none）：内容再长，也只有中间那块正文该被压缩 */
+.app-dialog-title { flex: none; font-size: var(--fs-lg); font-weight: 700; letter-spacing: 0.2px; }
+.app-dialog-detail {
+  margin-top: 10px; color: var(--muted); line-height: 1.75;
+  /* 原样保留换行：文案本来就是分行写的（"会影响：…" / "不影响：…"），
+     压成一段就分不出哪句是哪句 */
+  white-space: pre-line;
+  /* 极长的正文（例如那份 40 项的停用词清单）要在**框内滚**，而不是把弹框顶出视口。
+     这里**不写高度**：高度由 flex 给它 —— 内容短就按内容高（basis auto），
+     长就收缩到框内剩下的空间并滚动。`min-height: 0` 是让它**允许**收缩的那一句
+     （flex 子项默认 `min-height: auto` ≈ 内容高，不写它就不会滚）。
+     尺寸的来源是浏览器对 `<dialog>` 的默认约束（本页不覆盖它），于是全站仍然没有一处数值限高。 */
+  flex: 0 1 auto; min-height: 0; overflow: auto;
+}
+/* 选择型（`askChoose`）：一条一个按钮，点哪条就是选哪条。
+   列表自己滚动（理由同上一条）；每条给足两行位置 —— 名称是"选哪个"，
+   说明是"它是什么/开得出几章"，挤成一行就只剩名字，等于让人凭名字猜。 */
+.app-dialog-choices {
+  flex: 0 1 auto; min-height: 0; overflow: auto;
+  margin-top: 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.app-dialog-choices .choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  width: 100%; text-align: left; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--card); color: var(--text); cursor: pointer;
+}
+.app-dialog-choices .choice:hover { border-color: var(--focus-strong); background: var(--tint-primary-bg); }
+.app-dialog-choices .choice:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.choice-label { font-weight: 650; }
+.choice-detail { color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
+.app-dialog-field { flex: none; margin-top: 14px; }
+.app-dialog-field input { width: 100%; }
+.app-dialog-hint { margin-top: 8px; color: var(--danger); font-size: var(--fs-sm); }
+/* 动作按钮靠右成组："取消"永远在左、"要执行的那个"永远在右（位置固定，手感才固定）；
+   同样不收缩：它必须在框内一直看得见（被正文挤出去等于点不到） */
+.app-dialog-actions {
+  flex: none;
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line);
+}
+.app-dialog-actions button { min-width: 82px; }
+
+/* 专科控件的字段卡片（「基础数据 → 专科控件」的编辑器里，一格一卡）：
+   字段多起来（牙位图是几十行）时靠卡片分隔，否则十几格排下来读不出边界。 */
+.ctrl-field {
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.ctrl-field .row { margin-top: 6px; }
+.ctrl-field textarea { width: 100%; min-height: 46px; }
+/* 字段卡里的「必填 / 时间轴」勾选框借用的是模板编辑器那套 `.tpl-check`，
+   而它带一条 `padding-bottom: 9px` —— 那是为模板编辑器的**底部对齐**准备的
+   （`.tpl-slot-head` / `.tpl-slot-body` 用 `align-items: flex-end`：
+   勾选框要和旁边那列输入框的下沿齐平）。
+   可字段卡的 `.row` 是**垂直居中**，这 9px 就变成"勾选框比旁边的框高出小半格"，
+   读起来像没对齐。对齐方式不同，那条留白在这里就只能是多余的，去掉它。 */
+.ctrl-field .tpl-check { padding-bottom: 0; }
+/* 校验指出的那一格（由 `markCtrlFieldBad` 加上）：红框要与"填错了"这件事对上号 */
+.ctrl-field.bad { border-color: var(--danger); }
+
+/* 配置子页签：次一级的导航，左栏是"分区"（主），这里是"分区内的分类"（次）。
+   所以视觉必须比左栏轻一档：浅灰底 + 选中白胶囊 + 主色字，字号也收小一档。
+   （此前是整条 tint 蓝底 + 等宽按钮，比左栏还醒目，两级导航的权重就颠倒了。） */
+.cfg-tabs {
+  flex-wrap: wrap; gap: 2px; padding:  8px 10px; margin-bottom: 20px;
+  background: var(--card-2); border: 1px solid var(--line); border-radius: 10px;
+}
+.cfg-tab {
+  padding: 6px 13px; border: 1px solid transparent; background: transparent;
+  border-radius: 7px; font-size: 12px; color: var(--muted); cursor: pointer;
+}
+.cfg-tab:hover { background: var(--card); color: inherit; transform: none; }
+.cfg-tab.active {
+  background: var(--card); border-color: var(--line);
+  color: var(--tint-primary-tx); font-weight: 650; box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+}
+/* 一次只显示一类配置：与右栏 .panel 同一做法（隐藏而不是删掉，切换不丢已填内容） */
+.cfg-pane { display: none; }
+.cfg-pane.active { display: block; }
+
+/* ---------------- 卡片：展厅感靠"留白 + 一层很轻的浮起" ---------------- */
+.cfg-group {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 26px 28px; margin-bottom: 24px;
+  background: var(--card);
+  /* 两道阴影：一道贴边给出边界，一道很大的负扩散给出"浮起"，单独靠重阴影会显脏 */
+  box-shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 10px 28px -22px rgba(15, 23, 42, .35);
+}
+.cfg-head { display: flex; align-items: center; gap: var(--s2); margin-bottom: 16px; }
+.cfg-head > b { font-size: 16px; font-weight: 650; letter-spacing: -.005em; }
+
+/* ---------------- 表单网格：宽度跟语义走 ----------------
+   宽屏两列字段对（少一半滚动、也免掉右侧那片空旷），窄屏回落单列。
+   为什么不用"每对包一层 wrapper"：那要动 90 多个字段的 HTML，收益只是一点对齐；
+   4 列模板同样表达"标签 + 控件成对"，且 HTML 一个字符都不用改。 */
+.cfg-grid {
+  display: grid; grid-template-columns: 116px minmax(0, 1fr) 116px minmax(0, 1fr);
+  gap: 12px 26px; align-items: center; margin: 12px 0 4px;
+}
+.cfg-grid > span { color: var(--muted); font-size: var(--fs-sm); }
+.cfg-grid input, .cfg-grid select { width: 100%; max-width: 420px; box-sizing: border-box; }
+/* 数字右对齐：位数不同的数字左对齐时右端参差，扫一眼看不出量级 */
+.cfg-grid input[type="number"] { max-width: 140px; text-align: right; }
+/* 上面那条 140px 是按"示例值就是一个数字"定的，但采集与落位里有几格的示例值自带一句说明
+   （如"15000（公有云建议上调）"），140px 会截成"15000（公有云…" —— 提示语被截，
+   等于这一格没说明白自己要什么。这几格按**整句提示看得全**来定宽，而不是按位数。 */
+#cfgPlaceCeiling, #cfgCaptureSubmitTimeout, #cfgCapturePollInterval, #cfgCapturePollTimeout,
+#cfgCaptureSilence, #cfgCaptureMaxSeconds, #cfgCaptureMinSeconds { max-width: 220px; }
+/* 宽口字段：地址，以及**占位文案是整句说明**的那几格（采集地址 / 模型标识 / 签名公钥）。
+   这两类都是"内容会长到需要看清"的字段，按最长的那一句来定宽（680px 是网格列宽的上限）。 */
+#cfgEndpoint, #cfgCaptureEndpoint, #cfgCaptureModel, #cfgSignEndpoint, #cfgSignPublicKey,
+#cfgPlaceEndpoint, #cfgAuthEndpoint { max-width: 680px; }
+.cfg-grid { grid-template-columns: 116px minmax(0, 1fr); }
+
+@media (max-width: 720px) {
+  .cfg-grid { grid-template-columns: minmax(0, 1fr); gap: 5px 0; }
+  .cfg-grid > span { margin-top: 6px; }
+}
+/* 接入配置的卡片限宽：它的内容是一列表单，铺满 1300px 会变成"左边一片、右边一片空白"。
+   限宽之后右侧的空白成为版心留白（有意为之），而不是"没铺满" */
+
+.cfg-status { margin: 8px 0 0; min-height: 22px; }
+/* 失败态必须与"已保存"看得出来：同色同字号时它会被当成提示扫过去，
+   而配置类失败恰恰最容易被读成"我点了但没生效"（表单里还留着自己填的值）。 */
+.cfg-status.bad { color: var(--danger); }
+
+/* 管理端（独立页面 /admin）：整页布局 + 登录区。抽屉那套 dialog 样式与它无关。 */
+/* 页头：只有标题与一行说明（身份与退出已归左栏底部）。滚动时吸顶，
+   内容一长，标题是唯一能回答"我在哪一页"的东西，让它滚走等于每次都要划回顶部确认。
+
+   它用 `<header>` 标签，而全局 `header` 是医生端顶栏（sticky + 深色渐变 + 白字 + 阴影），
+   所以那一套要整个让开，不能只写 padding：实测踩到，页头会变成一条紫蓝横条。
+   吸顶用纯色底而不是毛玻璃：毛玻璃会让标题的对比度随滚过的内容变化。 */
+.admin-head {
+  z-index: 5;
+  background: var(--bg); color: inherit; box-shadow: none;
+  display: block; padding: 30px 0 20px;
+}
+.admin-title { margin: 0 0 8px; font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
+
+.admin-foot { margin-top: var(--s5); padding-top: var(--s3); border-top: 1px dashed var(--line); font-size: var(--fs-sm); line-height: 1.7; }
+
+/* 管理端登录字段（也是子页签共享的身份来源）：标签在上、控件在下，避免"文字挤一行" */
+.cfg-admin { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-sm); color: var(--muted); }
+.cfg-admin input { width: 200px; }
+
+/* 独立登录页（/login）：整页只有一张卡，居中。
+   它同样要显式 `display: block`，否则会被上面那条 `main { display: grid }`（医生端三栏）塞进第一列 */
+.login-body { display: block; max-width: 460px; margin: 9vh auto 0; padding: 0 var(--s4) 48px; }
+.login-card { border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; background: var(--card); }
+/* 品牌行：LOGO 在标题左边，与左栏里那排布法一致（同一枚图形、同一个位置关系）。
+   标题自带的 8px 下边距在这里要去掉：间距由 `.login-form` 的 18px 给，
+   两者叠加会把 LOGO 与表单之间撑出一道空档。 */
+.login-brand { display: flex; align-items: center; gap: 10px; }
+.login-brand .admin-title { margin: 0; }
+.login-form { display: flex; flex-direction: column; gap: 12px; margin: 18px 0 4px; }
+/* 登录页的字段要占满一行：这条卡本身很窄，200px 的固定宽度会让口令框看起来像被截断 */
+.login-form .cfg-admin input { width: 100%; }
+.login-form button { align-self: flex-start; padding: 8px 20px; }
+.login-note { padding-top: 12px; border-top: 1px dashed var(--line); font-size: var(--fs-sm); line-height: 1.8; color:#999;}
+/* 演示口令那一行要显眼：它是使用者进来第一件要找的东西（找不到就得去翻源码） */
+.login-note.login-demo { border-top-color: var(--tint-primary-bd); }
+.login-note.login-demo code { font-size: 13px; font-weight: 650; color: var(--tint-primary-tx); }
+
+/* ------------------------- 管理后台外壳（左栏 + 内容区） -------------------------
+   为什么这些要显式写：`main` 在 ui.css 里是医生端的三栏 grid（左病历树 / 中正文 / 右工作栏），
+   而管理后台是"左栏 + 一大块内容区"，两套布局各自说清，否则会互相污染
+   （实测：不写，后台的几块内容会被一条条塞进那三列里）。 */
+
+.admin-shell { display: flex; align-items: stretch; min-height: 100vh; }
+/* 侧栏用 `--card-2`（比内容区与卡片各差一档），于是画面有三层：
+   侧栏 / 内容底 / 卡片。全是同一个白，边界就只剩一条 1px 线，层次感出不来。 */
+.admin-side {
+  position: sticky; top: 0; flex: 0 0 216px; height: 100vh; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 20px 14px 16px; border-right: 1px solid var(--line); background: var(--card-2);
+}
+.admin-brand { padding: 2px 12px 18px; }
+/* 产品 LOGO（emr-l0-core）：占住"管理后台 / 环境"这两行的左边 ——
+   左图右文才读得成"一块牌子"：左边是"我们是谁"，右边两行是它的注脚
+   （这是什么 / 在哪套环境）。`align-items: center` 是让标识对着两行字的中间，
+   只对齐第一行的话，标识会显得是挂在产品名上、与下面那行没关系。
+   40px 不是随手取的：右边那两行字（15px 产品名 + 12.5px 环境标识）连起来约 43px 高，
+   标识取到与它同高，左图右文才合成"一整块"；小到 26px 时它像一枚挂件，
+   压不住那两行字（登录页同理：标题行高 41.6px，两个尺寸落在同一档）。
+   LOGO 用内联 SVG：零请求、颜色全走令牌（主色 → AI 紫，暗色主题自动换色，
+   不会出现"深色界面里一块刺眼的原色块"）。 */
+.admin-brand-row { display: flex; align-items: center; gap: 10px; }
+.admin-brand-text { display: flex; flex-direction: column; }
+.admin-brand-logo { display: block; flex: 0 0 auto; width: 40px; height: 40px; }
+.admin-brand-logo .brand-stop-a { stop-color: var(--primary); }
+.admin-brand-logo .brand-stop-b { stop-color: var(--ai); }
+.admin-brand-logo .brand-mark { fill: var(--brand-sheet); }
+.admin-brand-name { font-weight: 650; font-size: var(--fs-lg); letter-spacing: -.01em; }
+.admin-brand-sub { font-size: var(--fs-sm); line-height: 1.5; }
+
+/* 分区导航：竖排、间距更松。选中态 = 浅底 + 主色字 + 左侧主色竖条 */
+.side-nav { display: flex; flex-direction: column; gap: 4px; }
+.side-btn {
+  position: relative; width: 100%; text-align: left; padding: 11px 13px; border: 1px solid transparent;
+  border-radius: 10px; background: transparent; color: var(--muted); font-size: var(--fs-sm); cursor: pointer;
+}
+.side-btn.active::before {
+  content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--primary);
+}
+.side-btn:hover { background: var(--card-2); color: inherit; transform: none; }
+.side-btn.active {
+  background: var(--tint-primary-bg); border-color: var(--tint-primary-bd);
+  color: var(--tint-primary-tx); font-weight: 650;
+}
+
+/* 底部：公众号二维码 + 当前身份与退出，`margin-top: auto` 把它们压在栏底。
+   "现在是谁"这类信息固定在一处，比跟着内容滚动更好查 */
+.side-foot {
+  margin-top: auto; padding-top: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+/* 二维码：左栏底部的"我们是谁"。
+   `padding` + 白底是必需的，不是装饰：二维码外圈要有静区（quiet zone），
+   而且暗色主题下直接贴在深底上会扫不出来。尺寸 112px 是下限附近，
+   再小，手机在正常距离就不好扫。 */
+.side-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 12px 14px; }
+.side-qr img {
+  width: 112px; height: 112px; padding: 6px; border-radius: 10px;
+  background: #fff; border: 1px solid var(--line);
+}
+.side-qr-label { color: var(--muted); font-size: var(--fs-sm); }
+.side-user { padding: 0 12px; display: flex; flex-direction: column; gap: 8px; }
+/* 退出按钮：左栏这一格的唯一出口，做成整行按钮。
+   为什么不是贴着左边缘的小方块：它是这一格里唯一可点的东西，缩成小块会像"次要开关"，
+   而它在严格模式下是唯一的出口。平时保持中性（退出本身不是危险动作），
+   悬停才转成危险色 —— 提示的是后果："这会吊销会话"。 */
+.side-user #logoutBtn {
+  align-self: stretch; width: 100%; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 7px 12px; font-weight: 600; color: var(--muted);
+  border-color: var(--line); background: var(--card);
+}
+.side-user #logoutBtn:hover:not(:disabled) {
+  color: var(--tint-danger-tx); border-color: var(--tint-danger-bd); background: var(--tint-danger-bg);
+}
+
+/* 内容区：左栏右边的自适应区（不再是"居中单栏"） */
+/* 内容区用纯色底（不是医生端那个渐变）：页头要吸顶，渐变在小区域里会露出接缝 */
+.admin-body { display: block; flex: 1 1 auto; min-width: 0; max-width: 1320px; margin: 0; padding: 0 34px 84px; background: var(--bg); }
+
+/* 窄屏：左栏转为顶部一排。不做抽屉，抽屉要处理焦点陷阱、Esc、滚动锁，
+   而管理后台基本在桌面用，为它付这个代价不划算 */
+@media (max-width: 900px) {
+  .admin-shell { flex-direction: column; }
+  .admin-side {
+    position: static; height: auto; flex: 0 0 auto; width: 100%;
+    border-right: 0; border-bottom: 1px solid var(--line);
+  }
+  .side-nav { flex-direction: row; flex-wrap: wrap; }
+  .side-btn { width: auto; }
+  .side-foot { margin-top: 6px; border-top: 0; flex-direction: row; align-items: center; gap: 12px; }
+}
+/* 一次只显示一个分区：与 .cfg-pane 同一做法（隐藏而不是删掉，切回来不丢状态） */
+.admin-view { display: none; }
+.admin-view.active { display: block; }
+.cfg-head > .push { margin-left: auto; }
+
+/* ---------------- 判定方式清单：一条判法一块 ----------------
+   比 .cfg-group 轻一档：这一页整屏就是一张清单，每块都按卡片浮起会变成一堆盒子。
+   只用一条分隔线把"一种判法"框住，分组靠留白。 */
+.predicate-card { padding: 18px 0; border-top: 1px solid var(--line); }
+.predicate-card:first-child { border-top: 0; padding-top: 4px; }
+.predicate-card .cfg-head { margin-bottom: 8px; }
+.predicate-card table.mini { margin-top: 10px; }
+
+/* ---------------- 自定义条件构造器（规则抽屉里那一块） ----------------
+   一行一条条件，行内三格并排：它们是同一条条件的三个部分（读什么 / 怎么算 / 跟什么比），
+   并排才看得出"这是一条"；竖着排的话，三条条件会看起来像九件不相干的事。 */
+.cond-builder { margin-top: 8px; }
+.cond-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.cond-row {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px;
+}
+.cond-row-foot { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 10px; }
+.cond-row-foot .hint { flex: 1 1 auto; min-width: 0; }
+.cond-row-foot button { flex: 0 0 auto; }
+@media (max-width: 900px) { .cond-row { grid-template-columns: 1fr; } }
+
+/* ---------------- 判定方式的参数表与实参（规则抽屉 / 条件抽屉里那两块） ----------------
+   参数表一行一格参数（名字 / 类型 / 标签 / 必填 / 选项 / 单位 / 说明 / 删），
+   实参那一块是"按参数的规格一格一格填"。两块都用等宽字体显示参数名：
+   `$limitHours` 是要被逐字抄进条件树的，看错一个字母就是一条不生效的规则。 */
+.cond-params { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.cond-param-row {
+  display: grid; gap: 6px; align-items: center;
+  grid-template-columns: 1.1fr 0.8fr 1.3fr auto 1.4fr 0.8fr 1.8fr auto;
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px;
+}
+.cond-param-row input, .cond-param-row select { min-width: 0; }
+.cond-param-row input[data-cond-param-field="name"] { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.cond-param-flag { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+.cond-args { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.cond-args .tpl-cell { padding-left: 10px; border-left: 2px solid var(--line); }
+@media (max-width: 1100px) { .cond-param-row { grid-template-columns: 1fr 1fr; } }
+
+
+
+/* 路径与指纹要能逐字比对：等宽字体，免得 l/1/I 与 0/O 看错 */
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+/* 知识资产包的规则清单（管理后台「质控」子页签）：一行一条 = 标识 · 名称 · 级别 · 开关。
+   不做内部滚动、不截断，与医生端"内容必须显示全"同一条纪律 */
+.qc-pack-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.qc-pack-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.qc-pack-row .qc-pack-title { flex: 1 1 220px; min-width: 140px; color: var(--text); font-size: var(--fs-sm); }
+
+/* 模板库（管理后台「模板库」子页签）：一张表，一行一份病历模板，行尾是操作按钮。
+   为什么是表而不是一串行：一份文书的字段本来就是并列的几格（状态 / 名称 / 类型 / 规模 / 科室），
+   对齐之后"哪几份是草稿、哪几份限了科室"一眼扫得出，而每行自带说明的长句只能逐行读。
+   新建与编辑走抽屉（一级 `#tplDrawer` 在右、二级 `#tplDrawer2` 在左，复用 .drawer 样式），
+   不在行内展开 —— 改一份文书要同时看见名称、科室与每一章，行内展开会被表格行宽挤住。 */
+.tpl-table { margin-top: 10px; }
+.tpl-table th { white-space: nowrap; }
+.tpl-table td { vertical-align: middle; }
+/* 名称列给下限宽度：长名称不该把操作列挤成两行 */
+.tpl-table td.tpl-name { min-width: 170px; }
+/* 操作列不换行、靠右成组：编辑/发布/停用/撤稿/删除是同一类东西，
+   散在行尾各处会让人逐字读一遍才知道哪个是哪个。
+   表头跟着一起靠右，否则标题与它下面那组按钮不在同一条视线上 */
+.tpl-table th:last-child { text-align: right; }
+.tpl-table td.tpl-ops { white-space: nowrap; text-align: right; }
+.tpl-table td.tpl-ops button { margin-left: 4px; }
+/* 查询条（模板名称 / 控件名称）：输入框与动作按钮排一行，放不下就换行。
+   宽度按**提示语整句看得全**来定：占位文案是"按名称筛选（不区分大小写）"，
+   窄了会被截成"按名称筛选（不区分大…"—— 提示语被截，等于这一格没说明白自己要什么 */
+.tpl-toolbar { flex-wrap: wrap; }
+.tpl-toolbar input[type="search"] { width: 280px; max-width: 100%; }
+/* 分页条：左边一句"现在是第几页、这一页有几份、总共几份"，右边是上一页 / 下一页。
+   只有一页时也照常显示（两个按钮都置灰）：分页是一个稳定存在的机制，
+   藏起来会让人不知道"这张表还有没有下一页"。 */
+.tpl-pager {
+  display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--card-2);
+}
+.tpl-pager-btns { margin-left: auto; display: inline-flex; gap: 6px; }
+.tpl-pager button[disabled] { opacity: 0.5; cursor: default; }
+/* 开不出的文书（草稿 / 已停用）整行变淡：它不是"没建"，只是当前开不出 */
+.tpl-row.off { opacity: 0.66; }
+/* 控件表格里的公式要能逐字比对（它是这个控件唯一的内容） */
+.tpl-table td.tpl-formula { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+/* 适用科室（抽屉里）是勾选而不是输入框：编码打错一个字母，这份文书就谁都开不出，
+   所以只让人从科室字典里勾。勾选框之间要能换行 —— 科室多了不该横向溢出 */
+.tpl-edit-box .row label.check,
+.tpl-edit-box .tpl-depts label.check { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-sm); cursor: pointer; }
+/* 表达式控件表单（二级抽屉）的「名称 / 单位 / 说明」：
+   不给宽度就按浏览器默认的 size=20 渲染 —— 名称、单位还看得过去，
+   而「说明」那句占位文案（一句话说明它算什么）只露得出前几个字。
+   提示语被截 = 这一格没说明白自己要什么；更要紧的是，说明该写多长
+   不该由控件默认宽度决定（写不下就只好改成更短的写法）。
+   名称/单位是短值，给固定宽；说明是整句、这一行又只有它一个控件，
+   所以让它吃掉这一行的余量（上限与 `.tpl-field > input` 同一量级，不给无限宽）。 */
+.tpl-edit-box .row input#exprNewName { width: 220px; }
+.tpl-edit-box .row input#exprNewUnit { width: 180px; }
+.tpl-edit-box .row input#exprNewDesc { flex: 1 1 340px; max-width: 640px; }
+/* 专科控件表单的「说明」同理，而且它原来与「形状」挤在同一行：
+   那一行被下拉占去一段后，剩下的宽度只够露出占位文案的前几个字。
+   与表达式控件同一处置 —— 说明单独一行、吃掉这一行的余量（上限同一量级）。 */
+.tpl-edit-box .row input#ctrlNewDesc { flex: 1 1 340px; max-width: 640px; }
+/* 专科控件表单的「名称」：它现在独占一行（原来与「语义类型」同挤一行），
+   于是整行只剩它一个控件，不给宽度就按浏览器默认的 size=20 渲染 ——
+   一行里左边一小截、右边大片空白，读起来像这一格没长齐。
+   让它吃掉自己这一行的余量（下限保证名称写不下时也不会被压成一小条），
+   上限与 `.tpl-field > input` 同一量级：名称是短值，不给无限宽。 */
+.tpl-edit-box .row input#ctrlNewName { flex: 1 1 260px; max-width: 420px; }
+
+/* 基础数据 · 科室字典：一行一个科室（编码 / 名称 / 启用 / 删除）。
+   编码在前是因为**判定靠它**：改名称安全、改编码会让配了它的文书开不出，
+   把编码摆在最左边，人一眼就知道自己在改哪一格 */
+.dept-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: var(--fs-sm);
+}
+.dept-row:last-child { border-bottom: 0; }
+.dept-row input[type="text"] { min-width: 170px; }
+.dept-row label.check { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+/* 文书类型复用同一行的造型，只多一格「体系」下拉：
+   判重看的是"体系 + 编码"这一对，所以体系必须摆在行里（藏起来的话，
+   "为什么同一个 A01 能加两次"在界面上就没有解释） */
+.doc-type-row select { min-width: 110px; }
+/* ---------------------------------------------------------------------------
+   文书编辑抽屉（新建 / 编辑一份文书）：**一格一块、块内再分两行**。
+
+   为什么不是"一行摆五六个控件"：填写项最多要摆五个（类型 / 单位 / 从系统带入 /
+   必填 / 删），挤在一行里每一个都被压到最窄，而它们中间没有任何东西说明
+   "哪一格是什么"；改完一章得来回数格子才敢确认自己改的是哪一个。
+   间距也跟着放大：这一屏是**要人逐格核对**的地方，不是扫一眼就走的列表。
+   间距/圆角/字号一律取令牌（同 ui.css 顶部那条纪律）。 */
+.tpl-edit-box {
+  display: flex; flex-direction: column; gap: 16px;
+  margin: 0 0 10px; padding: 16px 18px;
+  border: 1px dashed var(--line); border-radius: var(--radius-xs); background: var(--bg-soft, transparent);
+}
+/* 一格：标签在上（"这一格是什么"）、控件在下（值） */
+.tpl-field { display: flex; flex-direction: column; gap: 6px; }
+.tpl-label { font-size: var(--fs-sm); color: var(--muted); font-weight: 600; letter-spacing: .2px; }
+.tpl-field > input, .tpl-field > select { max-width: 420px; }
+.tpl-depts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.tpl-pair { display: flex; gap: 8px; flex-wrap: wrap; }
+.tpl-pair input { flex: 1 1 200px; }
+
+/* 章节：一节一卡。卡片边界本身就是"这一章到哪儿结束"的答案 */
+.tpl-secs { display: flex; flex-direction: column; gap: 14px; }
+.tpl-sec {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 12px 14px; border: 1px solid var(--line); border-left: 3px solid var(--primary);
+  border-radius: var(--radius-xs); background: var(--card);
+}
+.tpl-sec-head { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.tpl-sec-no {
+  font-size: var(--fs-sm); font-weight: 650; color: var(--tint-primary-tx);
+  white-space: nowrap; align-self: flex-end; padding-bottom: 7px;
+}
+.tpl-cell { display: flex; flex-direction: column; gap: 5px; }
+.tpl-cell-wide { flex: 1 1 240px; min-width: 200px; }
+
+/* 槽位一块：第一行只有"这一格是什么"（槽位名 + 类别），第二行才是类别专有的字段。
+   底色与圆角的作用是分组 —— 两行必须看起来像同一件事，而不是两个独立的行 */
+.tpl-slots { display: flex; flex-direction: column; gap: 10px; }
+.tpl-slot-row {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-xs);
+  background: var(--card-2);
+}
+.tpl-slot-head { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.tpl-slot-head .tpl-cell { flex: 0 0 190px; }
+.tpl-slot-body { display: flex; align-items: flex-end; gap: 10px 14px; flex-wrap: wrap; }
+.tpl-slot-body .tpl-cell { flex: 1 1 170px; min-width: 150px; }
+.tpl-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--muted); padding-bottom: 9px; }
+/* 参考范围：四个小格并排（低 / 高 / 文本 / 单位）——
+   它们回答的是同一个问题（"多少算正常"），排成一块才看得出是一件事 */
+.tpl-range { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tpl-range-cell { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-sm); color: var(--muted); }
+.tpl-range-cell input { width: 84px; }
+.tpl-range-cell input[data-tpl-input^="slot:rrtext"] { width: 108px; }
+/* 表格的列编辑器：一行一列（列名 / 类型 / 单位 / 删）。
+   竖着排而不是横着铺：列是有顺序的，竖排才看得出"这是第几列"，也才敢在中间插一列。 */
+.tpl-columns { display: flex; flex-direction: column; gap: 6px; }
+.tpl-column { display: flex; align-items: center; gap: 6px; }
+.tpl-column input[data-tpl-input^="slot:coltitle"] { width: 168px; }
+.tpl-column select { min-width: 96px; }
+.tpl-column input[data-tpl-input^="slot:colunit"] { width: 96px; }
+.tpl-del-col { padding: 2px 8px; font-size: var(--fs-sm); line-height: 1.4; }
+/* 列表的项编辑器：与表格列同一套排法（一行一项、竖排）——
+   项是有顺序的，竖排才看得出"这是第几项"，也才敢在中间插一项。
+   文字框给得比列名宽：列表项通常是一整句话，不是两三个字。 */
+.tpl-items { display: flex; flex-direction: column; gap: 6px; }
+.tpl-item { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tpl-item input[data-tpl-input^="slot:itemtext"] { flex: 1 1 260px; min-width: 200px; }
+.tpl-item select { min-width: 96px; }
+.tpl-item input[data-tpl-input^="slot:itemunit"] { width: 88px; }
+.tpl-item input[data-tpl-input^="slot:itemlabel"] { width: 128px; }
+.tpl-del-item { padding: 2px 8px; font-size: var(--fs-sm); line-height: 1.4; }
+.tpl-add-item { align-self: flex-start; }
+/* "删掉这一格"推到行尾：它是这一行里唯一的破坏性动作，不该夹在"值"中间 */
+.tpl-del { flex: 0 0 auto; margin-left: auto; }
+.tpl-add { align-self: flex-start; }
+/* 章节编码是拿来跨文书对齐的锚点：等宽字体，免得 l/1/I 与 0/O 看错 */
+.tpl-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+/* 排序：把手 + 上移/下移。把手做成"抓得住"的样子（点阵 + 抓手光标）——
+   它是拖动的**唯一**入口（卡片本身不可拖：拖在输入框上会变成选文字，人会以为拖不动） */
+.tpl-drag-handle {
+  flex: 0 0 auto; align-self: flex-end; padding-bottom: 6px;
+  cursor: grab; color: var(--muted); font-size: 15px; line-height: 1;
+  user-select: none; letter-spacing: -1px;
+}
+.tpl-drag-handle:active { cursor: grabbing; }
+.tpl-move {
+  flex: 0 0 auto; align-self: flex-end; margin-bottom: 1px;
+  min-width: 30px; padding: 5px 8px; line-height: 1;
+}
+.tpl-move[disabled] { opacity: .4; cursor: default; }
+
+/* 章节自身属性一行（必备 / 整章算关键内容 / 说明）：
+   与"章节标题、编码"拉开一点距离 —— 上面那两格是**骨架**（只有草稿能改），
+   这一行是**元数据**（任何状态都能改），界线要在视觉上看得出来 */
+.tpl-sec-meta {
+  display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: var(--radius-xs);
+  background: var(--card-2); border: 1px dashed var(--line);
+}
+.tpl-sec-meta .tpl-cell { flex: 1 1 260px; min-width: 200px; }
+
+/* 章节片段工具条：插一段素材进来（与"加一章"并列的另一种起点） */
+.tpl-frag-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-xs);
+  background: var(--card-2);
+}
+.tpl-frag-bar select { min-width: 210px; }
+.tpl-frag-bar .muted { flex: 1 1 260px; font-size: var(--fs-sm); }
+
+/* 抽屉自己的状态行（排序 / 插入片段这些**不关抽屉**的动作把话写在这里：
+   写进抽屉背后那块面板等于没写 —— 模态开着的时候看不见） */
+.tpl-drawer-status:empty { display: none; }
+.tpl-drawer-status {
+  padding: 8px 10px; margin-bottom: 12px; border-radius: var(--radius-xs);
+  background: var(--tint-primary-bg); color: var(--tint-primary-tx);
+  font-size: var(--fs-sm); line-height: 1.6;
+}
+
+/* 文书表与片段表之间的分隔（两张表是两类东西，不能看成一张表的续行） */
+.tpl-sep { height: 1px; margin: 20px 0 14px; background: var(--line); }
+
+/* ---------------------------------------------------------------------------
+   模板预览（一级抽屉）：一屏"医生点开之后面前是什么"。
+
+   正文那一段不在这里定义样式，也不在这里画：它用的是 `.doc > .sec / .node`
+   这一套（见本文件"正文编辑"一节）与 `/doc-view.js` 的同一个渲染函数 ——
+   预览与正文长得一样，靠的是"画的就是同一套"，而不是两处各自照着对方调。
+
+   这里只剩预览特有的三块：文书头、科室判定（"本次就诊开不出来"是最该被看见的结论）、
+   以及**默认折叠的核对信息**（章节编码与槽位名不属于文书本身，摆进正文就等于
+   让人在"医生看到的那一屏"里读内部标识）。 */
+.tpl-preview { display: flex; flex-direction: column; gap: 14px; }
+.pv-head { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.pv-dept { font-size: var(--fs-sm); color: var(--muted); }
+/* "本次就诊开不出来"是预览里最该被看见的一条结论：用警告色，而不是灰字 */
+.pv-dept.warn { color: var(--warn); font-weight: 600; }
+.pv-warn { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.pv-check { font-size: var(--fs-sm); color: var(--muted); }
+.pv-check > summary { cursor: pointer; }
+.pv-check-sec { margin-top: 8px; }
+.pv-check-list { margin: 4px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+
+/* 表达式构造器：一格就是一个 AST 节点，缩进表示层级。
+   函数节点的参数在它下面缩进展开 —— "看到的结构"就是公式本身，
+   不需要再猜语法（这正是选结构而不是文本公式的原因） */
+.expr-tree {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--radius-xs);
+}
+.expr-node { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.expr-node select, .expr-node input[type="text"] { max-width: 320px; min-width: 150px; }
+.expr-node input[type="number"] { width: 120px; }
+.expr-fn { display: flex; flex-direction: column; gap: 5px; }
+
+/* 后台账号清单（管理后台「账号管理」）：一行一个账号 = 账号 · 角色 · 最近登录 · 动作 · 元信息。
+   动作组靠右成组（`margin-left: auto`）：改角色/重设口令/停用/删除是同一类东西，
+   散在行尾各处会让人逐字读一遍才知道哪个是哪个。
+   与"内容必须显示全"同步：不禁用换行、不截断，窄屏上折成两行比省略号可用 */
+.acct-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 0; border-bottom: 1px dashed var(--line); font-size: var(--fs-sm);
+}
+.acct-row:last-child { border-bottom: 0; }
+.acct-row .acct-name { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); font-weight: 650; }
+.acct-row .acct-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.acct-row .acct-actions select { height: 30px; }
+/* 元信息（算法 / 谁在什么时候改的）独占一行：它是给核对用的，挤在动作旁边会被读漏 */
+.acct-row .acct-meta { flex: 1 1 100%; }
+
+/* 说明性列表（"审计的边界""本页没有的"）：用列表而不是段落，
+   它们是逐条承诺，读的人会一条条对照 */
+.admin-list { margin: 4px 0 0; padding-left: 20px; color: var(--muted); font-size: var(--fs-sm); line-height: 1.8; }
+.admin-note { font-size: var(--fs-sm); line-height: 1.8; padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--radius-xs); }
+
+/* -------------------- 展厅感的细节：摘要 chip 行 / 操作区 / 键值表 -------------------- */
+
+/* 摘要 chip 行：把"当前：A · B · C · D"那一长串灰字拆成一条条。
+   一串用圆点分隔的灰字里，人只能靠自己找分隔符；chip 让每条事实有边界、有类别、有颜色 */
+.chiplines { display: flex; flex-wrap: wrap; align-items: baseline; margin: 2px 0 4px; }
+.chipline { display: inline-flex; align-items: baseline; gap: 6px; margin: 2px 20px 2px 0; }
+.chipline-k { color: var(--muted); font-size: var(--fs-sm); }
+/* 值用正文色（容器常带 .muted，别让"值"跟着变灰，灰是给标签的） */
+.chipline-v { color: var(--text); font-size: var(--fs-sm); font-weight: 650; }
+.chipline-v.ok { color: var(--ok); }
+.chipline-v.warn { color: var(--warn); }
+.chipline-v.danger { color: var(--danger); }
+.chipline-v.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 500; }
+
+/* 操作区：卡片底部一条，与表单用分隔线隔开，"填"与"交"本来就是两件事 */
+.form-actions {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line);
+}
+/* 危险操作靠右独立：不该紧挨着"保存"，手快一点就点错了（而且它不可撤销） */
+.form-actions .danger-zone { margin-left: auto; }
+
+/* 键值表：运行状态与系统信息共用一套（长值省略 + title 看全） */
+.kv { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 9px 18px; align-items: baseline; }
+.kv-k { color: var(--muted); font-size: var(--fs-sm); }
+/* 长值换行显示全，不省略，与医生端"内容必须显示全"同一条纪律（A9 就是守它的）：
+   路径与指纹是拿来逐字核对的，截断成"…"等于把这条信息丢掉，而 title 只在鼠标上有效 */
+.kv-v { font-size: var(--fs-sm); word-break: break-all; }
+.kv-v.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+/* "还缺哪几格"是一句清单：允许在任意位置换行（长括号与顿号不该把布局顶破） */
+#healthSignMissing { word-break: break-word; line-height: 1.7; }
+
+/* 指标条：大数字 + 小标签，"展厅感"最直接的一处。
+   但只放真实数字（这几项都来自服务端 counts），不编造趋势、不画没有数据的图 */
+/* 4 个指标要一行放完（3+1 的排法看着像没做完）。
+   不用 `grid` + `auto-fit`：它在宽容器里会造出多余轨道，实测算出 8 列，
+   4 个指标被挤在左边一半。`flex: 1 1 140px` 是均分且会自然换行，语义也更直白。 */
+.metric-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 16px; }
+.metric { flex: 1 1 140px; }
+/* 指标卡跨两列：4 个数字铺满整行才有"展厅感"（挤在半列里会显得局促） */
+.admin-view.grid2 > .cfg-group.span2 { grid-column: 1 / -1; }
+.metric { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--card-2); }
+.metric-v { font-size: 26px; font-weight: 650; line-height: 1.15; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.metric-k { margin-top: 3px; color: var(--muted); font-size: var(--fs-sm); }
+
+/* 宽屏：运行状态 / 系统信息的卡片并排两列（整片对齐，也少滚一半）。
+   接入配置不参与，它内部是表单 + 子页签，分列会把一张表单切两半；
+   审计与安全也不参与，它按"范围在上、记录在下"的顺序读，分栏会把顺序打乱 */
+.admin-view.grid2 { display: none; }
+.admin-view.grid2.active {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  gap: 20px; align-items: start;
+}
+.admin-view.grid2 > .cfg-group { margin-bottom: 0; }
+/* 说明块（"这里不是监控"那类）在网格里跨全列：它是整片的注释，不是一张卡 */
+.admin-view.grid2 > .admin-note { grid-column: 1 / -1; }
+
+/* 审计：三列对齐（时间 / 谁对什么 / 类型），变化行单独一行用等宽。
+   此前是"时间 · 人 · 对象 · 类型"串成一行，扫读时得自己找边界。
+
+   时间那一列给**固定**宽度而不是 max-content：每一行是各自独立的 grid，
+   max-content 会按各行自己的时间算宽，行与行的第二列就对不齐了。
+   宽度要按"整条时间戳一行放得下"来定（如 2026/10/16 14:23:45），
+   写窄了会折成两行 —— 折行之后这一列看起来"什么都挤在一起"。 */
+.audit-row {
+  display: grid; grid-template-columns: 184px minmax(0, 1fr) 62px; gap: 3px 14px;
+  padding: 11px 0; border-bottom: 1px dashed var(--line); font-size: var(--fs-sm);
+}
+/* 时间一格：不折行；数字用等宽字形（1 与 8 同宽，逐行扫读时右端才齐） */
+.audit-row > .muted:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.audit-row:last-child { border-bottom: 0; }
+/* 分页条跟在审计条目后面：条目自带下边界线（虚线），这里不再叠一条实线。
+   只有一页时同样显示，两个按钮都置灰 —— 分页是稳定存在的机制，藏起来会让人以为没有下一页 */
+#auditBody .tpl-pager { border-top: 0; }
+.audit-diff {
+  grid-column: 2 / -1; margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+}
+.audit-diff s { color: var(--muted); }
+.audit-diff b { color: var(--tint-primary-tx); }
+
+/* 细节统一：控件高度、focus 环、窄屏回落 */
+.admin-body input, .admin-body select { height: 34px; }
+.admin-body input:focus-visible, .admin-body select:focus-visible, .admin-body textarea:focus-visible {
+  outline: none; border-color: var(--focus-strong);
+}
+@media (max-width: 720px) {
+  .audit-row { grid-template-columns: minmax(0, 1fr); }
+  .audit-diff { grid-column: auto; }
+  .kv { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+  .kv-v { white-space: normal; }
+}
+/* 缺它的时候把焦点与高亮一起送过去，而不是只在状态行里说一句 */
+.cfg-admin input.invalid { border-color: var(--danger); }
+/* 落位规则表：整宽与可纵向拉伸（textarea 不在 .cfg-grid 的控件选择器内） */
+.cfg-terms { width: 100%; min-height: 64px; resize: vertical; box-sizing: border-box; }
+
+/* 拖拽指定落点：拖源给抓手光标，可接收的节点用虚线描边即时回馈，
+   落点刚被改过的下拉框闪一下边框（拖完要立刻看得出"确实改了"） */
+.sugg.draggable { cursor: grab; }
+.sugg.dragging { opacity: .55; cursor: grabbing; }
+.node.drop-target { border-color: var(--primary); background: var(--tint-primary-bg); box-shadow: 0 0 0 2px var(--tint-primary-bd); }
+/* 落点刚被拖拽改过：外环闪一下（不与焦点样式抢边框，也不用 outline） */
+select.just-set { box-shadow: 0 0 0 2px var(--ok); }
+
+/* AI 面板：操作区（能点的）与信息区（说明的）分成两块，用虚线隔开 */
+.stack { display: flex; flex-direction: column; gap: var(--s2); margin-bottom: var(--s3); }
+.ai-label { color: var(--muted); font-size: var(--fs-sm); width: 60px; flex: 0 0 auto; }
+#suggMode, #suggTarget { flex: 1; min-width: 0; }
+#qcTarget { flex: 1; min-width: 200px; }
+.ai-meta { border-top: 1px dashed var(--line); padding-top: 9px; }
+.ai-meta > div { color: var(--muted); font-size: var(--fs-sm); line-height: 1.65; }
+.ai-meta #modelInfo { font-family: ui-monospace, monospace; color: var(--text); font-size: var(--fs-sm); margin-left: 4px; }
+
+/* ------------------------------- ⑩ 浮层（toast / 键盘提示 / 帮助） -------------------------------
+   全局回执：任何操作有结果都要让人看见，否则医生会重复点（"不知道有没有生效"） */
+.toast {
+  position: fixed; top: calc(var(--header-h) + 10px); left: 50%; transform: translateX(-50%); z-index: 50;
+  max-width: 420px; padding: 9px 14px; border-radius: 10px; font-size: var(--fs-sm);
+  background: var(--tint-ok-bg); border: 1px solid var(--tint-ok-bd); color: var(--tint-ok-tx);
+  box-shadow: var(--shadow); animation: toast-in 0.18s ease-out;
+}
+.toast.danger { background: var(--tint-danger-bg); border-color: var(--tint-danger-bd); color: var(--tint-danger-tx); }
+.toast.info { background: var(--card); border-color: var(--line); color: var(--text); }
+.toast[hidden] { display: none; }
+@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(-6px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+.key-hint {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 40;
+  padding: var(--s2) 14px; border-radius: 999px; background: #1f2937; color: #fff; font-size: var(--fs-sm);
+  box-shadow: 0 6px 20px rgba(16, 24, 40, .25);
+}
+:root[data-theme="dark"] .key-hint { background: var(--card); border: 1px solid var(--line-strong); color: var(--text); }
+.key-hint[hidden] { display: none; }
+.keys-help {
+  position: fixed; right: 20px; bottom: 22px; z-index: 40; min-width: 250px;
+  padding: var(--s3) 14px; border-radius: 12px; background: var(--card); border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(16, 24, 40, .18); font-size: var(--fs-sm);
+}
+.keys-help[hidden] { display: none; }
+.keys-help h3 { margin: 0 0 var(--s2); font-size: 13px; }
+.keys-help .k { display: inline-block; min-width: 54px; font-family: ui-monospace, monospace; color: var(--tint-primary-tx); }
+
+/* 演示声明只在演示模式显示：对评审是必要的诚实声明，对医生是噪声 */
+body.clinical .demo-only { display: none; }
+input[type=range] { width: 100%; }
+
+/* ------------------------------- ⑪ 工具类 -------------------------------
+   模板字符串里不再写内联 style：间距/推挤/显隐统一走这里（可全局搜索、可整体调整） */
+.push { margin-left: auto; }
+.mt4 { margin-top: var(--s1); }
+.mt6 { margin-top: 6px; }
+.mt8 { margin-top: var(--s2); }
+.mt10 { margin-top: 10px; }
+.mb4 { margin-bottom: var(--s1); }
+.mb6 { margin-bottom: 6px; }
+.mb8 { margin-bottom: var(--s2); }
+.mb10 { margin-bottom: 10px; }
+.my6 { margin-top: 6px; margin-bottom: 6px; }
+.ml8 { margin-left: var(--s2); }
+.no-grow { flex: 0 0 auto; }
+.align-start { align-items: flex-start; }
+.note-list { margin: 0; padding-left: 18px; }
+.hide { display: none; }
+.nowrap { white-space: nowrap; }
+.w90 { width: 90px; flex: 0 0 auto; }
+
+/* --------------------------- ⑪-2 公有云警告（语音采集） ---------------------------
+   音频出院是这一页里最重的一句话。它平时不出现（选了院内服务就没有这一块），
+   一旦出现就要**一眼看得见**：所以用危险色整块打底，而不是缩成一行小字。
+   与 `.chip.danger` 同一套 tint 变量，深色主题下自动跟着走。 */
+.cloud-warn {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--tint-danger-bd);
+  border-radius: 6px;
+  background: var(--tint-danger-bg);
+  color: var(--tint-danger-tx);
+  line-height: 1.65;
+}
+/* 勾选框与确认文案同一行、垂直居中对齐：label 做 flex 容器，
+   勾选框自身的 baseline/margin 会让两者错位，这里统一抹平。 */
+.cloud-warn .cloud-ack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cloud-warn .cloud-ack input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+/* ------------------------------- ⑫ 动效降级 -------------------------------
+   prefers-reduced-motion：用户明确要求减少动效时，所有过渡/动画立即到终态。
+   这条不是装饰，诊室里有人对动效敏感（眩晕），降级是可读性的一部分。 */
+/* ---------------------------------------------------------------------------
+   自由流式编辑（纸面）：与上面的"正文编辑"（卡片）并列的第二套观感。
+
+   目标只有一句：**看上去是一张纸，不是一堆控件**。
+   所以这里刻意不做卡片那一套（每段一个框、框上有 chip 行、框下有按钮行）——
+   那些东西在流式模式里会被光标流穿过、被跨段选中一起选中，而它们不是内容。
+   来源与确认状态改由 run 级标记与段落旁的轻量提示表达（见 flow-view.js）。
+--------------------------------------------------------------------------- */
+
+/* 段内格式工具：只在流式模式出现（由 ui.js 按编辑范式置 `hidden`）。
+   放在纸面外面：放进去它就成了纸的一部分，会被选进选区、也会被删掉。 */
+.ftools {
+  display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+  padding: 6px 10px; border-bottom: 1px dashed var(--line);
+}
+.ftools[hidden] { display: none; }
+.ftools button { min-width: 30px; padding: 2px 8px; }
+.ftools .muted { font-size: var(--fs-sm); }
+
+/* 可编辑区（一段纸）。`contenteditable` 自带焦点框，这里换成与卡片一致的一圈描边 */
+.fbody {
+  background: var(--card); border: 1px solid transparent; border-radius: var(--radius-sm);
+  padding: 6px 12px; margin: 2px 0;
+  font-size: var(--fs-md); line-height: 1.9; color: var(--text);
+  overflow-wrap: break-word;
+}
+.fbody:focus { outline: none; border-color: var(--focus-strong); }
+.fbody.ro { background: var(--card-2); }
+/* 只读时点它要给得出理由（标题由 flow-view.js 写在容器上），这里保证鼠标能看出"不可编辑" */
+.fbody.ro { cursor: default; }
+
+/* 段落块。最小高度 1.9em = 一行，空段也点得进去（否则空段落塌成 0 高度，无法落笔） */
+.fp { min-height: 1.9em; padding: 1px 0; }
+.fp:focus { outline: none; }
+.fp-notext { color: var(--muted); }
+
+/* 章节标题：沿用卡片模式那套"左侧色条"的表达，让两种模式的章节看起来是同一份文档 */
+.fsec {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin: 16px 0 6px; font-weight: 650; font-size: var(--fs-md);
+}
+.fsec-title { padding-left: 9px; border-left: 3px solid var(--primary); }
+
+/* 行内填写项：点一下改一格。
+   虚线框 + 不参与文字选择（user-select: none）—— 它是一格数据，不是正文的字符，
+   不这么标的话，"选中一句话"会把格子里的值一起选进去，复制出来就多了一串数。 */
+.fe {
+  display: inline-flex; align-items: baseline; gap: 4px; margin: 0 4px; padding: 0 6px;
+  border: 1px dashed var(--line); border-radius: var(--radius-xs); background: var(--field);
+  font-size: var(--fs-sm); cursor: pointer;
+  user-select: none; -webkit-user-select: none;
+}
+.fe:hover { border-color: var(--primary); }
+.fe b { font-weight: 650; }
+/* 未确认的格子：与卡片模式的"待确认"同一套色（色是同一套，意思才是同一件事） */
+.fe.pending { border-color: var(--node-key-bd); background: var(--node-key-bg); }
+
+/* 段末装饰：来源 / 关键内容 / 待确认 / 质控徽标。
+   字号压到 sm 并靠右留白：纸面上它们是"批注"，不是正文 ——
+   和正文同字号会让人误以为那也是病历内容的一部分。 */
+.fp-deco {
+  display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  margin-left: 8px; font-size: var(--fs-sm); vertical-align: baseline;
+}
+
+/* 演示模式的内部标识（节点 id · rev）：用 `::after` 生成，**不进 DOM 文本**。
+   这不是取巧：纸面是可编辑区，写进 DOM 就会被解析成"医生打的字"再写回模型
+   （flow-view.js 文件头第 3 条），而生成内容只参与绘制、不参与读取。
+   与卡片模式一致，只在演示模式下出现；切到临床模式即收起。 */
+body.flow-mode:not(.clinical) .fp[data-node-id]::after {
+  content: attr(data-node-id) " · rev " attr(data-node-rev);
+  margin-left: 8px; color: var(--muted); font-size: var(--fs-sm);
+  font-weight: 400; opacity: 0.75;
+}
+
+/* run 级来源：只有"这一句"的来源与整段不同时才出现（逐句可回溯在界面上长这样）。
+   用点线而不是底色：底色在整页纸上看不出是"这一句"，而点线能跟着句子走。 */
+.run-ai { border-bottom: 1px dotted var(--ai); }
+.run-imported { border-bottom: 1px dotted var(--warn); }
+
+/* 表格与专科控件在流式模式里**仍是卡片**：它们是整块表单，不参与纸面光标流
+   （`contenteditable` 里塞 `<input>` 会让光标流在跨段选区时行为不可预期）。
+   所以这里只压一压间距，画法完全复用卡片模式那一份。 */
+.fcard { margin: 10px 0; }
+.fcard .node { border-color: var(--line); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 本机客户端状态卡：三列（标签 / 值 / 动作），左侧色条表示最坏的那一条。
+   原先这里是四五个 chip 挤在一行，换行位置由文字长度决定 —— "已连接"与地址被拆到两行、
+   告警和采集源挤成一片，读的人得先猜哪两块说的是同一件事。改成固定标签列之后，
+   每行的主语都落在同一列上，值随窗口宽度自己换行，不再互相挤。 */
+.cap-status {
+  margin-bottom: 10px; padding: 8px 10px;
+  border: 1px solid var(--line); border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-xs); background: var(--card-2);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.cap-status.ok { border-left-color: var(--ok); }
+.cap-status.warn { border-left-color: var(--warn); }
+.cap-status.danger { border-left-color: var(--danger); }
+.cap-row {
+  display: grid; grid-template-columns: 74px minmax(0, 1fr) auto;
+  align-items: baseline; gap: 10px; font-size: var(--fs-sm);
+}
+.cap-k { color: var(--muted); }
+/* 值不跟容器变灰：灰是给标签的，值才是要读的东西 */
+.cap-v { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.cap-v.ok { color: var(--ok); }
+.cap-v.warn { color: var(--warn); }
+.cap-v.danger { color: var(--danger); }
+/* 地址退成次要色：与它同行的那句状态才是结论 */
+.cap-host { color: var(--muted); margin-left: 8px; }
+.cap-act { justify-self: end; }
+.cap-act:empty { display: none; }
+.cap-notes { display: flex; flex-direction: column; gap: 4px; }
+.cap-note { color: var(--muted); font-size: var(--fs-sm); line-height: 1.6; }
+
+/* 录音电平条（本机客户端采集）：高度由**帧响度**推进（`--amp`），静音帧不跳。
+   它替代"转圈"：病房里要能一眼看出"它正在听"，而转圈说不清这件事。
+   颜色走 danger：与"● 录音中"是同一个信号，不是装饰。 */
+.capture-wave {
+  display: flex; align-items: center; gap: 3px; height: 22px;
+  color: var(--danger); overflow: hidden;
+}
+.capture-wave[hidden] { display: none; }
+.capture-wave i {
+  display: block; width: 3px; border-radius: 2px; background: currentColor;
+  height: calc(3px + var(--amp, .2) * 19px);
+  transform-origin: center;
+  animation: capture-wave .9s ease-in-out infinite alternate;
+}
+/* 静音帧：停住并压低 —— "没声音"也要看得出来，否则动画本身会撒谎 */
+.capture-wave[data-voiced="0"] i { animation-play-state: paused; transform: scaleY(.25); opacity: .4; }
+@keyframes capture-wave { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+
+/* 重新检测：一个图标按钮（一次只读探测，不是"开始采集"，所以不做成主按钮）。
+   它必须**看得见在动**：探测最长 2.5s，期间没有任何反馈的话，
+   人只会怀疑"这按钮到底能不能按"，于是反复点 —— 结果还是同一个。
+   所以点下去立刻转圈 + 置灰，落定后由状态卡重画回常态。 */
+.cap-refresh {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; min-height: 24px; padding: 0;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); color: var(--muted); flex: 0 0 auto;
+}
+.cap-refresh:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); transform: none; }
+.cap-refresh:disabled { cursor: progress; }
+.cap-refresh svg { display: block; }
+.cap-refresh.spinning svg { animation: cap-spin .8s linear infinite; }
+@keyframes cap-spin { to { transform: rotate(360deg); } }
+/* 系统要求减少动态效果时不要转：改成半透明，"还在跑"依然看得出来 */
+@media (prefers-reduced-motion: reduce) {
+  .cap-refresh.spinning svg { animation: none; opacity: .45; }
+}
+
+/* ------------------------- ⑪ 命令面板（Ctrl+K） -------------------------
+   壳复用 `dialog.app-dialog`（居中 / 遮罩 / Esc / 焦点归还都由内核与 dialog.js 同一套约定给），
+   这里只加"输入 + 候选 + 脚注"三段式。
+
+   **高度不写数值**：候选最多 12 条（见 command-palette.js 的 MAX_RESULTS），
+   高度由内容自己决定；真到了极小窗口，由 `.cmdk-list` 收缩并内部滚动 ——
+   这与 `.app-dialog-detail` 同一条思路，也就不给 A9「全站不出现数值限高」添第二条例外。 */
+dialog.app-dialog.cmdk {
+  width: 660px; max-width: 94vw; padding: 0; overflow: hidden;
+}
+.cmdk-head {
+  flex: none; display: flex; align-items: center; gap: var(--s3);
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+}
+/* 组合键做成键帽：它是这一屏唯一的"操作说明"，写在占位文字里会被输入内容盖掉 */
+.cmdk-key {
+  flex: none; font-size: var(--fs-xs); font-weight: 600; letter-spacing: .3px;
+  color: var(--tint-neutral-tx); background: var(--tint-neutral-bg);
+  border: 1px solid var(--tint-neutral-bd); border-radius: var(--radius-xs);
+  padding: 2px 7px; white-space: nowrap;
+}
+/* 输入框去掉自己的边框与底色：这一整条就是"一个搜索框"，再画一个框反而像两个控件 */
+.cmdk-input {
+  flex: 1 1 auto; min-width: 0;
+  border: 0; background: transparent; box-shadow: none;
+  min-height: 30px; padding: 2px 0; font-size: var(--fs-lg);
+}
+/* 焦点要看得见：输入框自己已经没有边框可变色了，改由这一条下划线承担 */
+.cmdk-head:focus-within { box-shadow: inset 0 -2px 0 var(--focus-strong); }
+
+.cmdk-list {
+  flex: 0 1 auto; min-height: 0; overflow: auto;
+  padding: 6px;
+}
+.cmdk-group {
+  padding: 8px 10px 4px; font-size: var(--fs-xs); font-weight: 600;
+  letter-spacing: .6px; color: var(--muted);
+}
+.cmdk-item {
+  display: flex; align-items: baseline; gap: var(--s3);
+  padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.cmdk-item.active {
+  background: var(--tint-primary-bg);
+  box-shadow: inset 0 0 0 1px var(--tint-primary-bd);
+}
+/* 标签与说明都可换行（全站不以省略号截断，见 A9）：命令名往往就是正文里那句话 */
+.cmdk-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.cmdk-detail {
+  flex: 0 1 auto; max-width: 46%; text-align: right;
+  color: var(--muted); font-size: var(--fs-sm); overflow-wrap: anywhere;
+}
+.cmdk-item.active .cmdk-detail { color: var(--tint-primary-tx); }
+.cmdk-empty { padding: 18px 12px; color: var(--muted); }
+.cmdk-foot {
+  flex: none; padding: 8px 16px; border-top: 1px solid var(--line);
+  font-size: var(--fs-xs); color: var(--muted);
+}
+/* 面板是模态：打开期间锁住背景滚动（与抽屉 `html.drawer-open` 同一条理由）。
+   用独立的类名而不是复用 dialog-open：两者可能同时存在，谁先关谁解会互相踩。 */
+html.cmdk-open { overflow: hidden; }
+
+/* 跳转落点的高亮：用 outline 而不是背景色 —— outline 不占布局，
+   不会因为高亮一下就让整页重排（那会让"跳过去"看起来像"页面抖了一下"）。 */
+.node-hit { outline: 2px solid var(--focus-strong); outline-offset: 2px; border-radius: var(--radius-xs); }
+
+/* ---------------------- ⑫ 建议卡片的逐句对照 ----------------------
+   三行三类：新增 / 删除 / 改写。虚线框是**建议**不是现状 —— 这一点靠"改动"标签与删除线共同表达，
+   不能只靠颜色（色弱用户与灰度打印都会读不出来）。
+
+   高度不写数值、文本不截断：长句换行，宁可把卡片撑高，也不把一句病历切成"…"。 */
+.sugg-review {
+  margin-top: 6px; padding: 6px 8px;
+  border: 1px dashed var(--line-strong); border-radius: var(--radius-sm);
+  background: var(--field);
+}
+.sugg-review > .muted { margin-bottom: 4px; }
+.sr-row {
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 3px 2px; font-size: var(--fs-sm); cursor: pointer;
+}
+/* 复选框本身要能被键盘走到，所以不隐藏、不自己画一个 —— Tab 逐句走靠的就是它 */
+.sr-row input { flex: none; margin: 3px 0 0; }
+.sr-tag {
+  flex: none; padding: 0 5px; line-height: 1.6;
+  font-size: var(--fs-xs); border-radius: var(--radius-xs);
+  border: 1px solid transparent; white-space: nowrap;
+}
+.sr-tag.ins { color: var(--tint-ok-tx); background: var(--tint-ok-bg); border-color: var(--tint-ok-bd); }
+.sr-tag.del { color: var(--tint-danger-tx); background: var(--tint-danger-bg); border-color: var(--tint-danger-bd); }
+.sr-tag.rep { color: var(--tint-warn-tx); background: var(--tint-warn-bg); border-color: var(--tint-warn-bd); }
+.sr-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* 当前句：键盘走到哪一句要看得见（否则"逐句走查"就变成了盲按） */
+.sr-row:focus-within {
+  background: var(--tint-primary-bg);
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--tint-primary-bd);
+}
+/* 未勾选的删除行：让它看起来"正在被保留"，勾上则恢复正常字色 —— 状态只有一处可见 */
+.sr-row.del input:not(:checked) ~ .sr-text { text-decoration: line-through; color: var(--muted); }

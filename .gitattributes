@@ -1,0 +1,11 @@
+# 归一化：版本库统一存 LF，检出时按平台换行；Windows 上不会每次 checkout 都炸一片 diff。
+* text=auto
+
+# 明确二进制，别让 Git 试图做文本转换或 diff。
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.ico  binary
+*.ofd  binary
+*.exe  binary
+*.db   binary

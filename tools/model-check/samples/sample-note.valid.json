@@ -1,0 +1,180 @@
+{
+  "schemaVersion": "1.0.0",
+  "docId": "doc_outpatient_sample_001",
+  "docType": { "system": "WST500", "code": "WST500.2", "display": "门（急）诊病历" },
+  "patient": { "patientId": "P0001", "nameMasked": "王**", "gender": "M", "birthDate": "1981-03-12" },
+  "encounter": { "visitId": "V20261008001", "visitType": "outpatient", "deptCode": "0301" },
+  "status": "signed",
+  "createdAt": "2026-10-08T01:12:00Z",
+  "updatedAt": "2026-10-08T01:40:00Z",
+  "createdBy": "DR1001",
+  "rootId": "n_root",
+  "nodes": {
+    "n_root": {
+      "id": "n_root",
+      "type": "document",
+      "parentId": null,
+      "order": 0,
+      "rev": 1,
+      "provenance": { "origin": "system", "actorId": "emr-core", "at": "2026-10-08T01:12:00Z" }
+    },
+    "n_sec_cc": {
+      "id": "n_sec_cc",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 10,
+      "rev": 1,
+      "title": "主诉",
+      "sectionCode": "chiefComplaint",
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:13:00Z" }
+    },
+    "n_p_cc": {
+      "id": "n_p_cc",
+      "type": "paragraph",
+      "parentId": "n_sec_cc",
+      "order": 10,
+      "rev": 1,
+      "semantic": "chiefComplaint",
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:13:10Z" }
+    },
+    "n_t_cc": {
+      "id": "n_t_cc",
+      "type": "text",
+      "parentId": "n_p_cc",
+      "order": 10,
+      "rev": 2,
+      "runs": [{ "text": "咳嗽、咳痰3天，伴发热1天。" }],
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:15:00Z" }
+    },
+    "n_sec_pe": {
+      "id": "n_sec_pe",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 20,
+      "rev": 1,
+      "title": "体格检查",
+      "sectionCode": "physicalExam",
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:16:00Z" }
+    },
+    "n_f_temp": {
+      "id": "n_f_temp",
+      "type": "field",
+      "parentId": "n_sec_pe",
+      "order": 10,
+      "rev": 2,
+      "dataType": "number",
+      "value": 38.5,
+      "valueText": "38.5",
+      "unit": "℃",
+      "required": true,
+      "sourceKey": "VITAL.TEMP",
+      "tags": [{ "system": "WS445", "code": "DE05.01.001", "display": "体温" }],
+      "provenance": {
+        "origin": "system",
+        "actorId": "system/lis",
+        "evidence": [{ "kind": "lis", "ref": "LIS:20261008-0116:VITAL.TEMP", "valueText": "38.5", "capturedAt": "2026-10-08T01:16:30Z" }],
+        "at": "2026-10-08T01:16:30Z"
+      }
+    },
+    "n_sec_dx": {
+      "id": "n_sec_dx",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 30,
+      "rev": 1,
+      "title": "初步诊断",
+      "sectionCode": "assessment",
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:20:00Z" }
+    },
+    "n_f_diag": {
+      "id": "n_f_diag",
+      "type": "field",
+      "parentId": "n_sec_dx",
+      "order": 10,
+      "rev": 3,
+      "dataType": "code",
+      "value": "J18.9",
+      "valueText": "肺炎",
+      "keyContent": true,
+      "humanConfirmed": true,
+      "tags": [{ "system": "ICD10", "code": "J18.9", "display": "肺炎" }],
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:22:00Z" }
+    },
+    "n_p_assess": {
+      "id": "n_p_assess",
+      "type": "paragraph",
+      "parentId": "n_sec_dx",
+      "order": 20,
+      "rev": 3,
+      "semantic": "assessment",
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:30:00Z" }
+    },
+    "n_t_assess": {
+      "id": "n_t_assess",
+      "type": "text",
+      "parentId": "n_p_assess",
+      "order": 10,
+      "rev": 4,
+      "humanConfirmed": true,
+      "runs": [{ "text": "结合病史、体征及血象，考虑社区获得性肺炎，建议抗感染治疗并复查。" }],
+      "provenance": {
+        "origin": "ai",
+        "modelId": "local/qwen-med:7b@2026-09",
+        "promptId": "tpl-assessment-v3",
+        "confidence": 0.93,
+        "evidence": [
+          { "kind": "lis", "ref": "LIS:20261008-0116:WBC", "valueText": "9.8", "capturedAt": "2026-10-08T01:16:30Z" },
+          { "kind": "guideline", "ref": "GUIDE:CAP-2025:§3.2", "quote": "社区获得性肺炎诊断需结合临床表现与影像学证据" }
+        ],
+        "acceptedBy": "DR1001",
+        "acceptedAt": "2026-10-08T01:33:00Z",
+        "suggestionId": "sg_0007",
+        "at": "2026-10-08T01:32:00Z"
+      }
+    },
+    "n_sig": {
+      "id": "n_sig",
+      "type": "signatureBlock",
+      "parentId": "n_root",
+      "order": 90,
+      "rev": 5,
+      "signerRole": "author",
+      "signerId": "DR1001",
+      "signatureRef": "sig_1",
+      "provenance": { "origin": "human", "actorId": "DR1001", "at": "2026-10-08T01:40:00Z" }
+    }
+  },
+  "machineReadable": {
+    "generatedAt": "2026-10-08T01:40:00Z",
+    "generator": "l0-export/0.1",
+    "modelSchemaVersion": "1.0.0",
+    "dataElements": [
+      { "tag": { "system": "WS445", "code": "DE05.01.001", "display": "体温" }, "value": 38.5, "valueText": "38.5", "unit": "℃", "nodeId": "n_f_temp", "origin": "system" },
+      { "tag": { "system": "ICD10", "code": "J18.9", "display": "肺炎" }, "value": "J18.9", "valueText": "肺炎", "nodeId": "n_f_diag", "origin": "human" }
+    ],
+    "keyContentRefs": [{ "nodeId": "n_f_diag", "tag": { "system": "ICD10", "code": "J18.9" }, "present": true }]
+  },
+  "revisions": [
+    { "rev": 1, "at": "2026-10-08T01:12:00Z", "actorId": "emr-core", "op": "create", "targetId": "n_root" },
+    { "rev": 2, "at": "2026-10-08T01:15:00Z", "actorId": "DR1001", "op": "insert", "targetId": "n_t_cc" },
+    {
+      "rev": 3,
+      "at": "2026-10-08T01:22:00Z",
+      "actorId": "system/lis",
+      "op": "update",
+      "targetId": "n_f_temp",
+      "patch": [{ "op": "replace", "path": "/nodes/n_f_temp/value", "value": 38.5 }]
+    },
+    { "rev": 4, "at": "2026-10-08T01:33:00Z", "actorId": "DR1001", "op": "accept-ai", "targetId": "n_t_assess", "aiSuggestionId": "sg_0007", "modelId": "local/qwen-med:7b@2026-09", "confidence": 0.93 },
+    { "rev": 5, "at": "2026-10-08T01:40:00Z", "actorId": "DR1001", "op": "sign", "targetId": "n_sig" }
+  ],
+  "signatureRefs": [
+    {
+      "signatureRef": "sig_1",
+      "signerRole": "author",
+      "signerId": "DR1001",
+      "signedAt": "2026-10-08T01:40:00Z",
+      "covers": ["Document.xml", "Pages/Page_0/Content.xml"]
+    }
+  ]
+}

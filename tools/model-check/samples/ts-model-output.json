@@ -1,0 +1,331 @@
+{
+  "createdAt": "2026-10-08T01:12:00Z",
+  "createdBy": "DR1001",
+  "docId": "doc_outpatient_sample_001",
+  "docType": {
+    "code": "WST500.2",
+    "display": "门（急）诊病历",
+    "system": "WST500"
+  },
+  "encounter": {
+    "deptCode": "0301",
+    "visitId": "V20261008001",
+    "visitType": "outpatient"
+  },
+  "machineReadable": {
+    "dataElements": [
+      {
+        "nodeId": "n_f_temp",
+        "origin": "system",
+        "tag": {
+          "code": "DE05.01.001",
+          "display": "体温",
+          "system": "WS445"
+        },
+        "unit": "℃",
+        "value": 38.5,
+        "valueText": "38.5"
+      },
+      {
+        "nodeId": "n_f_diag",
+        "origin": "human",
+        "tag": {
+          "code": "J18.9",
+          "display": "肺炎",
+          "system": "ICD10"
+        },
+        "value": "J18.9",
+        "valueText": "肺炎"
+      }
+    ],
+    "generatedAt": "2026-10-08T01:40:00Z",
+    "generator": "l0-export/0.1",
+    "keyContentRefs": [
+      {
+        "nodeId": "n_f_diag",
+        "present": true,
+        "tag": {
+          "code": "J18.9",
+          "system": "ICD10"
+        }
+      }
+    ],
+    "modelSchemaVersion": "1.0.0"
+  },
+  "nodes": {
+    "n_f_diag": {
+      "dataType": "code",
+      "humanConfirmed": true,
+      "id": "n_f_diag",
+      "keyContent": true,
+      "order": 10,
+      "parentId": "n_sec_dx",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:22:00Z",
+        "origin": "human"
+      },
+      "rev": 3,
+      "tags": [
+        {
+          "code": "J18.9",
+          "display": "肺炎",
+          "system": "ICD10"
+        }
+      ],
+      "type": "field",
+      "value": "J18.9",
+      "valueText": "肺炎"
+    },
+    "n_f_temp": {
+      "dataType": "number",
+      "id": "n_f_temp",
+      "order": 10,
+      "parentId": "n_sec_pe",
+      "provenance": {
+        "actorId": "system/lis",
+        "at": "2026-10-08T01:16:30Z",
+        "evidence": [
+          {
+            "capturedAt": "2026-10-08T01:16:30Z",
+            "kind": "lis",
+            "ref": "LIS:20261008-0116:VITAL.TEMP",
+            "valueText": "38.5"
+          }
+        ],
+        "origin": "system"
+      },
+      "required": true,
+      "rev": 2,
+      "sourceKey": "VITAL.TEMP",
+      "tags": [
+        {
+          "code": "DE05.01.001",
+          "display": "体温",
+          "system": "WS445"
+        }
+      ],
+      "type": "field",
+      "unit": "℃",
+      "value": 38.5,
+      "valueText": "38.5"
+    },
+    "n_p_assess": {
+      "id": "n_p_assess",
+      "order": 20,
+      "parentId": "n_sec_dx",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:30:00Z",
+        "origin": "human"
+      },
+      "rev": 3,
+      "semantic": "assessment",
+      "type": "paragraph"
+    },
+    "n_p_cc": {
+      "id": "n_p_cc",
+      "order": 10,
+      "parentId": "n_sec_cc",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:13:10Z",
+        "origin": "human"
+      },
+      "rev": 1,
+      "semantic": "chiefComplaint",
+      "type": "paragraph"
+    },
+    "n_root": {
+      "id": "n_root",
+      "order": 0,
+      "parentId": null,
+      "provenance": {
+        "actorId": "emr-core",
+        "at": "2026-10-08T01:12:00Z",
+        "origin": "system"
+      },
+      "rev": 1,
+      "type": "document"
+    },
+    "n_sec_cc": {
+      "id": "n_sec_cc",
+      "order": 10,
+      "parentId": "n_root",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:13:00Z",
+        "origin": "human"
+      },
+      "rev": 1,
+      "sectionCode": "chiefComplaint",
+      "title": "主诉",
+      "type": "section"
+    },
+    "n_sec_dx": {
+      "id": "n_sec_dx",
+      "order": 30,
+      "parentId": "n_root",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:20:00Z",
+        "origin": "human"
+      },
+      "rev": 1,
+      "sectionCode": "assessment",
+      "title": "初步诊断",
+      "type": "section"
+    },
+    "n_sec_pe": {
+      "id": "n_sec_pe",
+      "order": 20,
+      "parentId": "n_root",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:16:00Z",
+        "origin": "human"
+      },
+      "rev": 1,
+      "sectionCode": "physicalExam",
+      "title": "体格检查",
+      "type": "section"
+    },
+    "n_sig": {
+      "id": "n_sig",
+      "order": 90,
+      "parentId": "n_root",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:40:00Z",
+        "origin": "human"
+      },
+      "rev": 5,
+      "signatureRef": "sig_1",
+      "signerId": "DR1001",
+      "signerRole": "author",
+      "type": "signatureBlock"
+    },
+    "n_t_assess": {
+      "humanConfirmed": true,
+      "id": "n_t_assess",
+      "order": 10,
+      "parentId": "n_p_assess",
+      "provenance": {
+        "acceptedAt": "2026-10-08T01:33:00Z",
+        "acceptedBy": "DR1001",
+        "at": "2026-10-08T01:32:00Z",
+        "confidence": 0.93,
+        "evidence": [
+          {
+            "capturedAt": "2026-10-08T01:16:30Z",
+            "kind": "lis",
+            "ref": "LIS:20261008-0116:WBC",
+            "valueText": "9.8"
+          },
+          {
+            "kind": "guideline",
+            "quote": "社区获得性肺炎诊断需结合临床表现与影像学证据",
+            "ref": "GUIDE:CAP-2025:§3.2"
+          }
+        ],
+        "modelId": "local/qwen-med:7b@2026-09",
+        "origin": "ai",
+        "promptId": "tpl-assessment-v3",
+        "suggestionId": "sg_0007"
+      },
+      "rev": 4,
+      "runs": [
+        {
+          "text": "结合病史、体征及血象，考虑社区获得性肺炎，建议抗感染治疗并复查。"
+        }
+      ],
+      "type": "text"
+    },
+    "n_t_cc": {
+      "id": "n_t_cc",
+      "order": 10,
+      "parentId": "n_p_cc",
+      "provenance": {
+        "actorId": "DR1001",
+        "at": "2026-10-08T01:15:00Z",
+        "origin": "human"
+      },
+      "rev": 2,
+      "runs": [
+        {
+          "text": "咳嗽、咳痰3天，伴发热1天。"
+        }
+      ],
+      "type": "text"
+    }
+  },
+  "patient": {
+    "birthDate": "1981-03-12",
+    "gender": "M",
+    "nameMasked": "王**",
+    "patientId": "P0001"
+  },
+  "revisions": [
+    {
+      "actorId": "emr-core",
+      "at": "2026-10-08T01:12:00Z",
+      "op": "create",
+      "rev": 1,
+      "targetId": "n_root"
+    },
+    {
+      "actorId": "DR1001",
+      "at": "2026-10-08T01:15:00Z",
+      "op": "insert",
+      "rev": 2,
+      "targetId": "n_t_cc"
+    },
+    {
+      "actorId": "system/lis",
+      "at": "2026-10-08T01:22:00Z",
+      "op": "update",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_f_temp/value",
+          "value": 38.5
+        }
+      ],
+      "rev": 3,
+      "targetId": "n_f_temp"
+    },
+    {
+      "actorId": "DR1001",
+      "aiSuggestionId": "sg_0007",
+      "at": "2026-10-08T01:33:00Z",
+      "confidence": 0.93,
+      "modelId": "local/qwen-med:7b@2026-09",
+      "op": "accept-ai",
+      "rev": 4,
+      "targetId": "n_t_assess"
+    },
+    {
+      "actorId": "DR1001",
+      "at": "2026-10-08T01:40:00Z",
+      "op": "sign",
+      "rev": 5,
+      "targetId": "n_sig"
+    }
+  ],
+  "rootId": "n_root",
+  "schemaVersion": "1.0.0",
+  "signatureRefs": [
+    {
+      "covers": [
+        "Document.xml",
+        "Pages/Page_0/Content.xml"
+      ],
+      "signatureRef": "sig_1",
+      "signedAt": "2026-10-08T01:40:00Z",
+      "signerId": "DR1001",
+      "signerRole": "author"
+    }
+  ],
+  "status": "signed",
+  "updatedAt": "2026-10-08T01:40:00Z"
+}

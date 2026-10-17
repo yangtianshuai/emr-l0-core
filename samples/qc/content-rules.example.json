@@ -1,0 +1,14 @@
+[
+  {
+    "ruleId": "R-DEMO-01",
+    "title": "演示用：是否写明了鉴别诊断依据",
+    "severity": "info",
+    "requirement": "本段是否提到需要鉴别的疾病，并给出依据（症状 / 影像 / 检验）"
+  },
+  {
+    "ruleId": "R-DEMO-02",
+    "title": "演示用：病情变化是否有记录",
+    "severity": "warn",
+    "requirement": "本段是否描述了与上一次记录相比的病情变化（好转 / 加重 / 无变化）"
+  }
+]

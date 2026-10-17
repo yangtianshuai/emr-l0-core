@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>L0 编辑器骨架 · 输入延迟与分页验证</title>
+<style>
+  :root { --ink:#1f2328; --line:#d0d7de; --muted:#656d76; --accent:#0969da; --bg:#f6f8fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.7 "Microsoft YaHei","PingFang SC",sans-serif; color:var(--ink); background:var(--bg); }
+  header { position:sticky; top:0; z-index:10; background:#fff; border-bottom:1px solid var(--line); padding:8px 14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:14px; margin:0 12px 0 0; font-weight:600; }
+  button { font:inherit; padding:4px 10px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .meta { margin-left:auto; color:var(--muted); font-size:12px; display:flex; gap:12px; flex-wrap:wrap; }
+  main { display:grid; grid-template-columns: minmax(0,1fr) 380px; gap:14px; padding:14px; align-items:start; }
+  #paper { background:#fff; border:1px solid var(--line); border-radius:4px; padding:16mm 18mm; min-height:200mm; }
+  .pg-break { border-top:1px dashed #b9c0c7; margin:18px 0; height:0; position:relative; }
+  .pg-break::after { content:"分页"; position:absolute; right:0; top:-10px; font-size:11px; color:var(--muted); background:#fff; padding:0 6px; }
+  h2.sec { font-size:16px; margin:14px 0 6px; padding-bottom:4px; border-bottom:1px solid var(--line); }
+  .pg { margin:6px 0; }
+  .text { min-height:1.7em; outline:none; }
+  .text:focus { background:#fff8c5; }
+  .field { display:flex; gap:8px; align-items:center; margin:4px 0; }
+  .field label { color:var(--muted); min-width:80px; }
+  .field input { font:inherit; padding:2px 6px; border:1px solid var(--line); border-radius:4px; width:140px; }
+  table.grid { border-collapse:collapse; margin:6px 0; }
+  table.grid td { border:1px solid var(--line); padding:4px 8px; }
+  aside { background:#fff; border:1px solid var(--line); border-radius:4px; padding:10px; max-height:calc(100vh - 90px); overflow:auto; }
+  aside h3 { margin:0 0 6px; font-size:13px; }
+  pre { font:12px/1.5 Consolas,monospace; background:var(--bg); padding:8px; border-radius:4px; overflow:auto; max-height:34vh; }
+  .res { font:12px/1.6 Consolas,monospace; white-space:pre-wrap; }
+  .ok { color:#1a7f37; } .bad { color:#cf222e; }
+  @media print {
+    header, aside { display:none; }
+    body { background:#fff; }
+    main { display:block; padding:0; }
+    #paper { border:0; padding:0; min-height:0; }
+    .pg-break { border-top:0; margin:0; page-break-after:always; height:0; }
+    .pg-break::after { content:""; }
+    .text:focus { background:transparent; }
+    @page { size:A4; margin:18mm; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>L0 编辑器骨架</h1>
+  <button id="btn-harness" class="primary">运行输入延迟测试</button>
+  <button id="btn-paginate">分页预览</button>
+  <button id="btn-print">打印</button>
+  <button id="btn-export-doc">导出文档 JSON</button>
+  <button id="btn-export-perf">导出延迟报告</button>
+  <span class="meta">
+    <span id="m-nodes">节点 0</span>
+    <span id="m-bytes">0 KB</span>
+    <span id="m-keys">键入 0</span>
+    <span id="m-dirty">未修改</span>
+  </span>
+</header>
+<main>
+  <div id="paper"></div>
+  <aside>
+    <h3>延迟报告</h3>
+    <div id="perf" class="res">尚未运行。</div>
+    <h3 style="margin-top:10px">当前文档模型（视图与数据分离的产物）</h3>
+    <pre id="model">—</pre>
+  </aside>
+</main>
+<script>
+/* =====================================================================
+ * L0 编辑器骨架（零依赖单文件）
+ * 目的：
+ *   1) 打通"模型 → 视图 → 编辑 → 回写模型"的最小闭环（视图与数据分离）；
+ *   2) 埋点测量输入延迟（键盘输入 → 下一帧渲染），把 S6 的 P11 从"未覆盖"变成可测；
+ *   3) 提供分页预览与打印 CSS 的骨架（视觉一致性仍需截图 diff，不在本页判定）。
+ * 注意：这是骨架，不是产品。它用于验证指标与暴露问题，不用于交付。
+ * ===================================================================== */
+
+const THRESHOLD_INPUT_MS = 50;
+
+/* ---------------------------- 合成文档 ---------------------------- */
+function buildDoc(sections = 12, paragraphsPerSection = 9) {
+  const at = '2026-10-08T01:00:00Z';
+  const prov = (origin) => ({ origin, actorId: origin === 'ai' ? 'ai-pipeline' : 'DR_DEMO', at });
+  const nodes = {};
+  let n = 0;
+  const id = (p) => `${p}_${(n += 1)}`;
+  const LOREM = '患者3天前无诱因出现咳嗽、咳痰，痰为白色黏痰，伴发热，最高体温38.5℃，无明显胸闷气促，否认药物及食物过敏史。';
+
+  nodes.n_root = { id: 'n_root', type: 'document', parentId: null, order: 0, rev: 1, provenance: prov('system') };
+
+  for (let s = 0; s < sections; s += 1) {
+    const secId = id('sec');
+    nodes[secId] = { id: secId, type: 'section', parentId: 'n_root', order: (s + 1) * 10, rev: 1, title: `第 ${s + 1} 节 · ${['主诉', '现病史', '既往史', '体格检查', '辅助检查', '初步诊断'][s % 6]}`, provenance: prov('human') };
+    let order = 10;
+    for (let p = 0; p < paragraphsPerSection; p += 1) {
+      const pId = id('p');
+      nodes[pId] = { id: pId, type: 'paragraph', parentId: secId, order: (order += 10), rev: 1, semantic: p % 2 ? 'physicalExam' : 'presentIllness', provenance: prov('human') };
+      const tId = id('t');
+      nodes[tId] = { id: tId, type: 'text', parentId: pId, order: 10, rev: 1, runs: [{ text: LOREM }], provenance: prov('human') };
+      if (p % 3 === 0) {
+        const fId = id('f');
+        nodes[fId] = { id: fId, type: 'field', parentId: pId, order: 20, rev: 1, dataType: 'number', value: 36.5 + (p % 4) * 0.3, valueText: String(36.5 + (p % 4) * 0.3), unit: '℃', tags: [{ system: 'WS445', code: `DE05.01.00${p}` }], provenance: prov('system') };
+      }
+      if (p === paragraphsPerSection - 1) {
+        const tbId = id('tb');
+        nodes[tbId] = { id: tbId, type: 'table', parentId: pId, order: 30, rev: 1, colCount: 3, headerRows: 1, provenance: prov('human') };
+        const rowId = id('tr');
+        nodes[rowId] = { id: rowId, type: 'tableRow', parentId: tbId, order: 10, rev: 1, provenance: prov('human') };
+        for (let c = 0; c < 3; c += 1) {
+          const cId = id('tc');
+          nodes[cId] = { id: cId, type: 'tableCell', parentId: rowId, order: (c + 1) * 10, rev: 1, provenance: prov('human') };
+          const ctId = id('tct');
+          nodes[ctId] = { id: ctId, type: 'text', parentId: cId, order: 10, rev: 1, runs: [{ text: `项目 ${s + 1}-${c + 1}` }], provenance: prov('human') };
+        }
+      }
+    }
+  }
+
+  return {
+    schemaVersion: '1.0.0',
+    docId: 'doc_editor_demo',
+    docType: { system: 'WST500', code: 'WST500.2', display: '门（急）诊病历' },
+    patient: { patientId: 'P_DEMO', nameMasked: '演**', gender: 'U' },
+    status: 'draft',
+    createdAt: at,
+    updatedAt: at,
+    createdBy: 'DR_DEMO',
+    rootId: 'n_root',
+    nodes,
+    revisions: [{ rev: 1, at, actorId: 'DR_DEMO', op: 'create', targetId: 'n_root' }],
+  };
+}
+
+const doc = buildDoc();
+let keyCount = 0;
+let dirty = false;
+
+/* 子节点索引（编辑器内核必备：parentId + order → 有序树） */
+function buildChildren() {
+  const map = new Map();
+  for (const node of Object.values(doc.nodes)) {
+    if (!node.parentId) continue;
+    if (!map.has(node.parentId)) map.set(node.parentId, []);
+    map.get(node.parentId).push(node);
+  }
+  for (const list of map.values()) list.sort((a, b) => a.order - b.order);
+  return map;
+}
+let children = buildChildren();
+
+/* ---------------------------- 渲染 ---------------------------- */
+const paper = document.getElementById('paper');
+
+function renderText(node) {
+  const el = document.createElement('div');
+  el.className = 'text';
+  el.contentEditable = 'true';
+  el.spellcheck = false;
+  el.dataset.nodeId = node.id;
+  el.textContent = node.runs?.map((r) => r.text).join('') ?? '';
+  return el;
+}
+
+function renderField(node) {
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  const label = document.createElement('label');
+  label.textContent = (node.tags?.[0]?.code || '字段') + (node.unit ? `(${node.unit})` : '');
+  const input = document.createElement('input');
+  input.value = node.valueText ?? String(node.value ?? '');
+  input.dataset.nodeId = node.id;
+  input.addEventListener('input', () => {
+    const raw = input.value;
+    doc.nodes[node.id].value = node.dataType === 'number' && raw !== '' && !Number.isNaN(Number(raw)) ? Number(raw) : raw;
+    doc.nodes[node.id].valueText = raw;
+    markDirty();
+  });
+  wrap.append(label, input);
+  return wrap;
+}
+
+function renderNode(node) {
+  if (node.type === 'section') {
+    // 章节 = 标题 + 子节点（早期版本漏渲染子节点，导致找不到可编辑文本 —— 由 harness 的诊断发现）
+    const frag = document.createDocumentFragment();
+    const h = document.createElement('h2');
+    h.className = 'sec';
+    h.textContent = node.title || '（未命名章节）';
+    frag.append(h);
+    for (const kid of children.get(node.id) || []) frag.append(renderNode(kid));
+    return frag;
+  }
+  if (node.type === 'paragraph') {
+    const div = document.createElement('div');
+    div.className = 'pg';
+    for (const kid of children.get(node.id) || []) div.append(renderNode(kid));
+    return div;
+  }
+  if (node.type === 'text') return renderText(node);
+  if (node.type === 'field') return renderField(node);
+  if (node.type === 'table') {
+    const table = document.createElement('table');
+    table.className = 'grid';
+    for (const row of children.get(node.id) || []) {
+      const tr = document.createElement('tr');
+      for (const cell of children.get(row.id) || []) {
+        const td = document.createElement('td');
+        for (const kid of children.get(cell.id) || []) td.append(renderNode(kid));
+        tr.append(td);
+      }
+      table.append(tr);
+    }
+    return table;
+  }
+  return document.createTextNode('');
+}
+
+function renderAll() {
+  const t0 = performance.now();
+  children = buildChildren();
+  paper.replaceChildren(...(children.get(doc.rootId) || []).map(renderNode));
+  return performance.now() - t0;
+}
+
+function markDirty() {
+  dirty = true;
+  document.getElementById('m-dirty').textContent = '已修改';
+  updateMeta();
+}
+
+/* 编辑 → 回写模型（视图与数据分离：DOM 是视图，doc 是数据） */
+paper.addEventListener('input', (e) => {
+  const el = e.target.closest('.text');
+  if (!el) return;
+  const node = doc.nodes[el.dataset.nodeId];
+  if (!node) return;
+  node.runs = [{ text: el.textContent }];
+  node.rev += 1;
+  node.provenance = { origin: 'human', actorId: 'DR_DEMO', at: new Date().toISOString() };
+  keyCount += 1;
+  markDirty();
+});
+
+/* ---------------------------- 元信息 ---------------------------- */
+function updateMeta() {
+  const bytes = new Blob([JSON.stringify(doc)]).size;
+  document.getElementById('m-nodes').textContent = `节点 ${Object.keys(doc.nodes).length}`;
+  document.getElementById('m-bytes').textContent = `${(bytes / 1024).toFixed(1)} KB`;
+  document.getElementById('m-keys').textContent = `键入 ${keyCount}`;
+  document.getElementById('model').textContent = JSON.stringify(doc, null, 1).slice(0, 1800) + '\n…（已截断）';
+}
+
+/* ---------------------------- 分页预览 ---------------------------- */
+/* 骨架实现：按纸张可用高度累计块级元素高度，在溢出处插入分页标记。
+   真实产品需要在排版引擎层做断行/断页控制，此处只验证"可测量、可打印"。 */
+const PAGE_CONTENT_PX = 1000; // ≈ A4 高度 297mm 减去上下边距后的可用像素（视 DPR 而变）
+function paginate() {
+  document.querySelectorAll('.pg-break').forEach((el) => el.remove());
+  const blocks = [...paper.children];
+  let used = 0;
+  let pages = 1;
+  for (const b of blocks) {
+    const h = b.getBoundingClientRect().height;
+    if (used + h > PAGE_CONTENT_PX && used > 0) {
+      const br = document.createElement('div');
+      br.className = 'pg-break';
+      paper.insertBefore(br, b);
+      pages += 1;
+      used = h;
+    } else {
+      used += h;
+    }
+  }
+  return pages;
+}
+
+/* ---------------------------- 输入延迟埋点 ---------------------------- */
+function stats(samples) {
+  const s = [...samples].sort((a, b) => a - b);
+  const pick = (q) => s[Math.min(s.length - 1, Math.max(0, Math.ceil(q * s.length) - 1))];
+  return {
+    n: s.length,
+    avg: s.reduce((x, y) => x + y, 0) / s.length,
+    p50: pick(0.5),
+    p95: pick(0.95),
+    max: s[s.length - 1],
+    over: s.filter((v) => v > THRESHOLD_INPUT_MS).length,
+  };
+}
+
+/** 等待下一帧；无头/后台标签页可能不触发 rAF，超时后降级并记录（避免测量卡死） */
+function nextFrame(timeoutMs = 250) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (how) => {
+      if (!done) {
+        done = true;
+        resolve(how);
+      }
+    };
+    requestAnimationFrame(() => finish('raf'));
+    setTimeout(() => finish('timeout'), timeoutMs);
+  });
+}
+
+/**
+ * 输入延迟 = 从写入命令发出 到 下一帧渲染完成 的时间。
+ * 之所以用 execCommand('insertText')：它会触发与真实键入相同的 input 事件链，
+ * 因此模型回写（input 监听器）被计入测量，避免"只测 DOM 不测业务"的假快。
+ * 返回 { samples, timeouts }；找不到可编辑节点时返回 null（并写入诊断）。
+ */
+async function measureInputLatency(iterations = 120) {
+  const target = paper.querySelector('.text[contenteditable]');
+  if (!target) return null;
+  target.focus();
+  const samples = [];
+  let timeouts = 0;
+  for (let i = 0; i < iterations; i += 1) {
+    const t0 = performance.now();
+    document.execCommand('insertText', false, '文');
+    const how = await nextFrame();
+    if (how === 'timeout') timeouts += 1;
+    samples.push(performance.now() - t0);
+  }
+  return { samples, timeouts };
+}
+
+async function runHarness(iterations = 120) {
+  const box = document.getElementById('perf');
+  box.textContent = '运行中…';
+  const warnings = [];
+  const inputRaw = await measureInputLatency(iterations);
+  const input = inputRaw ? stats(inputRaw.samples) : null;
+  if (!inputRaw) warnings.push('未找到可编辑文本节点（检查渲染是否完整），输入延迟未测得');
+  else if (inputRaw.timeouts > 0) warnings.push(`${inputRaw.timeouts}/${iterations} 次未等到动画帧（可能是无头浏览器或后台标签页），数值仅验证链路可用`);
+
+  const serializeSamples = [];
+  for (let i = 0; i < 5; i += 1) {
+    const t0 = performance.now();
+    JSON.stringify(doc);
+    serializeSamples.push(performance.now() - t0);
+  }
+  const renderSamples = [];
+  for (let i = 0; i < 3; i += 1) renderSamples.push(renderAll());
+
+  const report = {
+    tool: 'editor-latency-harness',
+    version: '1.0.0',
+    generatedAt: new Date().toISOString(),
+    env: {
+      userAgent: navigator.userAgent,
+      headless: /Headless/i.test(navigator.userAgent),
+      devicePixelRatio: window.devicePixelRatio,
+      hardwareConcurrency: navigator.hardwareConcurrency,
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+    },
+    doc: { nodes: Object.keys(doc.nodes).length, bytes: new Blob([JSON.stringify(doc)]).size, published: dirty },
+    thresholdMs: THRESHOLD_INPUT_MS,
+    warnings,
+    input,
+    serialize: stats(serializeSamples),
+    render: stats(renderSamples),
+  };
+  window.__LATENCY_REPORT__ = report;
+
+  const verdict = input && input.p95 <= THRESHOLD_INPUT_MS ? 'PASS' : 'FAIL';
+  box.innerHTML =
+    `<span class="${verdict === 'PASS' ? 'ok' : 'bad'}">输入延迟 P95 ${input ? input.p95.toFixed(1) : '—'} ms（阈值 ${THRESHOLD_INPUT_MS} ms）→ ${verdict}</span>\n` +
+    (warnings.length ? `⚠ ${warnings.join('；')}\n` : '') +
+    (report.env.headless ? '⚠ 无头浏览器：数值不具代表性，仅证明链路可用\n' : '') +
+    `输入：n=${input ? input.n : 0} avg=${input ? input.avg.toFixed(2) : '—'} p50=${input ? input.p50.toFixed(2) : '—'} max=${input ? input.max.toFixed(2) : '—'} 超阈 ${input ? input.over : 0} 次\n` +
+    `序列化(整文档)：avg=${report.serialize.avg.toFixed(2)} ms\n` +
+    `整页重渲染：avg=${report.render.avg.toFixed(1)} ms\n` +
+    `文档：${report.doc.nodes} 节点 / ${(report.doc.bytes / 1024).toFixed(1)} KB\n` +
+    `环境：DPR ${report.env.devicePixelRatio} / 核心 ${report.env.hardwareConcurrency} / ${report.env.viewport}`;
+
+  // 若通过 HTTP 服务打开，回传结果给本地收集器
+  if (location.protocol.startsWith('http')) {
+    try {
+      await fetch('/result', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(report) });
+      box.textContent += '\n结果已回传至服务端（tools/editor-check/samples/latency-report.json）';
+    } catch (err) {
+      box.textContent += `\n回传失败（可手动导出）：${err.message}`;
+    }
+  }
+  return report;
+}
+
+/* ---------------------------- 导出 ---------------------------- */
+function download(name, text, type = 'application/json') {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('btn-harness').addEventListener('click', () => runHarness());
+document.getElementById('btn-paginate').addEventListener('click', () => {
+  const pages = paginate();
+  document.getElementById('btn-paginate').textContent = `分页预览（${pages} 页）`;
+});
+document.getElementById('btn-print').addEventListener('click', () => window.print());
+document.getElementById('btn-export-doc').addEventListener('click', () => download('editor-doc-export.json', JSON.stringify(doc, null, 2)));
+document.getElementById('btn-export-perf').addEventListener('click', () =>
+  download('latency-report.json', JSON.stringify(window.__LATENCY_REPORT__ || { error: '尚未运行测试' }, null, 2)),
+);
+
+renderAll();
+updateMeta();
+
+/* 自动运行（供无头浏览器或 CI 使用）：/?autorun=1
+   注意：无头浏览器时间线不具代表性，其数值只能验证链路可用，
+   真实验收必须在目标终端（医院老 PC / 信创机）上手动运行。 */
+if (new URLSearchParams(location.search).has('autorun')) {
+  setTimeout(async () => {
+    const report = await runHarness(120);
+    const p95 = report?.input?.p95;
+    document.title = `LATENCY_P95=${typeof p95 === 'number' ? p95.toFixed(2) : 'NA'}ms VERDICT=${typeof p95 === 'number' && p95 <= THRESHOLD_INPUT_MS ? 'PASS' : 'FAIL'}`;
+    window.__HARNESS_DONE__ = true;
+  }, 300);
+}
+</script>
+</body>
+</html>

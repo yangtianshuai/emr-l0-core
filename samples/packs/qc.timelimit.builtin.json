@@ -1,0 +1,67 @@
+{
+  "packId": "qc.timelimit.builtin",
+  "kind": "rule",
+  "name": "时限类质控规则（内置）",
+  "engineApi": "qc-rule/1",
+  "vendor": "本系统内置",
+  "scope": "general",
+  "description": "入院记录 24 小时内完成 / 首次病程记录 8 小时内完成 / 病程记录间隔不超过 24 小时 / 入院后 24 小时内须有入院记录。前两条按系统内写入时刻判定（导入件不判定）；后两条是跨文书判定，需要调用方给出该就诊的文书清单，拿不到则如实上报\"未判定\"。",
+  "items": [
+    {
+      "itemId": "R-TIME-01",
+      "title": "入院记录未在入院后 24 小时内完成",
+      "severity": "warn",
+      "predicate": {
+        "kind": "document-time-limit",
+        "params": {
+          "limitHours": 24,
+          "docTypeCode": "WST500.1",
+          "visitType": "inpatient"
+        }
+      },
+      "enabled": true
+    },
+    {
+      "itemId": "R-TIME-02",
+      "title": "首次病程记录未在入院后 8 小时内完成",
+      "severity": "warn",
+      "predicate": {
+        "kind": "document-time-limit",
+        "params": {
+          "limitHours": 8,
+          "docTypeCode": "WST500.3",
+          "visitType": "inpatient"
+        }
+      },
+      "enabled": true
+    },
+    {
+      "itemId": "R-TIME-03",
+      "title": "病程记录间隔超过 24 小时（住院期间）",
+      "severity": "warn",
+      "predicate": {
+        "kind": "visit-doc-interval",
+        "params": {
+          "docTypeCode": "WST500.3",
+          "maxGapHours": 24,
+          "visitType": "inpatient"
+        }
+      },
+      "enabled": true
+    },
+    {
+      "itemId": "R-TIME-04",
+      "title": "入院后 24 小时内没有入院记录",
+      "severity": "warn",
+      "predicate": {
+        "kind": "visit-doc-required",
+        "params": {
+          "docTypeCode": "WST500.1",
+          "withinHours": 24,
+          "visitType": "inpatient"
+        }
+      },
+      "enabled": true
+    }
+  ]
+}

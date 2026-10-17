@@ -1,0 +1,45 @@
+{
+  "tool": "editor-latency-harness",
+  "version": "1.0.0",
+  "generatedAt": "2026-10-08T01:46:19.178Z",
+  "env": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36 Edg/154.0.0.0",
+    "headless": true,
+    "devicePixelRatio": 1,
+    "hardwareConcurrency": 20,
+    "viewport": "756x488"
+  },
+  "doc": {
+    "nodes": 361,
+    "bytes": 86197,
+    "published": true
+  },
+  "thresholdMs": 50,
+  "warnings": [
+    "99/120 次未等到动画帧（可能是无头浏览器或后台标签页），数值仅验证链路可用"
+  ],
+  "input": {
+    "n": 120,
+    "avg": 206.2508333325386,
+    "p50": 250,
+    "p95": 250.09999990463257,
+    "max": 250.09999990463257,
+    "over": 99
+  },
+  "serialize": {
+    "n": 5,
+    "avg": 0,
+    "p50": 0,
+    "p95": 0,
+    "max": 0,
+    "over": 0
+  },
+  "render": {
+    "n": 3,
+    "avg": 0,
+    "p50": 0,
+    "p95": 0,
+    "max": 0,
+    "over": 0
+  }
+}

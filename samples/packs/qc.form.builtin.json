@@ -1,0 +1,38 @@
+{
+  "packId": "qc.form.builtin",
+  "kind": "rule",
+  "name": "形式类质控规则（内置）",
+  "engineApi": "qc-rule/1",
+  "vendor": "本系统内置",
+  "scope": "general",
+  "description": "缺记录时间 / 必填为空 / 占位符未替换。只报不阻断，产出走旁挂注解。",
+  "items": [
+    {
+      "itemId": "R-FORM-01",
+      "title": "本段缺少记录时间",
+      "severity": "warn",
+      "predicate": {
+        "kind": "text-missing-time"
+      },
+      "enabled": true
+    },
+    {
+      "itemId": "R-FORM-02",
+      "title": "必填数据元的段落内容为空",
+      "severity": "warn",
+      "predicate": {
+        "kind": "tagged-empty-text"
+      },
+      "enabled": true
+    },
+    {
+      "itemId": "R-FORM-03",
+      "title": "模板占位符未替换",
+      "severity": "warn",
+      "predicate": {
+        "kind": "placeholder-residue"
+      },
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,366 @@
+{
+  "schemaVersion": "1.0.0",
+  "docId": "doc_contract_001",
+  "docType": {
+    "system": "WST500",
+    "code": "WST500.2",
+    "display": "门（急）诊病历"
+  },
+  "patient": {
+    "patientId": "P9001",
+    "nameMasked": "张**",
+    "gender": "M"
+  },
+  "encounter": {
+    "visitId": "V001",
+    "visitType": "outpatient"
+  },
+  "status": "signed",
+  "createdAt": "2026-10-08T01:00:00Z",
+  "updatedAt": "2026-10-08T01:00:08Z",
+  "createdBy": "DR_T",
+  "rootId": "n_root",
+  "nodes": {
+    "n_root": {
+      "id": "n_root",
+      "type": "document",
+      "parentId": null,
+      "order": 0,
+      "rev": 1,
+      "provenance": {
+        "origin": "system",
+        "actorId": "seed",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "n_sec": {
+      "id": "n_sec",
+      "type": "section",
+      "parentId": "n_root",
+      "order": 10,
+      "rev": 1,
+      "title": "初步诊断",
+      "sectionCode": "assessment",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "n_p": {
+      "id": "n_p",
+      "type": "paragraph",
+      "parentId": "n_sec",
+      "order": 10,
+      "rev": 1,
+      "semantic": "assessment",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "n_t": {
+      "id": "n_t",
+      "type": "text",
+      "parentId": "n_p",
+      "order": 10,
+      "rev": 3,
+      "runs": [
+        {
+          "text": "结合病史与体征，考虑社区获得性肺炎，建议抗感染治疗并复查。"
+        }
+      ],
+      "provenance": {
+        "origin": "ai",
+        "modelId": "local/qwen-med:7b@2026-09",
+        "promptId": "tpl-assessment-v3",
+        "confidence": 0.96,
+        "evidence": [
+          {
+            "kind": "lis",
+            "ref": "LIS:20261008-0100:WBC",
+            "valueText": "9.8"
+          }
+        ],
+        "acceptedBy": "DR_T",
+        "acceptedAt": "2026-10-08T01:00:02Z",
+        "suggestionId": "sg_0001",
+        "at": "2026-10-08T01:00:02Z"
+      },
+      "humanConfirmed": true
+    },
+    "n_f": {
+      "id": "n_f",
+      "type": "field",
+      "parentId": "n_sec",
+      "order": 20,
+      "rev": 1,
+      "dataType": "code",
+      "value": "J18.9",
+      "valueText": "肺炎",
+      "keyContent": true,
+      "humanConfirmed": true,
+      "tags": [
+        {
+          "system": "ICD10",
+          "code": "J18.9",
+          "display": "肺炎"
+        }
+      ],
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    },
+    "n_f2": {
+      "id": "n_f2",
+      "type": "field",
+      "parentId": "n_sec",
+      "order": 30,
+      "rev": 2,
+      "dataType": "number",
+      "value": 38.7,
+      "valueText": "38.7",
+      "unit": "℃",
+      "tags": [
+        {
+          "system": "WS445",
+          "code": "DE05.01.001",
+          "display": "体温"
+        }
+      ],
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:00:05Z"
+      }
+    },
+    "n_sig": {
+      "id": "n_sig",
+      "type": "signatureBlock",
+      "parentId": "n_root",
+      "order": 90,
+      "rev": 1,
+      "signerRole": "author",
+      "provenance": {
+        "origin": "human",
+        "actorId": "DR_T",
+        "at": "2026-10-08T01:00:00Z"
+      }
+    }
+  },
+  "revisions": [
+    {
+      "rev": 1,
+      "at": "2026-10-08T01:00:00Z",
+      "actorId": "DR_T",
+      "op": "create",
+      "targetId": "n_root"
+    },
+    {
+      "rev": 2,
+      "at": "2026-10-08T01:00:03Z",
+      "actorId": "DR_T",
+      "op": "accept-ai",
+      "targetId": "n_t",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_t/rev",
+          "value": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_t/runs/0/text",
+          "value": "结合病史与体征，考虑社区获得性肺炎，建议抗感染治疗并复查。"
+        },
+        {
+          "op": "remove",
+          "path": "/nodes/n_t/provenance/actorId"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_t/provenance/origin",
+          "value": "ai"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/provenance/modelId",
+          "value": "local/qwen-med:7b@2026-09"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/provenance/promptId",
+          "value": "tpl-assessment-v3"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/provenance/confidence",
+          "value": 0.96
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/provenance/evidence",
+          "value": [
+            {
+              "kind": "lis",
+              "ref": "LIS:20261008-0100:WBC",
+              "valueText": "9.8"
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/provenance/acceptedBy",
+          "value": "DR_T"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/provenance/acceptedAt",
+          "value": "2026-10-08T01:00:02Z"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/provenance/suggestionId",
+          "value": "sg_0001"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_t/provenance/at",
+          "value": "2026-10-08T01:00:02Z"
+        },
+        {
+          "op": "add",
+          "path": "/nodes/n_t/humanConfirmed",
+          "value": false
+        }
+      ],
+      "aiSuggestionId": "sg_0001",
+      "modelId": "local/qwen-med:7b@2026-09",
+      "confidence": 0.96
+    },
+    {
+      "rev": 3,
+      "at": "2026-10-08T01:00:04Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_t",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_t/rev",
+          "value": 3
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_t/humanConfirmed",
+          "value": true
+        }
+      ]
+    },
+    {
+      "rev": 4,
+      "at": "2026-10-08T01:00:06Z",
+      "actorId": "DR_T",
+      "op": "update",
+      "targetId": "n_f2",
+      "patch": [
+        {
+          "op": "replace",
+          "path": "/nodes/n_f2/rev",
+          "value": 2
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_f2/value",
+          "value": 38.7
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_f2/valueText",
+          "value": "38.7"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_f2/provenance/origin",
+          "value": "human"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_f2/provenance/actorId",
+          "value": "DR_T"
+        },
+        {
+          "op": "replace",
+          "path": "/nodes/n_f2/provenance/at",
+          "value": "2026-10-08T01:00:05Z"
+        }
+      ]
+    },
+    {
+      "rev": 5,
+      "at": "2026-10-08T01:00:08Z",
+      "actorId": "DR_T",
+      "op": "sign",
+      "targetId": "n_root",
+      "patch": []
+    }
+  ],
+  "signatureRefs": [
+    {
+      "signatureRef": "sig_test",
+      "signerRole": "author",
+      "signerId": "DR_T",
+      "signedAt": "2026-10-08T01:00:07Z",
+      "covers": [
+        "Document.xml",
+        "Pages/Page_0/Content.xml",
+        "MachineReadable.xml"
+      ]
+    }
+  ],
+  "machineReadable": {
+    "generatedAt": "2026-10-08T01:00:06Z",
+    "generator": "doc-store/0.1",
+    "modelSchemaVersion": "1.0.0",
+    "sourceHash": "da514f5746f42ec78d6385d5e6da884b",
+    "dataElements": [
+      {
+        "tag": {
+          "system": "ICD10",
+          "code": "J18.9",
+          "display": "肺炎"
+        },
+        "value": "J18.9",
+        "nodeId": "n_f",
+        "origin": "human",
+        "valueText": "肺炎"
+      },
+      {
+        "tag": {
+          "system": "WS445",
+          "code": "DE05.01.001",
+          "display": "体温"
+        },
+        "value": 38.7,
+        "nodeId": "n_f2",
+        "origin": "human",
+        "valueText": "38.7",
+        "unit": "℃"
+      }
+    ],
+    "keyContentRefs": [
+      {
+        "nodeId": "n_f",
+        "present": true,
+        "tag": {
+          "system": "ICD10",
+          "code": "J18.9",
+          "display": "肺炎"
+        }
+      }
+    ]
+  }
+}

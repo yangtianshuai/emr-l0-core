@@ -1,0 +1,165 @@
+{
+  "tool": "perf-check",
+  "version": "1.0.0",
+  "generatedAt": "2026-10-08T02:04:09.710Z",
+  "env": {
+    "node": "v24.20.0",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "12th Gen Intel(R) Core(TM) i7-12700"
+  },
+  "scale": {
+    "pages": 60,
+    "nodes": 1921,
+    "bytes": 586472,
+    "iter": 20,
+    "batch": 1000
+  },
+  "checks": [
+    {
+      "id": "P0",
+      "name": "patch 策略等价性（local vs full）",
+      "metric": "语义一致",
+      "value": 0,
+      "threshold": 0,
+      "unit": "bool",
+      "critical": true,
+      "pass": true,
+      "detail": "留痕数 local=9 / full=9，最终文档完全一致"
+    },
+    {
+      "id": "P1",
+      "name": "文档加载 + 建索引",
+      "metric": "avg",
+      "value": 2.886749999999997,
+      "threshold": 3000,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "1921 节点 / 0.56 MB"
+    },
+    {
+      "id": "P2",
+      "name": "全量子树遍历（等价 getSubtree）",
+      "metric": "avg",
+      "value": 0.15198499999999768,
+      "threshold": 300,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "遍历 1921 节点"
+    },
+    {
+      "id": "P3",
+      "name": "getNode 单节点读取",
+      "metric": "p95",
+      "value": 0.003200000000006753,
+      "threshold": 1,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "avg=0.002ms"
+    },
+    {
+      "id": "P4",
+      "name": "insertText 单次写入",
+      "metric": "p95",
+      "value": 0.04019999999999868,
+      "threshold": 20,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "avg=0.057ms  (1921 节点文档)"
+    },
+    {
+      "id": "P4b",
+      "name": "参照：同一写入在 full（全量 diff）策略下",
+      "metric": "avg",
+      "value": 5.9034299999999975,
+      "threshold": 20,
+      "unit": "ms",
+      "critical": false,
+      "pass": true,
+      "detail": "local=0.057ms  vs  full=5.903ms，提速约 103 倍（写路径必须与文档规模无关）"
+    },
+    {
+      "id": "P5",
+      "name": "updateNodeProps 单次写入",
+      "metric": "p95",
+      "value": 0.033899999999988495,
+      "threshold": 20,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "avg=0.016ms"
+    },
+    {
+      "id": "P6",
+      "name": "exportMachineReadable",
+      "metric": "avg",
+      "value": 4.980189999999998,
+      "threshold": 500,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "900 个数据元"
+    },
+    {
+      "id": "P7",
+      "name": "整文档节点级 diff",
+      "metric": "avg",
+      "value": 1.9712649999999967,
+      "threshold": 200,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "1921 节点"
+    },
+    {
+      "id": "P8",
+      "name": "节点内容指纹 hashNodes",
+      "metric": "avg",
+      "value": 2.900675000000004,
+      "threshold": 100,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "对 1921 节点计算"
+    },
+    {
+      "id": "P9",
+      "name": "JSON 序列化往返",
+      "metric": "avg",
+      "value": 3.7596249999999913,
+      "threshold": 500,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "0.56 MB"
+    },
+    {
+      "id": "P10",
+      "name": "批量 1000 次写入（含留痕）",
+      "metric": "avg/次",
+      "value": 0.011120699999999999,
+      "threshold": 20,
+      "unit": "ms",
+      "critical": true,
+      "pass": true,
+      "detail": "留痕 1001 条"
+    },
+    {
+      "id": "P11",
+      "name": "输入延迟（键盘 → 呈现）",
+      "metric": "—",
+      "value": 0,
+      "threshold": 50,
+      "unit": "ms",
+      "critical": false,
+      "pass": true,
+      "skipped": true,
+      "detail": "未覆盖：需浏览器实测。用 tools/editor-check/editor-latency-server.mjs 打开骨架页面运行测试，再以 --browser-report 传入本脚本"
+    }
+  ],
+  "verdict": "PASS"
+}

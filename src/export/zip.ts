@@ -1,0 +1,115 @@
+/**
+ * 极小 ZIP 写入器（store 方式，不压缩），零依赖。
+ *
+ * 为什么自己写：OFD 本质就是 ZIP 容器，而 L0 要求"零 npm 依赖"（医院内网装机环境
+ * 常常无法联网装包）。store 方式不压缩，实现简单且**字节可复现**——同一份文档两次导出
+ * 得到完全相同的字节，便于做内容寻址与跨实现比对。
+ *
+ * 只实现写入（我们只产出 OFD，解包交给 tar/unzip/PowerShell）。
+ */
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let value = i;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+    }
+    table[i] = value >>> 0;
+  }
+  return table;
+})();
+
+export function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i += 1) crc = CRC_TABLE[(crc ^ bytes[i]!) & 0xff]! ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const encoder = new TextEncoder();
+
+export interface ZipEntry {
+  path: string;
+  data: string | Uint8Array;
+}
+
+function toDosDateTime(date: Date): { time: number; date: number } {
+  const time = ((date.getHours() & 0x1f) << 11) | ((date.getMinutes() & 0x3f) << 5) | (Math.floor(date.getSeconds() / 2) & 0x1f);
+  const d = (((date.getFullYear() - 1980) & 0x7f) << 9) | (((date.getMonth() + 1) & 0x0f) << 5) | (date.getDate() & 0x1f);
+  return { time, date: d };
+}
+
+/** 构建 ZIP 字节流（store 方式） */
+export function buildZip(entries: ZipEntry[], options: { date?: Date } = {}): Uint8Array {
+  const date = options.date ?? new Date('2026-10-08T00:00:00Z');
+  const { time, date: dosDate } = toDosDateTime(date);
+
+  const locals: Uint8Array[] = [];
+  const centrals: Uint8Array[] = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const nameBytes = encoder.encode(entry.path);
+    const dataBytes = typeof entry.data === 'string' ? encoder.encode(entry.data) : entry.data;
+    const crc = crc32(dataBytes);
+
+    const local = new Uint8Array(30 + nameBytes.length + dataBytes.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); // 本地文件头签名
+    lv.setUint16(4, 20, true); // 版本
+    lv.setUint16(6, 0x0800, true); // 通用标志：UTF-8 文件名
+    lv.setUint16(8, 0, true); // 压缩方式：store
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, dataBytes.length, true);
+    lv.setUint32(22, dataBytes.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true); // 扩展字段长度
+    local.set(nameBytes, 30);
+    local.set(dataBytes, 30 + nameBytes.length);
+    locals.push(local);
+
+    const central = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true); // 中央目录签名
+    cv.setUint16(4, 20, true); // 创建版本
+    cv.setUint16(6, 20, true); // 所需版本
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, time, true);
+    cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, dataBytes.length, true);
+    cv.setUint32(24, dataBytes.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true); // 扩展字段
+    cv.setUint16(32, 0, true); // 注释长度
+    cv.setUint16(34, 0, true); // 磁盘号
+    cv.setUint16(36, 0, true); // 内部属性
+    cv.setUint32(38, 0, true); // 外部属性
+    cv.setUint32(42, offset, true); // 本地头偏移
+    central.set(nameBytes, 46);
+    centrals.push(central);
+
+    offset += local.length;
+  }
+
+  const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); // EOCD 签名
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+
+  const total = offset + centralSize + end.length;
+  const out = new Uint8Array(total);
+  let cursor = 0;
+  for (const part of [...locals, ...centrals, end]) {
+    out.set(part, cursor);
+    cursor += part.length;
+  }
+  return out;
+}
