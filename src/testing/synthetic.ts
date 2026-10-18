@@ -1,14 +1,4 @@
-/**
- * 合成文档生成器（测试夹具）。
- *
- * 用途：为索引层、写路径、性能测试提供**合法**的大文档（能通过 validateDocument），
- * 避免测试只能跑几十个节点的小样例，暴露不出 O(n) 与 O(n²) 的区别。
- *
- * 约定：
- *   - 全部节点具备 provenance（否则语义校验会报 E_AI_NO_PROVENANCE）；
- *   - 不生成 machineReadable（避免陈旧判定干扰），需要时由被测代码自行派生；
- *   - revisions 只有一条 create，保证 rev 连续。
- */
+// 合成文档生成器（测试夹具）。
 
 import { SCHEMA_VERSION, type DocNode, type DocumentModel, type JsonValue, type NodeId, type ProvenanceOrigin } from '../model/types.ts';
 

@@ -1,15 +1,4 @@
-/**
- * 形式类质控规则包自测（Q1~Q6）。
- *
- * 说明：本套件**全部离线、不需要文档模型**（引擎只吃 `nodes`），也不连任何服务 ——
- * 这正是形式类质控该有的性质：规则是可判定的纯函数，跑一次是毫秒级的事。
- *
- * 重点锁死的五条：
- *   Q1 **纯函数**：同输入两次结果完全一致、且**不修改输入**（有副作用就没法穷举验证）；
- *   Q2/Q3/Q4 三条规则各自的**保守方向**（宁可不报，不可误报）；
- *   Q5 每条命中都**可解释**（带规则号与判定依据，医生据此复核）；
- *   Q6 `severity` 只是展示级别：**不阻断写、不阻断签章**（引擎压根没有这个能力）。
- */
+// 形式类质控规则包自测（Q1~Q6）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { fileURLToPath } from 'node:url';
@@ -21,14 +10,6 @@ import type { QcRulePack } from './types.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
-/**
- * 本套件用的规则集：**就是样例包里那一份**（`samples/packs/qc.form.builtin.json`），
- * 走的是与生产完全相同的编译路径。
- *
- * 引擎的 `rules` 现在**必填**（`form-rules.ts` 里那个 `FORM_RULES` 兜底已经删掉）——
- * 兜底会把"这台机器一个规则包都没装"悄悄变成"用内置那套跑"。
- * 这里显式给规则，就是在替测试里的"这台机器"声明它装了哪一份包。
- */
 const FORM_RULES: QcRule[] = compileRulePack(readSamplePack(ROOT, SAMPLE_PACK_FILES.formRules) as QcRulePack);
 
 const suite = new TestSuite('形式类质控规则包自测', [
@@ -59,19 +40,11 @@ function viewOf(text: string, extra: Partial<QcNodeView> = {}): QcNodeView {
 }
 
 /**
- * 判定上下文。**显式写死一个时刻**：形式类这三条规则用不到它，但引擎契约要求传 ——
+ * 判定上下文。显式写死一个时刻：形式类这三条规则用不到它，但引擎契约要求传 ——
  * 而"写死"正是重点：判定结果不该随运行时刻变化，否则"同一份病历跑两次结论不同"就无从复核。
- */
+  */
 const TEST_CTX: QcContext = { now: '2026-10-12T00:00:00Z' };
 
-/**
- * 把判定的**三态**收敛成用例能断言的两态：
- * 命中 → 命中内容；不适用 → `null`；**"判不了" → 直接让用例失败**。
- *
- * 为什么第三种要失败而不是当成 null：形式类规则没有任何"判不了"的理由。
- * 若哪天它开始返回"判不了"，那说明有新情况混进了这条规则 —— 用例就该拦下来看，
- * 而不是把它悄悄读成"没问题"。
- */
 function checkOrNull(rule: QcRule, view: QcNodeView): { detail: string; suggestion: string; quote?: string } | null {
   const result = rule.check(view, TEST_CTX);
   assert(!(result && 'uncertain' in result), `形式类规则不该出现"判不了"：${result && 'uncertain' in result ? result.uncertain : ''}`);
@@ -184,12 +157,12 @@ async function main(): Promise<void> {
   });
 
   await test('Q6 只报不阻断：severity 仅是展示级别，引擎没有落笔/拦截能力', () => {
-    /* 结构级证明：引擎的返回值只有命中列表与计数，**没有任何写操作通道**。
+    /* 结构级证明：引擎的返回值只有命中列表与计数，没有任何写操作通道。
        它不是"我们承诺不阻断"，而是"它拿不到能阻断的东西" ——
-       一旦让规则间接拥有流程控制权，一条误报就会让病历签不出去，而临床不会等规则。 */
+       一旦让规则间接拥有流程控制权，一条误报就会让病历签不出去，而临床不会等规则。  */
     const result = runFormRules(nodesOf({ n_1: textNode('n_1', '患者三天前出现咳嗽。') }), TEST_CTX, FORM_RULES);
-    /* 产出里**仍然没有任何"是否放行/是否阻断"的字段**；`unevaluated` 是**报告**不是闸门 ——
-       它只说明"这几条没判成"，改不了"能不能签、能不能存"（引擎手里没有那样的能力）。 */
+    /* 产出里仍然没有任何"是否放行/是否阻断"的字段；`unevaluated` 是报告不是闸门 ——
+       它只说明"这几条没判成"，改不了"能不能签、能不能存"（引擎手里没有那样的能力）。  */
     assertEqual(
       Object.keys(result).sort(),
       ['hits', 'rules', 'scannedNodes', 'unevaluated'],

@@ -1,20 +1,4 @@
-/**
- * T02 · 节点索引层。
- *
- * 职责：为编辑器内核提供 O(1)~O(log n) 的结构查询，避免每次渲染/校验都全量扫描节点。
- *   - children：parentId → 有序子节点（按 order 升序，order 相同按 id 升序保证确定性）
- *   - parents / orderById：反向与排序所需
- *   - tags：`system:code` → 节点集合（机读导出、质控规则大量使用）
- *   - origins / types / keyContent：审计统计与签名前检查使用
- *
- * 设计取舍（重要）：
- *   1) **不缓存 depth**：深度按需沿 parents 上溯计算。缓存 depth 需要在移动/删除时维护整棵子树，
- *      是本模块最易出错的地方；而单节点深度通常只有十几层，按需计算足够快且永远正确。
- *   2) **删除节点不级联**：删一个节点后其子节点 parentId 指向已不存在的节点（孤儿），
- *      由 unreachable() 统一查出。级联删除交由 removeSubtree() 显式调用 —— 隐式级联是数据事故的常见来源。
- *   3) **fingerprint()** 提供结构指纹，用于断言"增量维护 == 全量重建"。索引层的 bug 往往表现为
- *      长时间运行后才不一致，只有等价性断言能提前抓住。
- */
+// T02 · 节点索引层。
 
 import { hashValue } from './hash.ts';
 import type { DocNode, JsonValue, NodeId, NodeType, ProvenanceOrigin, TagSystem } from './types.ts';
@@ -72,8 +56,6 @@ export class DocumentIndex {
     return index;
   }
 
-  /* --------------------------- 基本信息 --------------------------- */
-
   get size(): number {
     return this.nodeById.size;
   }
@@ -120,8 +102,6 @@ export class DocumentIndex {
     }
     return depth;
   }
-
-  /* ---------------------------- 查询 ---------------------------- */
 
   /** 子树 id（含自身），可选深度限制（0 = 仅自身） */
   subtreeIds(id: NodeId, maxDepth = Number.POSITIVE_INFINITY): NodeId[] {
@@ -202,7 +182,6 @@ export class DocumentIndex {
     return [...this.keyContentIds].sort();
   }
 
-  /** 组合过滤（多条件取交集） */
   query(filter: NodeFilter): NodeId[] {
     let candidates: readonly NodeId[] = [...this.nodeById.keys()].sort();
     if (filter.type) candidates = candidates.filter((id) => this.nodeById.get(id)?.type === filter.type);
@@ -228,8 +207,6 @@ export class DocumentIndex {
     }
     return false;
   }
-
-  /* ------------------------ 增量维护接口 ------------------------ */
 
   onNodeAdded(node: DocNode): void {
     if (this.nodeById.has(node.id)) this.detach(node.id);
@@ -273,8 +250,6 @@ export class DocumentIndex {
     this.removeMemberships(before, after.id);
     this.addMemberships(after);
   }
-
-  /* ------------------------- 结构指纹 / 自检 ------------------------- */
 
   /** 结构指纹：覆盖父子关系、同级顺序、标签/来源/类型归属与关键内容标记 */
   fingerprint(): string {
@@ -333,8 +308,6 @@ export class DocumentIndex {
 
     return { ok: diffs.length === 0, diffs };
   }
-
-  /* --------------------------- 内部实现 --------------------------- */
 
   private attachToParent(childId: NodeId, parentId: NodeId): void {
     const list = this.children.get(parentId) ?? [];

@@ -1,13 +1,4 @@
-/**
- * 内容指纹（hash）实现 —— 与工具链 tools/model-check/lib/model-utils.mjs 必须逐字节一致。
- *
- * 为什么必须 canonical（键名递归排序）：
- *   JSON 对象的键顺序在不同实现/不同序列化库下并不稳定。若直接 JSON.stringify(obj) 求哈希，
- *   同一份内容在 A 实现与 B 实现下会得到不同指纹，导致机读信息被误判为"陈旧"——假警报。
- *   实测：TS 实现与 JS 工具链曾因此产生不一致，故统一为 canonical 形式。
- *
- * 规格：sha256( stableStringify(nodes) ) 的十六进制前 32 位。
- */
+// 内容指纹（hash）实现 —— 与工具链 tools/model-check/lib/model-utils.mjs 必须逐字节一致。
 
 import { createHash } from 'node:crypto';
 import type { DocNode, JsonValue, NodeId } from './types.ts';

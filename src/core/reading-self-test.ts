@@ -1,17 +1,4 @@
-/**
- * T18 验收自测：受控阅读（有效期 / 次数 / 环境绑定 / 内容范围）。
- *
- *   node src/core/reading-self-test.ts
- *
- * 覆盖四层：
- *   A 凭证本身：规范化、签发、**篡改必须被检出**（授权书是密码学绑定的，不是界面开关）
- *   B 四类控制：有效期、次数、环境、文档改动/撤销 —— 每类都要有**拒绝**用例
- *   C 内容范围：章节白名单 fail-closed、未授权内容不进视图、身份隐藏、告知水印
- *   D 纪律：公钥指纹可核、确定性、文档指纹的敏感性
- *
- * 这一套的重点在"拒绝"：授权控制的失败模式是**放行**（而不是报错），
- * 所以每个控制点都必须有一条"条件不满足时必须被拦"的用例。
- */
+// T18 验收自测：受控阅读（有效期 / 次数 / 环境绑定 / 内容范围）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession } from './session.ts';
@@ -76,7 +63,6 @@ async function credentialFor(doc: DocumentModel, overrides: Partial<ReadingGrant
 }
 
 async function main(): Promise<void> {
-  /* ========================= A 凭证本身 ========================= */
 
   await test('A1 授权书规范化：字段顺序固定、清单排序无关（协议字节不能随实现漂移）', async () => {
     const doc = fixture();
@@ -125,8 +111,6 @@ async function main(): Promise<void> {
     );
   });
 
-  /* ========================= B 四类控制 ========================= */
-
   await test('B1 正常阅读：放行并产出受控视图（章节/段落/数据元都在，字段值正确）', async () => {
     const doc = fixture();
     const decision = openForReading(await credentialFor(doc), doc, CONTEXT);
@@ -152,7 +136,7 @@ async function main(): Promise<void> {
     assertEqual(late.code, 'E_GRANT_EXPIRED', '过期必须拒绝');
     assert(late.reasons.join('').includes('过期'), '原因应说明已过期');
 
-    /* 边界：生效时刻与失效时刻**应当可读**（含端点的区间） */
+    /* 边界：生效时刻与失效时刻应当可读（含端点的区间）  */
     assertEqual(openForReading(credential, doc, { ...CONTEXT, at: '2026-10-08T00:00:00Z' }).allowed, true, '生效时刻应可读');
     assertEqual(openForReading(credential, doc, { ...CONTEXT, at: '2026-10-09T00:00:00Z' }).allowed, true, '失效时刻应可读');
   });
@@ -213,8 +197,6 @@ async function main(): Promise<void> {
     assertEqual(verifyCredential(credential).ok, true, '撤销是状态而非签名问题：凭证本身仍然有效');
   });
 
-  /* ========================= C 内容范围 ========================= */
-
   await test('C1 章节白名单：只出现授权章节，未授权章节**根本不进视图**并如实计数', async () => {
     const doc = fixture();
     const first = sectionsOf(doc)[0]!;
@@ -269,8 +251,6 @@ async function main(): Promise<void> {
     assert(notices.includes('2026-10-09T00:00:00Z'), '必须写明有效期');
     assert(notices.includes('剩余阅读次数 1'), '必须写明剩余次数');
   });
-
-  /* ========================= D 纪律与边界 ========================= */
 
   await test('D1 文档指纹：同文档稳定、改一个字段即变（凭证绑定的就是它）', async () => {
     const doc = fixture();

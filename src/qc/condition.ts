@@ -1,50 +1,13 @@
-/**
- * 质控条件树（**封闭**）：判定条件的"数据化"落点。
- *
- * ## 它解决什么、不解决什么
- *
- * 规则库里原本只有 6 种写死的判法（见 `predicates.ts`），要加一种就得改内核 + 加用例，
- * 于是"本院想加一条规则"变成一次发版。这里加**一种**谓词（`field-condition`），
- * 它的参数是一棵条件树：适用范围（哪份文书、哪种就诊）+ 字段 + 算子 + 取值
- * 全部能在管理后台拼出来 —— **新增规则不再需要改代码**。
- *
- * 它**不**解决"算子也要能配"：字段、算子、取值形态仍然是这份文件里的封闭清单。
- * 理由不是保守，而是算子承担着"宁可不报，不可误报"的全部边界取舍
- * （字段读不到怎么办、边界取哪一边、哪些节点不判、什么时候算"判不了"），
- * 那些取舍必须过评审、必须有用例。让配置定义算子，形式一定会收敛成"自定义表达式"，
- * 而它要么需要 `eval`（**包就能带可执行代码**，直接推翻"包是数据"），
- * 要么需要自己写解析器（多一层可错的语法）。模板公式在同一处分了同一刀，
- * 见 `src/template/types.ts` 的 `ExprNode` 注释。
- *
- * ## 为什么和谓词注册表分开
- *
- * `predicates.ts` 回答"有哪些判法"，这里回答"条件长什么样"。两者都要给界面下发规格，
- * 但**改动的理由完全不同**（前者是加一种判法，后者是加一个算子）。
- * 放在同一个文件里，每次加算子都要先读一遍 6 个谓词的实现。
- *
- * ## 两条贯穿所有算子的纪律（与 `predicates.ts` 完全一致）
- *
- * 1) **宁可漏报，不可误报**：字段读不到（`sectionCode` 为空、`origin` 缺失、
- *    节点类型不对路）时一律**不命中**，而不是拿"空值"参与比较 ——
- *    否则"系统里没有这个字段"就会变成一条质控结论。
- * 2) **判不了要说出来**：缺入院时刻、文书由外部导入这类情况走 `uncertain` 通道，
- *    不能被当成"没命中"（那会让"根本没判"看起来像"查过了没问题"）。
- */
+// 质控条件树（封闭）：判定条件的"数据化"落点。
 
 import type { JsonValue } from '../model/types.ts';
 import type { QcConditionParamKind, QcConditionParamSpec, QcContext, QcNodeView } from './types.ts';
 
 /* ========================= 共用常量（谓词侧也从这里取） =========================
    下面这几份表被 `predicates.ts` 一起引用。放在这里的理由只有一条：
-   **同一份清单只能有一处**。已踩过的坑是"界面能选、引擎不认"——
-   两处各写一份的代价不是多打几个字，而是一个只在有人真的点了它的时候才暴露的错。 */
+   同一份清单只能有一处。已踩过的坑是"界面能选、引擎不认"——
+   两处各写一份的代价不是多打几个字，而是一个只在有人真的点了它的时候才暴露的错。  */
 
-/**
- * 时间表述（**保守**：只认几种明确写法）。
- *
- * 为什么不写得宽松：写得松会"什么都像时间"，从而把真正缺记录时间的段落放过；
- * 写得紧最多是漏报，而漏报一条不痛不痒。这与"宁可不报，不可误报"一致。
- */
 export const TIME_PATTERNS: readonly RegExp[] = [
   /\d{4}\s*[-/年.]\s*\d{1,2}\s*[-/月.]\s*\d{1,2}/, // 2026-10-09 / 2026年10月9日 / 2026.10.9
   /\d{1,2}\s*月\s*\d{1,2}\s*日/, // 10月9日
@@ -54,17 +17,9 @@ export const TIME_PATTERNS: readonly RegExp[] = [
 
 export const hasTimeExpression = (text: string): boolean => TIME_PATTERNS.some((pattern) => pattern.test(text));
 
-/** 就诊类型。**只写这一处**：谓词参数的下拉与条件树的取值域都读它 */
+/** 就诊类型。只写这一处：谓词参数的下拉与条件树的取值域都读它  */
 export const VISIT_TYPES: readonly string[] = ['outpatient', 'inpatient', 'emergency', 'physical-exam'];
 
-/**
- * 具名条件的编码形状（`C-CUSTOM-1` 那一类）。
- *
- * 为什么只允许这种形状：编码**同时被人读、被规则写、进留痕**。允许自由文本的话，
- * 迟早会出现"看起来一样、其实多一个空格"的两个编码，而那时规则引用的是一个
- * 谁也搜不到的字符串 —— 报错只会说"没有这个条件"，没人看得出差在哪。
- * 校验放在这里（谓词侧也读它），是因为**同一份规则只有一处**。
- */
 export const QC_CONDITION_ID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
 
 export function asPlainObject(value: unknown): Record<string, unknown> | null {
@@ -77,8 +32,6 @@ export function rejectUnknownParams(source: Record<string, unknown>, allowed: re
   return Object.keys(source).every((key) => allowed.includes(key));
 }
 
-/* ============================== 条件树的数据形状 ============================== */
-
 export type QcConditionField =
   | 'text'
   | 'tags'
@@ -90,15 +43,15 @@ export type QcConditionField =
   | 'docType'
   | 'visitType'
   /**
-   * **就诊文书**（T2 新增）：同一次就诊下的文书清单（`ctx.visitDocs`）。
+   * 就诊文书（T2 新增）：同一次就诊下的文书清单（`ctx.visitDocs`）。
    *
-   * 它不是一个"标量字段"，而是一族**聚合取值器**的输入 —— 跨文书的判定
+   * 它不是一个"标量字段"，而是一族聚合取值器的输入 —— 跨文书的判定
    * （同类文书间隔、应有而缺）全部落在这一格上。做成字段而不是另起一种谓词，
    * 是为了让"跨文书"这件事也能被拼进条件树、被组合。
    *
    * 边界与两个内核谓词完全一致：拿不到清单 → `uncertain`（不猜）；清单里有一份
    * 成文时间无法解析 → `uncertain`（跳过会让"时间坏了"变成"那段时间没文书"）。
-   */
+    */
   | 'visitDocs';
 
 export type QcConditionOperator =
@@ -121,13 +74,6 @@ export type QcConditionOperator =
 export interface QcConditionAtom {
   kind: 'atom';
   field: QcConditionField;
-  /**
-   * 算子名。
-   *
-   * 类型是 `string` 而不是 `QcConditionOperator`：算子是**可扩展的**（部署方装签名插件，
-   * 见 `plugin.ts`）。内置的那些在 `QcConditionOperator` 里封闭列出，插件带来的名字不在里面 ——
-   * 但它们在装载时都过了同一段形状校验，所以"认不认得这个算子"这件事在解析期就已经答完。
-   */
   op: string;
   /** 取值。形状由算子的取值规格决定；不接受取值的算子（如"正文为空"）不写这个字段 */
   value?: JsonValue;
@@ -136,10 +82,10 @@ export interface QcConditionAtom {
 /**
  * 条件树。
  *
- * **只有四种节点**，与模板公式同一取舍：AST 没有语法、只有结构 ——
+ * 只有四种节点，与模板公式同一取舍：AST 没有语法、只有结构 ——
  * 校验它就是在校验一棵 JSON 树，错了能精确指到哪一个节点（`path`）。
  * 接受字符串表达式就得自己写解析器，而"多一层可错的语法"在这里没有任何回报。
- */
+  */
 export type QcConditionNode =
   | { kind: 'all'; children: QcConditionNode[] }
   | { kind: 'any'; children: QcConditionNode[] }
@@ -150,34 +96,26 @@ export type QcConditionNode =
  * 一条条件的判定结论。
  *
  * `hit: false` 同时覆盖"不适用"与"不命中"——两者在医生眼里是同一件事（不提示），
- * 分开只会多一处需要维护的口径。但**判不了**必须单列：它与前两者都不是一回事。
- */
+ * 分开只会多一处需要维护的口径。但判不了必须单列：它与前两者都不是一回事。
+  */
 export type QcConditionVerdict =
   /**
-   * 命中。`quote` 是**命中处的原文片段**（可选，只有"文字片段类"算子给得出）：
+   * 命中。`quote` 是命中处的原文片段（可选，只有"文字片段类"算子给得出）：
    * 它必须逐字出现在节点正文里 —— 下游（锚点重定位）靠它判断"那句话还在不在"，
    * 所以不能拿整段顶上（拿整段时"改了一个字"也会被判成"还在"，那正是重定位要避免的）。
-   */
+    */
   | { hit: true; quote?: string }
   | { hit: false }
   | { uncertain: string };
 
-/** 规模上限。**必须有**：条件树是外部数据，没有上限时一份包能拖垮每次质控扫描 */
+/** 规模上限。必须有：条件树是外部数据，没有上限时一份包能拖垮每次质控扫描  */
 export const QC_CONDITION_LIMITS = {
   maxDepth: 4,
   maxChildren: 20,
   maxWordLength: 64,
-  /** 一条判定方式最多带几个参数（T1）。同一条理由：它是外部数据，必须有界 */
   maxParams: 8,
 } as const;
 
-/**
- * 参数占位符的形状：`$limitHours`。
- *
- * 为什么只认这一种形状、而且是"整体替换"：占位符**只能出现在取值位置**、
- * 只能整格替换（不做字符串拼接）。允许拼接就等于允许"用参数拼出别的算子名或字段名"，
- * 那是一门语言的起点，而不是参数化的终点。
- */
 export const QC_CONDITION_PLACEHOLDER_PATTERN = /^\$[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
 export function isPlaceholderValue(value: unknown): value is string {
@@ -188,10 +126,6 @@ export function isPlaceholderValue(value: unknown): value is string {
 export function placeholderNameOf(value: string): string {
   return value.slice(1);
 }
-
-/* ============================== 规格（只写这一处） ==============================
-   下面两份规格同时供三处使用：① 下载给界面（生成条件构造器）；② 引擎校验；
-   ③ 人话回读（`describeCondition`）。**不在这里另抄一份字段名或算子名**。 */
 
 export interface QcConditionOption {
   value: string;
@@ -204,10 +138,10 @@ export interface QcConditionFieldSpec {
   /** 取值形态：界面据此决定"这一格能填什么"，引擎据此决定读出来是什么 */
   kind: 'text' | 'string-list' | 'enum' | 'boolean' | 'time';
   /**
-   * 作用位置 —— **它决定界面上归哪一组**，不改变判定：
+   * 作用位置 —— 它决定界面上归哪一组，不改变判定：
    *   - `document`：整篇文书都一样（文书类型、就诊类型）→ 界面归入「适用范围」
    *   - `node`：逐节点不同 → 界面归入「判定条件」
-   */
+    */
   scope: 'document' | 'node';
   options?: readonly QcConditionOption[];
   doc: string;
@@ -216,10 +150,10 @@ export interface QcConditionFieldSpec {
 /**
  * 算子的取值规格。
  *
- * `record`（T2 新增）是**聚合取值器**的那一档：取值不是一个标量，而是"挑哪一类文书、
+ * `record`（T2 新增）是聚合取值器的那一档：取值不是一个标量，而是"挑哪一类文书、
  * 阈值多少"这样一组具名格（如 `{ docTypeCode, hours }`）。它不是"嵌套对象"——
  * 只有这一层、格名封闭，所以它没有把取值变成一门可递归的小语言。
- */
+  */
 export interface QcConditionValueFieldSpec {
   name: string;
   label: string;
@@ -241,33 +175,17 @@ export type QcConditionValueSpec =
 
 export interface QcConditionOperatorSpec {
   /**
-   * 算子名。**内置的在类型里封闭**（`QcConditionOperator`），插件带来的扩展名是自由字符串 ——
+   * 算子名。内置的在类型里封闭（`QcConditionOperator`），插件带来的扩展名是自由字符串 ——
    * 于是"这条规则用了哪个算子"永远读得出来，而"哪些算子是内核自带"这件事也不会被搅混。
-   */
+    */
   name: string;
   label: string;
-  /** 只能用在哪些字段上。**只写这一处**：界面照它筛可选项，引擎照它校验 */
+  /** 只能用在哪些字段上。只写这一处：界面照它筛可选项，引擎照它校验  */
   fields: readonly QcConditionField[];
   /** 取值那一格的规格；`null` = 这个算子不接受取值 */
   value: QcConditionValueSpec | null;
   doc: string;
-  /**
-   * 判定实现（**只有插件算子会带它**：内置那些在 `evaluateAtom` 的 switch 里）。
-   *
-   * 它不可能来自包 —— 包只能引用算子名，实现在部署方安装的签名组件里（见 `plugin.ts`）。
-   * 这是"新算子不必与应用同版本发版"的落点，也是它必须**签名**的原因。
-   */
   evaluate?(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): QcConditionVerdict | null;
-  /**
-   * 命中时的**富文案**（可选）。
-   *
-   * 为什么需要它：条件树命中的默认依据是"命中本院的判定条件：<人话回读>"（一句回读），
-   * 而跨文书那两条必须说清"实际最长间隔 31.2 小时：自 … 到 …"—— 那种依据要算，
-   * 回读给不出来。它放在算子表里（算子本来就是代码），于是"文案"与"算法"仍在同一处。
-   *
-   * `quote` 与判定结果里那一个同源：**文案与片段必须在同一次计算里出来**，
-   * 否则"依据里说的那句话"与"重定位用的片段"会各自漂移。
-   */
   explain?(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): { detail: string; suggestion: string; quote?: string } | null;
 }
 
@@ -282,9 +200,9 @@ export const VISIT_TYPE_OPTIONS: readonly QcConditionOption[] = [
 /**
  * 节点类型。
  *
- * 与 `src/model/types.ts` 的 `NodeType` 对齐。**列全**而不是只列常用的四种：
+ * 与 `src/model/types.ts` 的 `NodeType` 对齐。列全而不是只列常用的四种：
  * 列一半会让"给表格单元定一条规则"变成一件做不到的事，而使用者只会以为是自己没找对地方。
- */
+  */
 const NODE_TYPE_OPTIONS: readonly QcConditionOption[] = [
   { value: 'document', label: '整篇文书' },
   { value: 'section', label: '章节' },
@@ -314,11 +232,11 @@ const PATTERN_OPTIONS: readonly QcConditionOption[] = [
 ];
 
 /**
- * **模板占位文字**的内置模式（T2 新增）。
+ * 模板占位文字的内置模式（T2 新增）。
  *
- * 与 `predicates.ts` 的 `placeholder-residue` 用的是**同一份正则**（就写在下面），
+ * 与 `predicates.ts` 的 `placeholder-residue` 用的是同一份正则（就写在下面），
  * 两处各写一份的后果是"同一条规则在两种判法下给出不同结论"，而没人会想到去比对它们。
- */
+  */
 export const PLACEHOLDER_PATTERN = /(待补充|待填写|待完善|待补|TODO|FIXME|\bXXX+\b|\bxxx+\b)/i;
 
 export function hasPlaceholderExpression(text: string): boolean {
@@ -421,7 +339,6 @@ export const QC_CONDITION_FIELD_ORDER: readonly QcConditionField[] = [
   /* 先「适用范围」：整篇文书都一样的那几格，摆在最前面（它们决定这条规则管不管这份文书） */
   'docType',
   'visitType',
-  /* 再逐节点的判定条件 */
   'nodeType',
   'sectionCode',
   'keyContent',
@@ -466,8 +383,8 @@ export const QC_CONDITION_OPERATORS: Record<QcConditionOperator, QcConditionOper
     fields: ['text'],
     value: wordsValueSpec('词表里任一词出现在正文里即算满足。例如"待补充、TODO"。'),
     doc: '正文里出现词表中的任一词。只对文本段判定 —— 章节与文书根的正文是空的，对它们判"包不包含"必然得出错的结论。',
-    /* 依据必须写出**命中的那个词**：医生看到"本段包含「待补充」"才知道该去改哪几个字；
-       只给一句"包含下列词之一"等于让人自己在正文里找 */
+    /* 依据必须写出命中的那个词：医生看到"本段包含「待补充」"才知道该去改哪几个字；
+       只给一句"包含下列词之一"等于让人自己在正文里找  */
     explain: (node, atom) => {
       const matched = wordsOf(atom).find((word) => node.text.includes(word));
       if (matched === undefined) return null;
@@ -501,7 +418,7 @@ export const QC_CONDITION_OPERATORS: Record<QcConditionOperator, QcConditionOper
     fields: ['tags'],
     value: wordsValueSpec('带其中任一个标签、且正文为空才算满足。'),
     doc: '带指定的数据元标签、但正文为空 —— "必填项没填"最常见的写法。没有标签的空白段落不算：它可能本就不必填，报它会误伤。',
-    /* 依据要列出**节点上的标签**：医生据此核对"该填的是哪一项"，而不是只知道"有个必填项空着" */
+    /* 依据要列出节点上的标签：医生据此核对"该填的是哪一项"，而不是只知道"有个必填项空着"  */
     explain: (node) => (node.text.trim() === '' && node.tags.length > 0
       ? {
         detail: `本段带数据元标签「${node.tags.join('」、「')}」，但正文去掉首尾空白后为空。`,
@@ -572,7 +489,6 @@ export const QC_CONDITION_OPERATORS: Record<QcConditionOperator, QcConditionOper
       doc: '第一版只给"模板占位文字"一档。注意它用的是内置正则（大小写不敏感、"XXX"按词边界匹配），与「包含（任一）」的子串包含不完全等价 —— 要的是精确口径就用内置判定方式「模板占位符未替换」。',
     },
     doc: '正文里出现了指定的内置模式。模式的写法在内核里，不由配置决定（自由正则不做：写得松会"什么都像占位文字"）。',
-    /* 与谓词 `placeholder-residue` 同一条理由：quote 用命中片段本身（见 `matchPlaceholderExpression`） */
     explain: (node) => {
       const matched = matchPlaceholderExpression(node.text);
       if (matched === null) return null;
@@ -642,15 +558,6 @@ const OPERATOR_BY_NAME = new Map<string, QcConditionOperatorSpec>(
   QC_CONDITION_OPERATOR_ORDER.map((name) => [name, QC_CONDITION_OPERATORS[name]]),
 );
 
-/* ============================== 算子扩展点（T3） ==============================
-   插件注册进来的算子挂在下面这张表里。它**只在装载插件时写入**，不进包、不进代码仓库 ——
-   插件是部署方安装的签名组件（`plugin.ts`），所以"新算子不必与应用同版本发版"。
-
-   三条守门（在 `registerConditionOperator` 里判）：
-     ① 名字不能与内置的撞（撞了会让"这条规则到底怎么算"取决于装了哪个插件）；
-     ② 字段必须在字段表里（否则界面上拼不出来，而引擎却认它）；
-     ③ 必须带 `evaluate`（没有实现的算子等于一条永远不命中的规则，而它看着是配好的）。 */
-
 const EXTENDED_OPERATORS = new Map<string, QcConditionOperatorSpec>();
 
 /** 插件带来的算子名（按注册顺序）。界面与文档用它回答"这台机器上多出了什么" */
@@ -667,12 +574,6 @@ export class QcOperatorRegistrationError extends Error {
   }
 }
 
-/**
- * 注册一个插件算子（**唯一入口**）。
- *
- * 它不校验签名 —— 签名由调用方（`plugin.ts`）在**读文件之前**验完。
- * 分开的理由：这里只管"算子的形状合不合规"，验签是"这份代码该不该被执行"，两件事。
- */
 export function registerConditionOperator(spec: QcConditionOperatorSpec): void {
   if (typeof spec.name !== 'string' || !/^[a-z][a-z0-9-]{2,47}$/.test(spec.name)) {
     throw new QcOperatorRegistrationError('E_OPERATOR_NAME_INVALID', `算子名「${String(spec.name)}」不合法：小写字母开头的 3-48 位（小写字母 / 数字 / 短横线）`);
@@ -698,7 +599,7 @@ export function registerConditionOperator(spec: QcConditionOperatorSpec): void {
   EXTENDED_OPERATORS.set(spec.name, spec);
 }
 
-/** 撤销一个插件算子（**只给自测与插件卸载用**：装着跑过一轮之后要能回到干净状态） */
+/** 撤销一个插件算子（只给自测与插件卸载用：装着跑过一轮之后要能回到干净状态）  */
 export function unregisterConditionOperator(name: string): boolean {
   if (!EXTENDED_OPERATORS.has(name)) return false;
   EXTENDED_OPERATORS.delete(name);
@@ -715,8 +616,8 @@ export function conditionOperatorSpec(name: string): QcConditionOperatorSpec | n
 }
 
 /* ================================= 校验 =================================
-   **不合法即拒**，不做"取值不合法就用默认值"的兜底 ——
-   兜底会让"我配的条件没生效"变成一件没人能发现的事（与 `predicates.ts` 同一条纪律）。 */
+   不合法即拒，不做"取值不合法就用默认值"的兜底 ——
+   兜底会让"我配的条件没生效"变成一件没人能发现的事（与 `predicates.ts` 同一条纪律）。  */
 
 function normalizeWords(raw: unknown): string[] | null {
   if (!Array.isArray(raw)) return null;
@@ -749,9 +650,9 @@ function normalizeAtom(raw: Record<string, unknown>, allowPlaceholders: boolean)
   const value = raw.value;
   if (value === undefined) return null;
 
-  /* 占位符：**整格替换**。这里只认"它是个占位符"，
-     具体形态（整数？词表？）要等实参代入后由**同一段校验**判 —— 于是
-     "占位符最终落成什么类型"不会有两处说法。 */
+  /* 占位符：整格替换。这里只认"它是个占位符"，
+     具体形态（整数？词表？）要等实参代入后由同一段校验判 —— 于是
+     "占位符最终落成什么类型"不会有两处说法。  */
   if (allowPlaceholders && isPlaceholderValue(value)) {
     return { kind: 'atom', field: field.name, op: op.name, value };
   }
@@ -808,12 +709,12 @@ function normalizeAtom(raw: Record<string, unknown>, allowPlaceholders: boolean)
 }
 
 /**
- * 校验并归一化一棵条件树。返回 `null` = **结构或取值不合法**。
+ * 校验并归一化一棵条件树。返回 `null` = 结构或取值不合法。
  *
  * 调用方（谓词的 `normalizeParams`）据此显式拒绝，而不是带着一份"以为配了、其实没配"的
- * 条件跑起来。**这一步在装包那一刻就会跑**（`validateRulePack` → `resolveRule`），
+ * 条件跑起来。这一步在装包那一刻就会跑（`validateRulePack` → `resolveRule`），
  * 于是"条件写错"在还有人看着的时候就报出来，而不是等医生点了"跑质控"才发现少了一条。
- */
+  */
 export function normalizeCondition(raw: unknown, depth = 0, allowPlaceholders = false): QcConditionNode | null {
   if (depth > QC_CONDITION_LIMITS.maxDepth) return null;
   const source = asPlainObject(raw);
@@ -845,13 +746,6 @@ export function normalizeCondition(raw: unknown, depth = 0, allowPlaceholders = 
   return null;
 }
 
-/**
- * 一棵树里用到的占位符名（去重、按出现顺序）。
- *
- * 它回答的是"这条判定方式到底要几个参数"—— 与 `params` 规格**互相对照**：
- * 声明了没用到 = 多了一个形参（界面会逼使用者填一个其实不起作用的格）；
- * 用了没声明 = 实参来了也没处校验。两种都要拒，见 `rule-pack.ts`。
- */
 export function collectPlaceholders(condition: QcConditionNode): string[] {
   const out: string[] = [];
   const remember = (value: unknown): void => {
@@ -886,15 +780,15 @@ export function collectPlaceholders(condition: QcConditionNode): string[] {
 }
 
 /**
- * 把占位符替换成实参，返回**未校验的 JSON 树**。
+ * 把占位符替换成实参，返回未校验的 JSON 树。
  *
  * 刻意不在这里校验：替换完必须再过一次 `normalizeCondition`（不允许占位符），
  * 于是"代入后的树是否合法"与"内联一棵树是否合法"永远是同一段代码在判 ——
  * 两处各判一遍的后果是"占位符代入把类型换错了"只在扫描期表现为"这条规则不出现"。
- */
+  */
 export function substitutePlaceholders(condition: QcConditionNode, args: Record<string, JsonValue>): JsonValue {
-  /* 实参缺失**不在这里兜底**：调用方必须先做必填校验，缺了就不该走到这一步。
-     真走到了，就把原占位符留下 —— 代入后那次校验会拒掉它（fail-closed） */
+  /* 实参缺失不在这里兜底：调用方必须先做必填校验，缺了就不该走到这一步。
+     真走到了，就把原占位符留下 —— 代入后那次校验会拒掉它（fail-closed）  */
   const fill = (value: unknown): unknown => {
     if (isPlaceholderValue(value)) {
       const name = placeholderNameOf(value);
@@ -932,9 +826,8 @@ export function conditionAtomCount(condition: QcConditionNode): number {
 
 /* ============================== 参数规格（T1） ==============================
    判定方式是数据，参数是它唯一被开放的部分。所以这一层的纪律与条件树本身一致：
-   形状封闭、名字封闭、不合法一律拒、**不做兜底**。 */
+   形状封闭、名字封闭、不合法一律拒、不做兜底。  */
 
-/** 参数可用的类型（**封闭**：见 `types.ts` 里 `QcConditionParamSpec` 的理由） */
 export const QC_CONDITION_PARAM_KINDS: readonly { name: QcConditionParamKind; label: string; doc: string }[] = [
   { name: 'integer', label: '正整数', doc: '阈值：小时数、字数、条数。0 与负数一律拒 —— 它们会得到"永远成立"或"永远不成立"的规则。' },
   { name: 'string', label: '单行文本', doc: '一个非空字符串：文书类型码、章节码。' },
@@ -1000,13 +893,6 @@ export function normalizeConditionParams(raw: unknown): QcConditionParamSpec[] |
   return out;
 }
 
-/**
- * 校验实参（规则填进来的那一组值）。返回 `null` = 不合法。
- *
- * 三条与谓词参数同源的纪律：**未知参数名拒、必填缺失拒、类型与取值域不符拒**。
- * 另加一条：`args` 里出现判定方式没声明的名字要拒 —— 那说明界面或包在按另一份规格填，
- * 而"填了但不生效"正是这套质控最想避免的那种错。
- */
 export function validateConditionArgs(
   specs: readonly QcConditionParamSpec[],
   raw: unknown,
@@ -1049,13 +935,11 @@ export function validateConditionArgs(
   return out;
 }
 
-/* ================================= 判定 ================================= */
-
 function wordsOf(atom: QcConditionAtom): string[] {
   return Array.isArray(atom.value) ? (atom.value.filter((item): item is string => typeof item === 'string')) : [];
 }
 
-/** 取字段的当前值。**取不到就给 `undefined`**：由各算子按"宁可不报"处置，不在这里替它猜 */
+/** 取字段的当前值。取不到就给 `undefined`：由各算子按"宁可不报"处置，不在这里替它猜  */
 function fieldTextOf(node: QcNodeView, field: QcConditionField, ctx: QcContext): string | undefined {
   switch (field) {
     case 'docType':
@@ -1082,9 +966,9 @@ function fieldTextOf(node: QcNodeView, field: QcConditionField, ctx: QcContext):
 }
 
 /* --------------------------- 跨文书（T2：聚合取值器） ---------------------------
-   下面两档算子的语义与 `predicates.ts` 的两个跨文书谓词**逐条对齐**：
+   下面两档算子的语义与 `predicates.ts` 的两个跨文书谓词逐条对齐：
    右端取出院时刻（或判定时刻）、一份都没有时不报、期限未到不报、时间解析不出走"判不了"。
-   实现在这里、而不是在 predicates 里各写一份：同一份口径只能有一处。 */
+   实现在这里、而不是在 predicates 里各写一份：同一份口径只能有一处。  */
 
 interface VisitTimelineDoc {
   docId: string;
@@ -1092,7 +976,7 @@ interface VisitTimelineDoc {
   title?: string;
 }
 
-/** 取出该就诊下**同一类文书**的成文时刻；有无法解析的 → 判不了（不猜） */
+/** 取出该就诊下同一类文书的成文时刻；有无法解析的 → 判不了（不猜）  */
 export function visitTimelineOf(
   visitDocs: readonly { docId: string; docTypeCode: string; createdAt: string; title?: string }[],
   docTypeCode: string,
@@ -1101,8 +985,8 @@ export function visitTimelineOf(
   for (const item of visitDocs) {
     if (item.docTypeCode !== docTypeCode) continue;
     const at = Date.parse(item.createdAt);
-    /* 时间解析不出来的文书**不能静默跳过**：跳过会让"有一份时间坏了的文书"变成
-       "那段时间没有文书"，从而把一次真实缺漏算成正常，或把正常算成缺漏 —— 两种都是错的。 */
+    /* 时间解析不出来的文书不能静默跳过：跳过会让"有一份时间坏了的文书"变成
+       "那段时间没有文书"，从而把一次真实缺漏算成正常，或把正常算成缺漏 —— 两种都是错的。  */
     if (!Number.isFinite(at)) return { ok: false, reason: `文书 ${item.docId} 的成文时间无法解析（${item.createdAt}）` };
     picked.push({ docId: item.docId, at, ...(item.title ? { title: item.title } : {}) });
   }
@@ -1122,7 +1006,7 @@ function recordOf(atom: QcConditionAtom): Record<string, JsonValue> {
   return (asPlainObject(atom.value) ?? {}) as Record<string, JsonValue>;
 }
 
-/** 「同类文书间隔超过」：判定与文案**同一次算出**（文案里的数字必须就是判定用的那个） */
+/** 「同类文书间隔超过」：判定与文案同一次算出（文案里的数字必须就是判定用的那个）  */
 function evaluateVisitGap(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): VisitVerdict {
   if (node.type !== 'document') return { kind: 'none' };
   if (ctx.visitDocs === undefined) return { kind: 'uncertain', reason: '本次判定没有拿到同一次就诊的文书清单，频次无法计算' };
@@ -1216,14 +1100,14 @@ function explainOf(outcome: VisitVerdict): { detail: string; suggestion: string 
 function evaluateAtom(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): QcConditionVerdict {
   const words = wordsOf(atom);
 
-  /* 正文类算子**只对文本段判定**：章节与文书根的正文是空串，
-     对它们判"包不包含 / 是否为空"会得出一个看似合理其实是错误的结论 */
+  /* 正文类算子只对文本段判定：章节与文书根的正文是空串，
+     对它们判"包不包含 / 是否为空"会得出一个看似合理其实是错误的结论  */
   const textOnly = (): QcConditionVerdict | null => (node.type === 'text' ? null : { hit: false });
   const trimmed = node.text.trim();
 
   /* 插件算子（T3）：实现挂在算子规格上，判定走它自己。
-     放在 switch 之前，是因为它本来就不在下面那张**封闭**的名单里。
-     `null` 按"不适用/不命中"处置 —— 与内置算子的返回口径一致 */
+     放在 switch 之前，是因为它本来就不在下面那张封闭的名单里。
+     `null` 按"不适用/不命中"处置 —— 与内置算子的返回口径一致  */
   const extended = conditionOperatorSpec(atom.op);
   if (extended?.evaluate) return extended.evaluate(node, atom, ctx) ?? { hit: false };
 
@@ -1232,7 +1116,6 @@ function evaluateAtom(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): 
       const guard = textOnly();
       if (guard) return guard;
       const matched = words.find((word) => node.text.includes(word));
-      /* quote 用命中的那个词（与谓词 `placeholder-residue` 同一条理由：锚点重定位依赖它） */
       return matched === undefined ? { hit: false } : { hit: true, quote: matched };
     }
     case 'not-contains': {
@@ -1248,13 +1131,13 @@ function evaluateAtom(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): 
     case 'empty-with-tag': {
       const guard = textOnly();
       if (guard) return guard;
-      /* 没有标签的空白段**不算**：它可能本就不必填（与 `tagged-empty-text` 同一条理由） */
+      /* 没有标签的空白段不算：它可能本就不必填（与 `tagged-empty-text` 同一条理由）  */
       if (node.tags.length === 0) return { hit: false };
       if (trimmed !== '') return { hit: false };
       return { hit: words.some((word) => node.tags.includes(word)) };
     }
     case 'has-tag': {
-      /* 它只回答"带没带标签"，所以**不限定节点类型**：标签挂在哪种节点上由文档决定 */
+      /* 它只回答"带没带标签"，所以不限定节点类型：标签挂在哪种节点上由文档决定  */
       return { hit: node.tags.length > 0 };
     }
     case 'matches-pattern': {
@@ -1283,9 +1166,9 @@ function evaluateAtom(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): 
       return { hit: !hasTimeExpression(node.text) };
     }
     case 'older-than-hours': {
-      /* 时限是**文书级**要求：逐段落判会把同一件事报很多遍
+      /* 时限是文书级要求：逐段落判会把同一件事报很多遍
          （实测踩过：一份有 7 个章节的入院记录会得到 8 条一模一样的提示）。
-         要限定到某一节，用「章节码 属于」那一条去配。 */
+         要限定到某一节，用「章节码 属于」那一条去配。  */
       if (node.type !== 'document' && node.type !== 'section') return { hit: false };
       if (ctx.admittedAt === undefined || ctx.admittedAt === '') {
         return { uncertain: '本文书没有就诊/入院时间（文档 encounter.admittedAt），时限无法计算' };
@@ -1305,7 +1188,7 @@ function evaluateAtom(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): 
       if (recorded > now) return { uncertain: `记录时间（${node.recordedAt}）晚于判定时刻（${ctx.now}），数据或时钟可能异常` };
       const limitHours = typeof atom.value === 'number' ? atom.value : 0;
       const elapsedHours = (recorded - baseline) / 3_600_000;
-      /* 正好等于时限**不报**：要求是"在 N 小时内完成"，压线算完成 */
+      /* 正好等于时限不报：要求是"在 N 小时内完成"，压线算完成  */
       return { hit: elapsedHours > limitHours };
     }
     case 'gap-exceeds-hours':
@@ -1315,8 +1198,8 @@ function evaluateAtom(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): 
     case 'in':
     case 'not-in': {
       const current = fieldTextOf(node, atom.field, ctx);
-      /* 读不到字段 → **不命中**（两个算子都一样）：
-         拿"读不到"当成"不属于"，会把系统缺数据变成一条质控结论，而它看起来是配好的 */
+      /* 读不到字段 → 不命中（两个算子都一样）：
+         拿"读不到"当成"不属于"，会把系统缺数据变成一条质控结论，而它看起来是配好的  */
       if (current === undefined) return { hit: false };
       const included = words.includes(current);
       return { hit: atom.op === 'in' ? included : !included };
@@ -1333,10 +1216,10 @@ function evaluateAtom(node: QcNodeView, atom: QcConditionAtom, ctx: QcContext): 
 /**
  * 判一棵条件树。
  *
- * `all` / `any` 的短路取向是**假优先**：只要有一个分支明确不命中，整棵就"不命中"，
+ * `all` / `any` 的短路取向是假优先：只要有一个分支明确不命中，整棵就"不命中"，
  * 即使别的分支"判不了" —— 一条规则有没有命中是可判定的，就不该因为另一分支缺数据而变成"判不了"。
  * 反过来，`not` 里出现"判不了"仍然是"判不了"：把一个未知取反，还是未知。
- */
+  */
 export function evaluateCondition(node: QcNodeView, condition: QcConditionNode, ctx: QcContext): QcConditionVerdict {
   if (condition.kind === 'atom') return evaluateAtom(node, condition, ctx);
 
@@ -1369,10 +1252,6 @@ export function evaluateCondition(node: QcNodeView, condition: QcConditionNode, 
   }
   return uncertain === null ? { hit: false } : { uncertain };
 }
-
-/* ============================== 人话回读 ==============================
-   光看一棵条件树看不出"这条规则到底判什么"。界面上必须有一行自然语言 ——
-   与模板公式的 `describeExpression` 同一条理由：判定必须可解释。 */
 
 function optionLabelOf(options: readonly QcConditionOption[] | undefined, value: string): string {
   if (!options) return value;
@@ -1423,9 +1302,9 @@ function valueTextOf(
  * 人话回读。
  *
  * `args` 只在"这条判定方式带了参数、而规则已经填了实参"时给（T1）：
- * 给了就把占位符读成**实参**（界面上要看的是"这条规则实际按什么判"）；
+ * 给了就把占位符读成实参（界面上要看的是"这条规则实际按什么判"）；
  * 不给就把它读成 `⟨参数名⟩` —— 回读一句编出来的数字，比留着一个明显的占位符更糟。
- */
+  */
 export function describeCondition(
   condition: QcConditionNode,
   parent: QcConditionNode['kind'] | null = null,
@@ -1459,23 +1338,11 @@ export function describeCondition(
   return needParens ? `（${text}）` : text;
 }
 
-/**
- * 命中的**富文案**：找出第一个"命中且自带 explain"的原子，用它的依据。
- *
- * 为什么先找原子而不是直接把整棵树回读一遍：跨文书那两条要说出"实际最长间隔 31.2 小时，
- * 自 … 到 …"，而回读只能给出"同类文书间隔超过 文书类型码「WST500.3」、最大间隔 72 小时"。
- * 找不到富文案时返回 `null`，调用方退回用整棵树的人话回读 —— 不编。
- */
 export function explainConditionHit(
   condition: QcConditionNode,
   node: QcNodeView,
   ctx: QcContext,
 ): { detail: string; suggestion: string; quote?: string } | null {
-  /* 把**所有**命中且给得出富文案的格子收集起来，再并成一句。
-     为什么不是"取第一个命中的"：一条条件的依据往往由两格拼成 ——
-     「带任意数据元标签 且 正文为空」的第一格只能说"带了 DE-001"，第二格只能说"正文为空"，
-     任取其一都会漏掉后半句，而医生要的正是"哪一项、怎么了"这整句话。
-     能参与并句的只有实现了 `explain` 的算子（内置那两档跨文书的判定互斥，不会同时命中）。 */
   const walk = (current: QcConditionNode, out: Array<{ detail: string; suggestion: string; quote?: string }>): void => {
     if (current.kind === 'not') return; /* 取反之后的文案没有意义，退回整棵树的回读 */
     if (current.kind === 'all' || current.kind === 'any') {
@@ -1492,8 +1359,6 @@ export function explainConditionHit(
   const found: Array<{ detail: string; suggestion: string; quote?: string }> = [];
   walk(condition, found);
   if (found.length === 0) return null;
-  /* 片段取第一个给得出的那个：一条规则命中处通常只有一处（多处的 quote 也只能取一个，
-     硬拼起来就不再是"逐字出现在正文里"的片段了）。 */
   const quote = found.find((item) => item.quote !== undefined)?.quote;
   return {
     detail: found.map((item) => item.detail).join('，且'),
@@ -1501,8 +1366,6 @@ export function explainConditionHit(
     ...(quote === undefined ? {} : { quote }),
   };
 }
-
-/* ============================== 下发界面 ============================== */
 
 /** 逻辑连接词的规格（界面照它生成"满足全部 / 满足任一"那一格） */
 const LOGIC_SPECS: readonly { name: 'all' | 'any'; label: string; doc: string }[] = [
@@ -1520,18 +1383,12 @@ export interface QcConditionCatalog {
 }
 
 /**
- * 条件构造器的规格（下发管理后台）。
- *
- * 与 `qcPredicateCatalog()` 同一条纪律：**前端不手抄一份字段表或算子表**。
- * 抄一份的代价是"界面能选、引擎不认"，而它只会在有人真的点了它的时候才暴露。
- */
-/**
- * 下发给界面的算子规格：**把函数摘掉**。
+ * 下发给界面的算子规格：把函数摘掉。
  *
  * 界面拿到的只是"有哪些算子、能用在哪、怎么填"；实现（`evaluate` / `explain`）留在内核与插件里。
  * 不摘也不影响 JSON 序列化（函数会被丢掉），但"这一份是给界面的清单"这件事要写在代码上 ——
  * 否则将来有人往里塞一个函数，会得到一份"本地测试看得见、线上看不见"的清单。
- */
+  */
 function catalogOperatorOf(spec: QcConditionOperatorSpec): QcConditionOperatorSpec {
   const { evaluate: _evaluate, explain: _explain, ...rest } = spec;
   return rest as QcConditionOperatorSpec;

@@ -1,8 +1,4 @@
-/**
- * L0 模型层对外出口（barrel）。
- *
- * 使用方只需从这里导入，避免内部模块路径泄漏到业务代码。
- */
+// L0 模型层对外出口（barrel）。
 
 export * from './types.ts';
 export * from './hash.ts';

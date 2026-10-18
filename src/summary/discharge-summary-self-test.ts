@@ -1,18 +1,4 @@
-/**
- * 出院汇总自测（D1~D6）。
- *
- *   node src/summary/discharge-summary-self-test.ts
- *
- * 这一族最容易写错的地方，各有用例钉住：
- *   D1 **原文搬运**：多段按固定连接符合并，不摘要、不改写；
- *   D2 **缺文书就是缺**：没有入院记录时如实报缺口，且不产生"凭空补上"的条目；
- *   D3 **空章节 ≠ 没这个事实**：源章存在但为空，报 E_SOURCE_EMPTY；
- *   D4 **目标章不存在**：给出内容但不给落点（`targetNodeId` 为 null）；
- *   D5 **三态**：空 → new；与派生一致 → same；已有不同文字 → changed；
- *   D6 **优先级**：出院诊断先取病程记录，没有才退回入院记录的初步诊断。
- *
- * 全部离线：合成文书，不读库、不联网。
- */
+// 出院汇总自测（D1~D6）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
@@ -28,8 +14,6 @@ const suite = new TestSuite('出院汇总自测', [
 ]);
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
-
-/* ------------------------------ 夹具 ------------------------------ */
 
 const section = (code: string, title: string, texts: string[]): SummarySection => ({
   code,
@@ -89,8 +73,6 @@ const discharge = (params: { sections: SummarySection[] } = {
 
 const planOf = (docs: SummaryDoc[]) => planDischargeSummary({ currentDocId: 'd_dis', docs });
 const itemOf = (plan: ReturnType<typeof planOf>, key: string) => plan.items.find((item) => item.key === key);
-
-/* ------------------------------- 用例 ------------------------------- */
 
 async function main(): Promise<void> {
   await test('D1 多段原文按固定连接符合并，不摘要、不改写', () => {

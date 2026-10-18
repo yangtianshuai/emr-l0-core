@@ -1,15 +1,5 @@
-/**
- * T18b 验收自测：SM4 运行时自检 + HMAC/PBKDF2-SM3 + 认证加密信封。
- *
- *   node src/crypto/envelope-self-test.ts
- *
- * 分三层：
- *   A SM4：**国标示例向量**是硬门槛（判定"运行时给的到底是不是 SM4"），并与 OpenSSL 逐字节比对封装是否正确；
- *   B KDF：没有公开测试向量，因此验证可证伪的性质（确定性、参数影响、长度语义）+ 与 OpenSSL 的 HMAC 一致；
- *   C 信封：重点全在**拒绝**——篡改密文/IV/头部/KDF 参数、错误口令、截断，每一条都必须被 MAC 拦住。
- *
- * 迭代次数在用例里取小值（否则每个用例几百毫秒）；另有一条用例守住"默认值不能为了跑得快被调低"。
- */
+// T18b 验收自测：SM4 运行时自检 + HMAC/PBKDF2-SM3 + 认证加密信封。
+// C 信封：重点全在拒绝——篡改密文/IV/头部/KDF 参数、错误口令、截断，每一条都必须被 MAC 拦住。
 
 import { createCipheriv, createHmac } from 'node:crypto';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -59,7 +49,6 @@ function expectError(run: () => unknown, keyword: string): void {
 }
 
 async function main(): Promise<void> {
-  /* ============================== A SM4 ============================== */
 
   await test('A1 国标示例向量：判定运行时给的是不是 SM4（key=明文=0123…3210 → 681edf34…）', () => {
     const check = sm4SelfCheck();
@@ -112,8 +101,6 @@ async function main(): Promise<void> {
     expectError(() => sm4Ctr(new Uint8Array(16), new Uint8Array(8), new Uint8Array(4)), 'IV');
   });
 
-  /* ============================== B KDF ============================== */
-
   await test('B1 HMAC-SM3 与 OpenSSL 一致（多组密钥/数据）', () => {
     let same = 0;
     for (let i = 0; i < 16; i += 1) {
@@ -156,8 +143,6 @@ async function main(): Promise<void> {
     assertEqual(toHex(sm3Kdf(z, 32)), toHex(long.subarray(0, 32)), '32 字节结果应是 64 字节结果的前缀');
     assert(toHex(sm3Kdf(z, 32)) !== toHex(sm3Kdf(utf8('另一个'), 32)), '不同输入必须不同结果');
   });
-
-  /* ============================= C 信封 ============================= */
 
   await test('C1 往返：中文 / 空 / 二进制都能原样还原', () => {
     const cases: Uint8Array[] = [

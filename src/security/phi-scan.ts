@@ -1,46 +1,5 @@
-/**
- * 发布前隐私与密钥排查（患者信息 / 私钥 / 证书）。
- *
- *   npm run scan:phi
- *   node src/security/phi-scan.ts --roots artifacts,src,tools --json artifacts/phi-scan.json
- *   node src/security/phi-scan.ts --fingerprints      # 打印命中指纹（写复核记录时用）
- *
- * ## 为什么要有它
- *
- * 开源或交付前必须回答一个问题：**仓库里有没有真实患者数据、生产私钥或证书？**
- * 这件事靠"我翻过了"是回答不了的 —— 翻过一遍只能证明"我看了我当时想到的地方"，
- * 而这类泄漏的典型形态正是"没人想到要去看那里"（备份残留、日志、压缩容器、截图）。
- *
- * ## 它诚实的地方（也是它唯一的卖点）
- *
- * 1) **报告里不二次泄露**：命中一律打码（号码留前 2 后 1，姓名复用内核的 `maskPersonName`），
- *    于是报告可以随手贴进 issue 或发给人看，而不会变成新的泄露源。
- * 2) **压缩容器解包后再扫**：`.ofd` 是 ZIP，正文压在 `Document.xml` 里 —— 用文本工具 grep
- *    只会得到**假清白**（"没搜到患者姓名"）。所以这里走 `readZip()` 逐条目扫，
- *    扫的就是第三方解包后**真能看到的东西**。
- * 3) **扫不到的东西如实列出来**（第四节的"未检查"）：图像内容、加密产物、未知二进制，
- *    脚本一律不假装看过。**没查 ≠ 干净**。
- *
- * ## 四档结论（与质控规则"宁可不报，不可误报"同一取向）
- *
- * - ⛔ **必须处置**：私钥/证书材料，且**无法归因**到公开的演示种子。
- * - ⚠️ **需人工确认**：命中患者标识模式（身份证 / 手机号 / 带标签的姓名与住院号…）。
- *   其中"校验位不通过的身份证""常见虚构名""示例域名邮箱"会被**标注**为疑似虚构 ——
- *   注意只是标注，**不免检**：把"我觉得它是假的"当成"它是假的"，正是漏检的起点。
- * - ✓ **已复核**：人工回源确认过、并写进 `phi-scan.reviewed.json` 的那些（附理由与复核人）。
- *   **仍然逐条列在报告里**，只是不再计入退出码 —— 一份永远为红的门禁等于没有门禁，
- *   而它真正的作用是"**新出现的命中能拦住**"。
- * - ○ **已知可公开**：可由代码里公开字面量种子经 `demoKeyPair()` 推导出的演示私钥。
- *
- * 退出码：出现 ⛔ 或**未复核的** ⚠️ 时为 1（可挂 CI）。**"发布态"缺失不计入退出码** ——
- * 没有 LICENSE / .gitignore 是发布节奏问题，混进隐私门禁只会让这个检查天天红，然后就没人看了。
- *
- * ## 它做不到的（写在这里，免得被当成合规审计）
- *
- * 这是**模式匹配**，不是合规审计，也**不能证明"不存在真实数据"**：
- * 它只能给出"没命中我认识的那几类形态"。认不出的（化名、外文名、编码后的号码、
- * 图像与未知格式里的内容）它一律查不出来。
- */
+// 发布前隐私与密钥排查（患者信息 / 私钥 / 证书）。
+// 开源或交付前必须回答一个问题：仓库里有没有真实患者数据、生产私钥或证书？
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -63,40 +22,32 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.playwright-cli', '.codebudd
 const MAX_TEXT_BYTES = 8 * 1024 * 1024;
 
 /**
- * 扫描器自身的规则表**必然**包含这些字样（否则它没法查），把它排除掉。
+ * 扫描器自身的规则表必然包含这些字样（否则它没法查），把它排除掉。
  *
  * 代价要说清：真把患者数据误加进这个文件就查不出来。
  * 所以它只应包含"规则与说明"，任何具体数据都不该写进来。
- */
+  */
 const SCANNER_REL = 'src/security/phi-scan.ts';
 
 /**
- * 演示环境惯用的虚构值 —— **只用于在报告里加标注，不做免检**。
+ * 演示环境惯用的虚构值 —— 只用于在报告里加标注，不做免检。
  * "我以为它是假的"正是漏检的起点：真实数据里出现"张三"的概率不为零。
- */
+  */
 const FICTIONAL_NAMES = new Set(['张三', '李四', '王五', '赵六', '张三丰', '某某', '患者甲', '患者乙', '测试', '测试患者']);
 
 /** 示例域名：同样只标注 */
 const FICTIONAL_MAIL = /@(example\.(com|org|net)|test|localhost|[\w-]+\.local)$/i;
 
 /**
- * 汉名里不会出现的字：命中它们说明抓到的是**提示文案**而不是姓名
+ * 汉名里不会出现的字：命中它们说明抓到的是提示文案而不是姓名
  * （`患者：门诊号`、`姓名必须已脱敏` 这类措辞在自测标题与文档里到处都是）。
  * 按"宁可不报，不可误报"放过 —— 报告里每一条都得值得看，否则它就会被跳读。
- */
+  */
 const NON_NAME_CHARS = /[号码别龄期址值科]/;
 
 const KEY_FILE_EXT = new Set(['.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.crt', '.cer']);
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
 
-/**
- * 密钥 / 证书文件的级别判定：**判据是"文件里有没有东西"，而不是"文件名像不像密钥"**。
- *
- * 0 字节的文件不含任何材料，报成最高级别只会造出**假警报** —— 而假警报的代价是这份报告被跳读。
- * 但它仍然逐条出现（降为"需人工确认"，并写明为何降级）：**空壳本身可能是一条真信息** ——
- * "本该有内容却落盘失败"就会长这样。实测来源：清除密钥时"把文件写空"的旧实现留下的空壳
- * （已改为真删文件，见 `ai/model-config-store.ts`）。
- */
 export function keyFileVerdict(ext: string, bytes: number): { level: Level; detail: string } {
   if (bytes === 0) {
     return {
@@ -114,9 +65,9 @@ export function keyFileVerdict(ext: string, bytes: number): { level: Level; deta
 /**
  * 四档结论。
  *
- * `reviewed` 是**人已经复核过**的那些：它仍然出现在报告里（连同复核理由与复核人），
+ * `reviewed` 是人已经复核过的那些：它仍然出现在报告里（连同复核理由与复核人），
  * 只是不再计入退出码 —— 一份永远为红的门禁等于没有门禁，而它的价值恰恰在于"新出现的能拦住"。
- */
+  */
 type Level = 'must' | 'review' | 'reviewed' | 'public';
 
 export interface Finding {
@@ -125,22 +76,15 @@ export interface Finding {
   rule: string;
   /** 位置：`相对路径:行号`，容器内为 `路径!条目` */
   where: string;
-  /** 打码后的片段 + 判定依据（**可以给人看**） */
+  /** 打码后的片段 + 判定依据（可以给人看）  */
   detail: string;
-  /**
-   * 命中指纹：`sha256(规则名 ‖ 原值)` 的前 16 位。
-   *
-   * 为什么用**哈希**而不是原值：复核记录要长期保存并进版本库，
-   * 而清单里出现明文就等于换个地方再泄露一次。哈希能让复核精确匹配到这一条命中，又不落明文；
-   * 路径与行号**不参与**哈希，于是文件挪动、行号变化都不会让复核失效。
-   */
   fingerprint: string;
   /**
-   * 未打码的原值，**只用于白名单归因，绝不打印、绝不写入报告文件**。
+   * 未打码的原值，只用于白名单归因，绝不打印、绝不写入报告文件。
    *
    * 这是本脚本唯一一处同时持有明文的地方：既要在报告里打码，又要把"这把私钥推得出来吗"
    * 判成可断言的结论 —— 两件事必须分开对待，靠"打印时记得打码"是迟早会出错的。
-   */
+    */
   secret?: string;
 }
 
@@ -153,8 +97,6 @@ interface FileRef {
   rel: string;
   abs: string;
 }
-
-/* ------------------------------ 命名与打码 ------------------------------ */
 
 /** 手写扩展名提取：本项目对 node:path 的自有类型声明未覆盖 extname */
 function extOf(name: string): string {
@@ -193,8 +135,6 @@ function maskValue(value: string): string {
   return `${chars.slice(0, 2).join('')}***（${chars.length} 字符）`;
 }
 
-/* ------------------------------ 规则实现 ------------------------------ */
-
 interface Rule {
   name: string;
   level: Level;
@@ -208,13 +148,6 @@ interface Rule {
 const ID_CARD_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
 const ID_CARD_CHECK = ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'];
 
-/**
- * 身份证号：18 位 + **校验位按 GB 11643 复算**。
- *
- * 为什么要复算：这样"命中"才有依据，而不是"18 位数字就算"。
- * 编号（住院号/设备号/时间戳拼接）常常正好 18 位，不复算会淹没在误报里；
- * 反过来，校验位通过的值几乎一定是真实身份证号编制规则下的产物，必须人工确认。
- */
 function idCardDetail(value: string): string | null {
   const upper = value.toUpperCase();
   const birthday = upper.slice(6, 14);
@@ -263,13 +196,13 @@ const RULES: Rule[] = [
   },
   {
     /*
-     * **冒号是必需的**（`[:：=]`，不是可选）。
+     * 冒号是必需的（`[:：=]`，不是可选）。
      *
      * 试探过"允许无冒号"（`住院号 ZY001` 这种写法），结果立刻被误报淹没：
      * 代码注释里的「姓名/就诊号以外」「住址替换为等长假值」全被当成了数据 ——
-     * 命中的是**措辞**不是**数据**。误报的代价不只是噪声：它会让人开始跳读这份报告，
+     * 命中的是措辞不是数据。误报的代价不只是噪声：它会让人开始跳读这份报告，
      * 而这份报告的全部价值就在于"每一条都值得看"。代价认下来：无冒号的写法会被漏掉。
-     */
+      */
     name: '带标签的身份信息',
     level: 'review',
     pattern:
@@ -290,24 +223,6 @@ const RULES: Rule[] = [
     },
   },
   {
-    /*
-     * JSON 里的姓名 / 标签字段。
-     *
-     * 为什么单列一条：**这条规则是被漏报逼出来的** —— 首轮扫描零命中，
-     * 而 `artifacts/recipient-keys.json` 里明明白白写着 `"label": "张医生（内科）"`。
-     * 中文姓名不一定跟在"姓名："后面，它经常是某个字段的**值**。
-     * 若不补这条，这份报告就会给出一次"没搜到姓名"的假清白 —— 那是它最不该犯的错。
-     *
-     * **`name` 这个键是刻意不要的**：试过加进来，33 处命中全是章节名（"结论"、"签名"、"
-     * 辅助检查"）—— 说明 `name` 在结构上就是歧义的（"字段名"与"人名"共用它）。
-     * 认下这个漏：只写 `name` 的 JSON 查不到；换来的是报告里每一条都值得看。
-     *
-     * **值后面允许跟着别的东西**（`[^"\n]*`）：这条是被自己的实测打回来的 ——
-     * 最初写成 `"...":\s*"([中文]{2,12})"`（要求闭合引号紧跟纯中文），
-     * 而真实数据是 `"label": "张医生（内科）"`：**人名后面跟着科室**，于是整条失配、静默漏报。
-     * 教训很具体：**"差一个字符就整条漏掉"的模式，必须拿真实数据试过才算写完**，
-     * 否则它会以"没命中"的形态伪装成"没问题"。
-     */
     name: 'JSON 里的姓名 / 标签字段',
     level: 'review',
     pattern: /"(?:patientName|realName|doctorName|signerName|label)"\s*:\s*"([\u4e00-\u9fa5·]{2,12})[^"\n]*"/g,
@@ -321,14 +236,9 @@ const RULES: Rule[] = [
       FICTIONAL_MAIL.test(match[0]) ? `${maskValue(match[0])}（示例域名，疑似虚构）` : maskValue(match[0]),
   },
   {
-    /*
-     * 硬编码口令 / 令牌：开源前最该查的一类（它不像私钥有 PEM 那种显眼形态）。
-     *
-     * 定为"需人工确认"而不是"必须处置"：自测夹具里本来就会写死口令（那是测试数据，不是密钥），
-     * 一提就必须处置，报告立刻被噪声淹没。**措辞要求人逐条看一眼来源**，而不是一律当事故。
-     * 本项目有一条相关纪律：签名服务的密钥只存**环境变量名**，所以这里命中的若是变量名本身
-     * （值形如 SIGN_API_KEY），人工确认即可；命中真正的取值才是问题。
-     */
+    // 硬编码口令 / 令牌：开源前最该查的一类（它不像私钥有 PEM 那种显眼形态）。
+// 定为"需人工确认"而不是"必须处置"：自测夹具里本来就会写死口令（那是测试数据，不是密钥），
+
     name: '硬编码口令 / 令牌',
     level: 'review',
     pattern: /(?:passphrase|password|passwd|apiKey|api_key|accessToken|access_token|secretKey|token)\s*[:=]\s*['"`]([^'"`\n]{6,64})['"`]/gi,
@@ -345,15 +255,14 @@ function lineOf(text: string, index: number): number {
 /**
  * 命中指纹：只对"规则名 + 原值"取哈希。
  *
- * 刻意**不含**路径与行号 —— 复核记录不该因为"文件挪了目录"或"上面加了一行注释"就失效：
+ * 刻意不含路径与行号 —— 复核记录不该因为"文件挪了目录"或"上面加了一行注释"就失效：
  * 那种失效会训练人直接重跑一遍复核，而复核的全部意义就是"这一条我看过了"。
  * 同一段合成数据出现在多个自测文件里，指纹也只有一个，复核记录因此很紧凑。
- */
+  */
 export function fingerprintOf(rule: string, rawValue: string): string {
   return sha256Hex(utf8(`${rule}\u0000${rawValue}`)).slice(0, 16);
 }
 
-/** 对一段文本跑全部规则；`where` 是给人看的位置标签。导出是为了能用例守住规则本身（见 `phi-scan-self-test.ts`） */
 export function scanText(text: string, where: string, into: Finding[]): void {
   for (const rule of RULES) {
     rule.pattern.lastIndex = 0;
@@ -377,15 +286,13 @@ export function scanText(text: string, where: string, into: Finding[]): void {
   }
 }
 
-/* ------------------------------ 演示密钥白名单 ------------------------------ */
-
 /**
- * 收集代码里**公开字面量**的演示种子。
+ * 收集代码里公开字面量的演示种子。
  *
  * 判据很硬：种子就写在源码里（`demoKeyPair('xxx')` / `DEMO_SIGNING_SEED`），
- * 任何人 clone 下来都能推出同一把私钥 —— 所以它**构造上就不可能保密**，
+ * 任何人 clone 下来都能推出同一把私钥 —— 所以它构造上就不可能保密，
  * 发现它不构成泄漏。反过来，推不出来的私钥一律按"必须处置"处理，不做任何猜测。
- */
+  */
 function collectDemoSeeds(texts: Map<string, string>): string[] {
   const seeds = new Set<string>([DEMO_SIGNING_SEED]);
   const pattern = /demoKeyPair\(\s*'([^']+)'/g;
@@ -410,8 +317,6 @@ export function demoPrivateHexes(seeds: string[]): Map<string, string> {
   return out;
 }
 
-/* ------------------------------ 文件遍历与分类 ------------------------------ */
-
 function collect(relRoot: string, out: FileRef[]): void {
   const abs = resolve(REPO, relRoot);
   if (!existsSync(abs)) return;
@@ -428,25 +333,13 @@ function collect(relRoot: string, out: FileRef[]): void {
   }
 }
 
-/**
- * 人工复核记录（进版本库，文件名固定）。
- *
- * 为什么必须有它：**一份永远为红的门禁等于没有门禁**。测试夹具、演示数据本来就会命中规则，
- * 若它们永远让退出码为 1，人就会开始忽略这个检查 —— 而它恰恰要靠"**新出现的能拦住**"才有用。
- * 所以复核过的命中降级为 ✓：**仍然逐条列在报告里（连同理由与复核人）**，只是不再阻断。
- *
- * 刻意**不提供**"一键把所有命中标为已复核"：那样这个文件会变成一个橡皮图章。
- * 要复核就用 `--fingerprints` 打印指纹，然后手写进记录 —— 复核是一件要被看见的事。
- */
 const REVIEW_FILE = 'phi-scan.reviewed.json';
 
 export interface ReviewEntry {
-  /** 命中指纹（见 `fingerprintOf`）。**匹配只认它** —— 路径与行号会变，指纹不会 */
   fingerprint: string;
   /** 复核时的位置与规则，仅供人读 */
   where?: string;
   rule?: string;
-  /** 为什么判定它不是真实数据：这一栏才是复核记录的价值所在 */
   note: string;
   reviewedBy: string;
   reviewedAt: string;
@@ -460,9 +353,9 @@ export function loadReview(): ReviewEntry[] {
 }
 
 /**
- * 应用复核记录：命中的降级为 `reviewed` 并附上理由；返回**已失效**的记录
+ * 应用复核记录：命中的降级为 `reviewed` 并附上理由；返回已失效的记录
  * （清单里记着、仓库里却已无对应命中 —— 内容被删或改过了，记录该清理，否则它会悄悄烂掉）。
- */
+  */
 export function applyReview(findings: Finding[], entries: ReviewEntry[]): ReviewEntry[] {
   const byFingerprint = new Map(entries.map((entry) => [entry.fingerprint, entry]));
   const used = new Set<string>();
@@ -477,11 +370,11 @@ export function applyReview(findings: Finding[], entries: ReviewEntry[]): Review
 }
 
 /**
- * 私钥归因：能由**公开种子**推导的降级为"已知可公开"，其余留作"必须处置"并返回位置清单。
+ * 私钥归因：能由公开种子推导的降级为"已知可公开"，其余留作"必须处置"并返回位置清单。
  *
- * 单独成一个函数不是为了好看：这是全脚本**唯一一处会把告警降级**的地方 ——
+ * 单独成一个函数不是为了好看：这是全脚本唯一一处会把告警降级的地方 ——
  * 降级错了就等于亲手放过一把真私钥，所以它必须能被用例守住（见 P5）。
- */
+  */
 export function attributeKnownKeys(findings: Finding[], known: Map<string, string>): string[] {
   const unknownKeys: string[] = [];
   for (const finding of findings) {
@@ -497,8 +390,6 @@ export function attributeKnownKeys(findings: Finding[], known: Map<string, strin
   }
   return unknownKeys;
 }
-
-/* ------------------------------ 主体 ------------------------------ */
 
 interface ScanOutput {
   scannedAt: string;
@@ -592,9 +483,9 @@ function main(): void {
     scanText(text, file.rel, findings);
   }
 
-  /* 第二遍：OFD 容器**解包后**扫 —— 纯文本扫描对 ZIP 会给出假清白。
-     这里同时统计"解出了多少条目、其中多少按文本扫过"：**覆盖范围必须是看得见的数字**，
-     否则"解包后没报问题"和"根本没解出东西"在报告上长得一模一样，正是假清白的来源。 */
+  /* 第二遍：OFD 容器解包后扫 —— 纯文本扫描对 ZIP 会给出假清白。
+     这里同时统计"解出了多少条目、其中多少按文本扫过"：覆盖范围必须是看得见的数字，
+     否则"解包后没报问题"和"根本没解出东西"在报告上长得一模一样，正是假清白的来源。  */
   let containerEntries = 0;
   let containerTexts = 0;
   for (const [rel, bytes] of blobs) {
@@ -616,7 +507,7 @@ function main(): void {
   const seeds = collectDemoSeeds(texts);
   const known = demoPrivateHexes(seeds);
   const unknownKeys = attributeKnownKeys(findings, known);
-  /* 复核记录在归因**之后**应用：演示私钥已降级为"已知可公开"，不该被复核记录再盖一层 */
+  /* 复核记录在归因之后应用：演示私钥已降级为"已知可公开"，不该被复核记录再盖一层  */
   const staleReview = applyReview(findings, loadReview());
 
   const must = findings.filter((item) => item.level === 'must');
@@ -626,7 +517,6 @@ function main(): void {
 
   const release = releaseState(roots);
 
-  /* ------------------------------ 报告 ------------------------------ */
   console.log('发布前隐私与密钥排查（模式匹配，不是合规审计）');
   console.log(`仓库根：${REPO}`);
   console.log(`扫描根：${roots.join(', ')}\n`);
@@ -732,9 +622,9 @@ function main(): void {
 /**
  * 发布态检查：这些是"能不能公开"的另一半（文章发布备注里已列过）。
  *
- * 它们**不计入退出码** —— 缺 LICENSE 与"仓库里有生产私钥"是两类事：
+ * 它们不计入退出码 —— 缺 LICENSE 与"仓库里有生产私钥"是两类事：
  * 前者是流程进度，后者必须立刻处置。混在一个门禁里，结果就是这个检查天天红、然后就没人看了。
- */
+  */
 function releaseState(_roots: string[]): string[] {
   const lines: string[] = [];
   if (existsSync(resolve(REPO, 'LICENSE'))) lines.push('LICENSE：已存在');
@@ -760,10 +650,10 @@ function releaseState(_roots: string[]): string[] {
     return lines;
   }
 
-  /* 判据是**具体风险路径**，不是"整个扫描根被忽略"。
+  /* 判据是具体风险路径，不是"整个扫描根被忽略"。
      两者的区别很实际：`.gitignore` 若一刀切忽略整个 `artifacts/`，
      `verify:ofd` / `test:wst500` / `scan:external` 在全新 clone 上会直接失败 ——
-     那是**假干净**。所以这里只要求真正危险的那几处被挡住。 */
+     那是假干净。所以这里只要求真正危险的那几处被挡住。  */
   const risky: Array<{ path: string; why: string }> = [
     { path: 'artifacts/state', why: '快照 salt 与密文同时在库，等于给离线爆破留一份样本' },
     { path: 'artifacts/state-selftest', why: '同上（自测状态目录）' },

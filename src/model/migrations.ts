@@ -1,14 +1,4 @@
-/**
- * schemaVersion 迁移框架。
- *
- * 铁律：**禁止原地修改字段语义**。任何模型变更必须新增一条迁移，形成 from→to 链；
- * 否则线上存量文档会在升级后静默变成"能读但语义已变"的数据 —— 这是最难排查的一类事故。
- *
- * 职责边界：
- *   - migrate() 只负责版本与结构搬迁，不做业务校验；
- *   - 校验由 validate() 负责（只接受当前版本）；
- *   - 调用顺序：fromJson() → migrate() → validate()。
- */
+// schemaVersion 迁移框架。
 
 import { hashNodes } from './hash.ts';
 import { isPlainObject } from './guards.ts';
@@ -36,11 +26,11 @@ export class MigrationError extends Error {
 }
 
 /**
- * 迁移登记表。新增版本时**必须**在此追加一条，并补一条 self-test 用例。
+ * 迁移登记表。新增版本时必须在此追加一条，并补一条 self-test 用例。
  * 0.9.0 → 1.0.0 为示例迁移（真实项目里 0.9.0 是标准发布前的内部版本）：
  *   - 为机读块补充 sourceHash（内容指纹）；
  *   - 为缺省 provenance 的节点补 origin='imported'（历史数据可能没有来源标记）。
- */
+  */
 export const MIGRATIONS: Migration[] = [
   {
     from: '0.9.0',

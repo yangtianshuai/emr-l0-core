@@ -1,16 +1,4 @@
-/**
- * T10~T15 验收自测：AI 建议通道与门控。
- *
- *   node src/core/suggestion-self-test.ts
- *
- * 两部分：
- *   A 契约用例（TS 真实实现）—— 直接对应 S4 的 26 条契约，逐条断言行为与错误码；
- *   B 跨实现一致性 —— 同一批场景分别跑「TS 真实实现」与「工具链 JS 参考实现（doc-store）」，
- *     要求两者的"成功/错误码"完全一致。**双实现交叉验证**能抓住"两套实现各自看起来都对、
- *     但语义已经漂移"的问题（例如阈值口径、门控顺序、状态机边界的差异）。
- *
- * 未覆盖（归属其他任务）：机读信息派生与陈旧检测（T04/T16）、OFD 导出计划校验（T17）。
- */
+// T10~T15 验收自测：AI 建议通道与门控。
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,8 +43,6 @@ function textOf(session: WriteSession, nodeId: NodeId): string {
   const node = session.document.nodes[nodeId] as Extract<DocNode, { type: 'text' }>;
   return node.runs.map((run) => run.text).join('');
 }
-
-/* --------------------------------- A 部分 --------------------------------- */
 
 async function partA(): Promise<void> {
   await test('A1 生成建议不落笔、不留痕、不改 rev（门控在落笔，不在生成）', async () => {
@@ -261,9 +247,6 @@ async function partA(): Promise<void> {
       '都应是 pending',
     );
     assertEqual(inGroup[0]?.traceId, 'trace-001', 'traceId 应透传（与 groupId 各司其职）');
-    /* 组 ID 系统生成：调用方给不了，也就无法把两批不相干的建议并成一组。
-       注意 `groupId` **可能为空** —— 那只会发生在"整批都与仍待处理的旧建议同文本"时
-       （那种情况不建组，见 `SuggestionBook.addBatch`）；这里三条都是新文本，必须建了组。 */
     assert((batch.groupId ?? '').startsWith('grp_'), `组 ID 应系统生成，实际 ${batch.groupId}`);
     assertEqual(session.verifyInvariants(), [], '不变量应成立');
   });
@@ -441,9 +424,6 @@ async function partA(): Promise<void> {
     const { session, ids } = open();
     const spec = { nodeId: ids.textIds[0] as NodeId, text: '离线模板续写', confidence: 0.95, modelId: 'offline:x' };
 
-    /* ① 连点两次：第二次复用同一条 —— 建议数与 `suggested` 都不膨胀。
-       这一条是**根因**所在：产出方可以是确定性的，而"生成"是医生能连点的动作，
-       不去重就会让指标随点击次数失真（采纳率/拒绝率是要进质量报表的数字）。 */
     const first = session.suggestText(spec, AI);
     const second = session.suggestText(spec, AI);
     assertEqual(second.suggestionId, first.suggestionId, '同目标同文本且仍待处理时应复用同一条');
@@ -451,13 +431,10 @@ async function partA(): Promise<void> {
     assertEqual(session.listSuggestions().length, 1, '建议数不应随点击次数膨胀');
     assertEqual(session.getMetrics().suggested, 1, '指标也不应膨胀');
 
-    /* ② 文本不同就是另一条：产出方换了内容，就是新建议 */
     const other = session.suggestText({ ...spec, text: '另一段内容' }, AI);
     assertEqual(other.reused, false, '文本不同不应复用');
     assertEqual(session.listSuggestions().length, 2, '文本不同应新建');
 
-    /* ③ 已被采纳 / 已被拒绝 → **允许再建**：医生再点"生成一条"是主动再要一条，
-       被旧决定挡住会表现成"点了没反应"，那比重复更糟 */
     session.acceptSuggestion({ suggestionId: first.suggestionId }, HUMAN);
     const again = session.suggestText(spec, AI);
     assertEqual(again.reused, false, '已采纳的不算重复');
@@ -477,8 +454,6 @@ async function partA(): Promise<void> {
     assert((base.groupId ?? '').startsWith('grp_'), '首次整批应建组');
     const baseGroup = base.groupId as string;
 
-    /* ① 部分重复：只有新文本进新组，重复的那条**留在它原来的组里**（复用不改原条，
-       组是历史事实，不因复用而转移） */
     const mixed = session.suggestBatch({ modelId: 'm1', items: [spec(first, 'A'), spec(second, 'C')] }, AI);
     assertEqual(mixed.reused.length, 1, '重复的那条应如实列入 reused');
     assertEqual(mixed.reused[0], base.suggestionIds[0], 'reused 里应是原有那条的 id');
@@ -487,7 +462,6 @@ async function partA(): Promise<void> {
     assertEqual(session.listSuggestions({ groupId: baseGroup }).length, 2, '原组仍是两条');
     assertEqual(session.listSuggestions({ groupId: mixed.groupId as string }).length, 1, '新组只有新增那条');
 
-    /* ② 全重复：不建组、不推进组号 —— 空组会让界面的"接受本组"落在一个不存在的范围上 */
     const groupsBefore = session.listSuggestionGroups().length;
     const allDuplicate = session.suggestBatch({ modelId: 'm1', items: [spec(first, 'A'), spec(second, 'B')] }, AI);
     assertEqual(allDuplicate.groupId, undefined, '全重复不应建组');
@@ -545,12 +519,12 @@ async function partA(): Promise<void> {
 
   await test('A26 归因恒等式：四类之和恒等于采纳数，且与 metrics 的采纳数同源', async () => {
     const { session, ids } = open();
-    /* 一条原样、一条微改、一条大改、外加一条拒绝（拒绝**不进归因**，它有自己的原因） */
+    /* 一条原样、一条微改、一条大改、外加一条拒绝（拒绝不进归因，它有自己的原因）  */
     const asIs = session.suggestText({ nodeId: ids.textIds[0] as NodeId, text: '原文', confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: asIs.suggestionId }, HUMAN);
-    /* 微改样本：只加一个"尚"字。注意 0.2 的边界**并不宽松** ——
+    /* 微改样本：只加一个"尚"字。注意 0.2 的边界并不宽松 ——
        "甲：无异常。"改成"甲：未见异常。"（加两字 / 共七字）已经是 0.29，直接翻成大改；
-       所以界面上"微改"这一档描述的确实是"只动了措辞" */
+       所以界面上"微改"这一档描述的确实是"只动了措辞"  */
     const light = session.suggestText({ nodeId: ids.textIds[1] as NodeId, text: '甲：体温正常，精神可。', confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: light.suggestionId, editedText: '甲：体温正常，精神尚可。' }, HUMAN);
     const heavy = session.suggestText({ nodeId: ids.textIds[2] as NodeId, text: '考虑肺炎', confidence: 0.99, modelId: 'm1' }, AI);
@@ -569,14 +543,14 @@ async function partA(): Promise<void> {
     assertEqual(attribution.asIs, 1, '一条原样');
     assertEqual(attribution.light, 1, '一条微改');
     assertEqual(attribution.heavy, 1, '一条大改');
-    /* 占比分母是**采纳数**（含未归因）：把 unknown 从分母里拿掉，指标会随老数据存量无声变好 */
+    /* 占比分母是采纳数（含未归因）：把 unknown 从分母里拿掉，指标会随老数据存量无声变好  */
     assertEqual(attribution.asIsShare.toFixed(4), '0.3333', '占比分母应为采纳数');
   });
 
   await test('A27 未归因的采纳单列：老数据不能被读成"原样采纳"', async () => {
     /* `editRatio` 是这次才加的字段，老快照里的采纳没有它。
-       默认成"原样采纳"恰好把指标推向**模型表现最好的一档** ——
-       这正是本仓库反复拒绝的那种"把不知道说成知道"。 */
+       默认成"原样采纳"恰好把指标推向模型表现最好的一档 ——
+       这正是本仓库反复拒绝的那种"把不知道说成知道"。  */
     const book = SuggestionBook.restore({
       seq: 1,
       groupSeq: 0,
@@ -611,7 +585,7 @@ async function partA(): Promise<void> {
     /* 长文本里改一个字：剥公共前后缀后只剩一个字符，比例极小 */
     const base = '患者今日体温正常，无咳嗽咳痰，精神可，饮食睡眠可，二便正常。';
     assert(editRatioOf(base, base.replace('精神可', '精神尚可')) <= 0.2, '一处小改应落在微改档内');
-    /* 分档边界：`light` 是**闭区间**（≤），差一点就翻档 */
+    /* 分档边界：`light` 是闭区间（≤），差一点就翻档  */
     assertEqual(editBandOf(0), 'as-is', '0 是原样');
     assertEqual(editBandOf(0.2), 'light', '边界值算微改（≤）');
     assertEqual(editBandOf(0.2000001), 'heavy', '刚过边界算大改');
@@ -680,8 +654,6 @@ async function partA(): Promise<void> {
     assertEqual(node.provenance.origin, 'ai', '节点级记录采纳行为');
   });
 }
-
-/* --------------------------------- B 部分 --------------------------------- */
 
 interface Ids {
   textId: NodeId;
@@ -877,8 +849,8 @@ async function partB(createJsStore: (doc: unknown, options?: unknown) => RawStor
         fieldId: jsFixture.ids.fieldIds[0] as NodeId,
       };
 
-      /* 用**异步版**：签章场景返回 Promise，同步 codeOf 抓不到它的拒绝
-         （那会让"应当被拒"的场景假装通过 —— 这次改造里真实踩到过） */
+      /* 用异步版：签章场景返回 Promise，同步 codeOf 抓不到它的拒绝
+         （那会让"应当被拒"的场景假装通过 —— 这次改造里真实踩到过）  */
       const tsOutcome = await codeOfAsync(() => scenario.run(tsAdapter(tsSession), tsIds));
       const jsOutcome = await codeOfAsync(() => scenario.run(jsAdapter(jsStore), jsIds));
 
@@ -952,9 +924,9 @@ async function main(): Promise<void> {
     assertEqual(tsMetrics.adoptionRate, jsMetrics.adoptionRate, '采纳率应一致');
     assert(tsMetrics.editRate > 0 && tsMetrics.editRate < 1, `修改率应在 (0,1) 之间，实际 ${tsMetrics.editRate}`);
 
-    /* 三级归因同样跨实现比对：改动幅度是一个**算法**（剥公共前后缀、滚动数组边界、
+    /* 三级归因同样跨实现比对：改动幅度是一个算法（剥公共前后缀、滚动数组边界、
        分档的闭区间），两套实现各写一遍正是双实现验证的意义 ——
-       任何一处漂移都会在这里露出来，而不是等到某天发现两张报表对不上 */
+       任何一处漂移都会在这里露出来，而不是等到某天发现两张报表对不上  */
     const tsAttribution = tsSession.getSuggestionAttribution();
     assertEqual(tsAttribution, jsStore.getSuggestionAttribution(), '三级归因应逐项一致');
     assertEqual(

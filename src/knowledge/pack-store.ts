@@ -1,46 +1,4 @@
-/**
- * 知识资产包存储：**库里的 `knowledge_packs` 一张表，一个包一行**。
- *
- * ## 为什么是"一个包一行"，而不是"一个版本一行 + 一张生效指针"
- *
- * 早期实现是后者（`(pack_id, version)` 主键 + `knowledge_pack_active` 指针表），
- * 于是多版本并存是天然的、回退=改指针那一行。那套东西**已经删掉**，理由不是"简单",
- * 而是它把现场真正需要回答的问题换掉了：
- *   - 需要回答的是"**现在跑的是哪一份内容**" → 一行就能答，指纹就是答案；
- *   - 版本模型逼着人回答的是"**该切哪一版**" —— 这是个判断题，而系统给不出依据，
- *     只能让人在界面上对着两个版本号做选择。
- * 删掉之后：写包 = 按 `pack_id` 覆盖（改了就是改了），
- * 条目开关仍单独一列（不混进内容，见下），指纹一列（可直接查"这台机器载的是哪份内容"）。
- *
- * ## 包内容**不加密**（与文书、旁挂数据相反，这是有意的）
- *
- * 包里是规则、模板、术语 —— **没有患者数据**。加密它只会让包无法核对、无法 diff、
- * 无法被别人人工审查，而"这个判定标准到底是什么"恰恰是必须能被看见的东西。
- *
- * ## 库是唯一来源
- *
- * 代码里**不再有出厂包**：新库就是空的（如实上报 `source: 'empty'`），
- * 包只有一条进来的路 —— `writePack()`（演示服务里是 `POST /api/knowledge-pack-load`）。
- * 不再有"代码里的内置包"与"库里的包"两份内容互相追着跑，也就不再有
- * "我改了代码怎么没生效"这一类问题：改包就是写库，写库即生效。
- *
- * ## 覆盖是允许的，但**不允许悄悄覆盖**——覆盖要留痕
- *
- * `writePack()` 会**如实报出指纹前后**（`fingerprintBefore → fingerprintAfter`），
- * 调用方据此记一条审计：判定标准换了，这件事必须留得下痕迹。
- * 这与"包是部署参数、不进文档留痕"并不矛盾：它不进**病历**的留痕，但进**系统**的审计。
- *
- * ## 开关不进包内容
- *
- * `enabled` 是运行时策略，只写在 `disabled` 列里；写内容时会剥掉它（`packContentProjection`）。
- * 于是"载的是哪份内容"（`content` / `fingerprint` 列）与"实际在跑什么"（`disabled` 列）
- * 分得干干净净 —— 与内存态的两个指纹同一个口径。
- *
- * ## 装载是"一盘定生死"
- *
- * 先**全部**读库校验，再清空注册表统一装载：不允许出现"半个库状态"。
- * 那是个谁也没设计过的状态，而它会以"规则少了一条"的形式安静地活着。
- */
+// 知识资产包存储：库里的 `knowledge_packs` 一张表，一个包一行。
 
 import { createHash } from 'node:crypto';
 import { inTransaction, type SqliteDatabase } from '../storage/sqlite.ts';
@@ -87,7 +45,7 @@ export interface PackRow {
 }
 
 export interface PackStoreReport {
-  /** `empty` = 库里一个包都没有（**空就是空**，不再有出厂包替你播种）；`database` = 从库装载 */
+  /** `empty` = 库里一个包都没有（空就是空，不再有出厂包替你播种）；`database` = 从库装载  */
   source: 'empty' | 'database';
   tables: string[];
   packs: Array<{ packId: string; kind: PackKind; itemCount: number; enabledItemCount: number; fingerprint: string }>;
@@ -97,7 +55,7 @@ export type OpenResult = { ok: true; report: PackStoreReport } | { ok: false; co
 
 export interface OpenPackStoreInput {
   registry: PackRegistry;
-  /** 包存储所在的库（与文书、旁挂数据**同一个库**：备份一次就带走全部） */
+  /** 包存储所在的库（与文书、旁挂数据同一个库：备份一次就带走全部）  */
   db: SqliteDatabase;
   supported: SupportedEngineApis;
   /** 类别专有校验（如规则包的谓词参数）—— 与写包时用的是同一套 */
@@ -105,7 +63,7 @@ export interface OpenPackStoreInput {
 }
 
 export interface WritePackInput extends OpenPackStoreInput {
-  /** 外部提交的包（**未校验的原始数据**） */
+  /** 外部提交的包（未校验的原始数据）  */
   input: unknown;
   /** 覆盖前先留痕用的操作者标识（只用于报告，不落库） */
   by?: string;
@@ -118,7 +76,7 @@ export interface WritePackResult {
   action: 'created' | 'updated' | 'unchanged';
   fingerprintBefore: string | null;
   fingerprintAfter: string;
-  /** 覆盖时**被丢弃的条目开关**（新版里已不存在的条目）—— 不悄悄丢 */
+  /** 覆盖时被丢弃的条目开关（新版里已不存在的条目）—— 不悄悄丢  */
   droppedSwitches: string[];
   disabled: string[];
   summary: ReturnType<PackRegistry['load']>;
@@ -159,9 +117,9 @@ export function readPackRows(db: SqliteDatabase): PackRow[] {
 }
 
 function buildReport(registry: PackRegistry, db: SqliteDatabase): PackStoreReport {
-  /* 指纹是**内容的函数**，读的时候重算，而不是信任列里的旧值：
+  /* 指纹是内容的函数，读的时候重算，而不是信任列里的旧值：
      迁移会改写内容（如剥掉旧字段），而列里的值那时就与内容不符了 ——
-     而"现在跑的是哪一份内容"必须永远答得准（下一句就是把它展示给人看）。 */
+     而"现在跑的是哪一份内容"必须永远答得准（下一句就是把它展示给人看）。  */
   const fingerprints = new Map(readPackRows(db).map((row) => [row.packId, fingerprintOf(row.content)]));
   return {
     source: registry.list().length === 0 ? 'empty' : 'database',
@@ -177,12 +135,12 @@ function buildReport(registry: PackRegistry, db: SqliteDatabase): PackStoreRepor
 }
 
 /**
- * 在**临时注册表**上把整盘演练一遍。
+ * 在临时注册表上把整盘演练一遍。
  *
  * 包与包之间的冲突（同 packId、同条目）只会在装载那一刻暴露，而那时真注册表已经被清空。
- * 先演练，就把**所有**失败挡在"注册表被动过"之前 —— 于是契约变得干净：
- * **失败 ⇒ 注册表保持原样**。
- */
+ * 先演练，就把所有失败挡在"注册表被动过"之前 —— 于是契约变得干净：
+ * 失败 ⇒ 注册表保持原样。
+  */
 function rehearsalOf(
   input: Pick<OpenPackStoreInput, 'supported' | 'validateFor'>,
   rows: Array<{ pack: Pack; disabled: string[] }>,
@@ -201,7 +159,7 @@ function rehearsalOf(
   return { ok: true };
 }
 
-/** 把库里的那些行解析成可装载的包（**逐行校验，一处不合法就整体拒绝**） */
+/** 把库里的那些行解析成可装载的包（逐行校验，一处不合法就整体拒绝）  */
 function parseRows(
   input: Pick<OpenPackStoreInput, 'supported' | 'validateFor'>,
   rows: readonly PackRow[],
@@ -237,16 +195,16 @@ function parseRows(
 }
 
 /**
- * 打开包存储：**库是唯一来源**（空库就是空库，不用任何出厂包顶上）。
+ * 打开包存储：库是唯一来源（空库就是空库，不用任何出厂包顶上）。
  *
- * 顺序刻意如此：**先读库校验 → 再清空注册表 → 统一装载**。
+ * 顺序刻意如此：先读库校验 → 再清空注册表 → 统一装载。
  * 若装载阶段失败，注册表保持为空并如实报错 —— 不留"半个库状态"。
- */
+  */
 export function openPackStore(input: OpenPackStoreInput): OpenResult {
   const rows = readPackRows(input.db);
   if (rows.length === 0) {
-    /* 空库：把注册表清空并如实上报。**不播种、不回退到任何内置内容** ——
-       "看起来有规则在跑"是这里最危险的一种状态（医生以为质控在工作）。 */
+    /* 空库：把注册表清空并如实上报。不播种、不回退到任何内置内容 ——
+       "看起来有规则在跑"是这里最危险的一种状态（医生以为质控在工作）。  */
     input.registry.clear();
     return { ok: true, report: { source: 'empty', tables: [PACK_TABLE], packs: [] } };
   }
@@ -271,16 +229,11 @@ export function openPackStore(input: OpenPackStoreInput): OpenResult {
  * 写入（新增或覆盖）一个包，并立刻装载。
  *
  * 契约：
- *   - `action: 'unchanged'` 时**什么都不写**（重复灌同一个包不该让 `updated_at` 漂移）；
- *   - 覆盖时**保留仍然存在的条目开关**，丢弃新版里已不存在的条目，并在 `droppedSwitches` 里如实报出；
- *   - 失败 ⇒ **库与注册表都不动**（校验与冲突判定全部先于写入）。
- */
+ *   - `action: 'unchanged'` 时什么都不写（重复灌同一个包不该让 `updated_at` 漂移）；
+ *   - 覆盖时保留仍然存在的条目开关，丢弃新版里已不存在的条目，并在 `droppedSwitches` 里如实报出；
+ *   - 失败 ⇒ 库与注册表都不动（校验与冲突判定全部先于写入）。
+  */
 export function writePack(input: WritePackInput): { ok: true; result: WritePackResult } | { ok: false; code: PackStoreErrorCode; message: string } {
-  /*
-   * 校验失败**要按签名返回 `{ok:false}`，而不是抛出去**：
-   * 调用方（接口层）拿到的是"这份包为什么不能收"的说明，而不是一个未捕获异常。
-   * 抛出去的表现是：界面上只有 500，而 `code` 里本来写着可定位的原因（`E_PACK_FIELD_INVALID` 之类）。
-   */
   const pack = ((): Pack | { problem: string } => {
     try {
       const validated = validatePack(input.input, input.supported);
@@ -294,9 +247,9 @@ export function writePack(input: WritePackInput): { ok: true; result: WritePackR
     return { ok: false, code: 'E_PACK_STORE_BAD_CONTENT', message: pack.problem };
   }
 
-  /* 冲突判定：同类别下 `itemId` 被**别的包**占用 → 拒绝。
+  /* 冲突判定：同类别下 `itemId` 被别的包占用 → 拒绝。
      复用注册表自己的判定（它不是"只有装载时才跑"的逻辑，而是唯一一处口径）：
-     临时装配"库里其它包 + 本次这个包"，冲突会在这里抛出来，且真注册表与库都还没动。 */
+     临时装配"库里其它包 + 本次这个包"，冲突会在这里抛出来，且真注册表与库都还没动。  */
   const others = readPackRows(input.db).filter((row) => row.packId !== pack.packId);
   const parsedOthers = parseRows(input, others);
   if (!parsedOthers.ok) return parsedOthers;
@@ -354,16 +307,6 @@ export function writePack(input: WritePackInput): { ok: true; result: WritePackR
   };
 }
 
-/**
- * **删掉一整个包**（库里那一行 + 内存里那一份）。
- *
- * 为什么需要它、而不是"写一份空包进去"：`validatePack` 明确拒绝空包
- * （"空包几乎总是导出/拼装出错"），而**删掉包里最后一条文书**恰恰会让包变空 ——
- * 那是人有意为之的结果，不是导出出错。于是出路只有一条：连包一起删。
- * 留一个空包在库里，界面上会多出一个"什么都装着的包"，那才是真的说不清楚。
- *
- * 顺序仍是"先库、后内存"：反过来会在删库失败时留下"内存里没了、库里还在"。
- */
 export function deletePack(input: { registry: PackRegistry; db: SqliteDatabase; packId: string }): { ok: boolean; code?: PackStoreErrorCode; report: PackStoreReport } {
   const removed = inTransaction(input.db, () => {
     const result = input.db.prepare('delete from knowledge_packs where pack_id = ?').run(input.packId);
@@ -376,11 +319,11 @@ export function deletePack(input: { registry: PackRegistry; db: SqliteDatabase; 
 }
 
 /**
- * 把**条目开关**写回库里（只改 `disabled` 列，不动内容）。
+ * 把条目开关写回库里（只改 `disabled` 列，不动内容）。
  *
  * 内容列一个字节都不碰：否则"关掉一条规则"会连带改变内容指纹，
  * 而"换了包"与"只是关了条规则"就又混成一件事了。
- */
+  */
 export function saveDisabledItems(registry: PackRegistry, db: SqliteDatabase, options: { at?: string } = {}): { tables: string[] } {
   const at = options.at ?? now();
   inTransaction(db, () => {
@@ -389,8 +332,8 @@ export function saveDisabledItems(registry: PackRegistry, db: SqliteDatabase, op
       const updated = db
         .prepare('update knowledge_packs set disabled = ?, updated_at = ? where pack_id = ?')
         .run(JSON.stringify(disabled), at, summary.packId);
-      /* 注册表里有、库里却没有：**不静默造一行**出来（那等于凭空多出一份内容）。
-         如实报错，让"内存与库不一致"当场暴露，而不是等重启后包内容变成另一份。 */
+      /* 注册表里有、库里却没有：不静默造一行出来（那等于凭空多出一份内容）。
+         如实报错，让"内存与库不一致"当场暴露，而不是等重启后包内容变成另一份。  */
       if (Number(updated.changes) === 0) {
         throw new PackStoreError(
           'E_PACK_STORE_WRITE',

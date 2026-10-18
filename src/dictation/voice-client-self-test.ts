@@ -1,18 +1,4 @@
-/**
- * 语音采集客户端（Windows exe）的验收自测。
- *
- *   node src/dictation/voice-client-self-test.ts
- *
- * 它守这几件事：
- *   VC1 **分片规则与 capture.ts 逐字段一致**（同一时间线喂两份实现：段号、区间、原因、WAV 字节数、短片计数）；
- *   VC2 **桥协议与 local-capture-client 一致**（令牌、未开始、配置非法、取段、取音频、乱序拒绝、ack 释放、done 汇总）；
- *   VC4 **多块录音卡能选**（枚举只读、按编号/名字解析，找不到就拒绝启动而不是回落系统默认）；
- *   VC5 **无帧看门狗**（设备中途停摆要判得出，收到帧要立刻恢复）。
- *
- * 为什么必须对拍：exe 是 `capture.ts` 的**第二份实现**（Node 没有麦克风 API）。两份实现一定会分叉，
- * 除非每次都在同一时间线上比较结果。这里不碰真麦克风：用 `--source tone` 合成音频，
- * 让自测不依赖"这台机器有没有麦"——否则它迟早会因为环境偶尔失败而被所有人忽略。
- */
+// 语音采集客户端（Windows exe）的验收自测。
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -154,7 +140,6 @@ async function waitForHello(port: number, token: string): Promise<void> {
       const reply = await bridge(port, '/dictation-capture/hello', { token });
       if (reply.status === 200) return;
     } catch {
-      /* 进程还没起来 */
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -358,7 +343,6 @@ async function main(): Promise<void> {
     });
     assert(!listening, '选设备失败时不得监听端口（否则页面会连上一个"连上了但采不到音"的客户端）');
 
-    /* tone 源不受 --device 影响：它本来就不碰设备 */
     const tone = spawnExeSync(['--source', 'tone', '--selftest-segments', '--timeline', '1,1', '--config', '800,30,1']);
     assert(JSON.parse(tone).ok === true, 'tone 模式不该被设备选择影响');
   });
@@ -388,7 +372,7 @@ async function main(): Promise<void> {
       assertEqual(saved.ok, true, '--set-device default 应成功');
       assert(existsSync(cfg), '--set-device 要真的落盘（否则"改完就记住"是空话）');
 
-      /* 不存在的设备**不能**写进配置：写进去下次启动才发现，等于埋一个雷 */
+      /* 不存在的设备不能写进配置：写进去下次启动才发现，等于埋一个雷  */
       const bad = spawnSync(EXE, ['--set-device', '999999', '--config-file', cfg], { encoding: 'utf8' });
       assertEqual(bad.status, 2, '不存在的设备不得写进配置');
       const after = JSON.parse(spawnExeSync(['--print-config', '--config-file', cfg])) as Record<string, unknown>;

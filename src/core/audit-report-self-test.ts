@@ -1,13 +1,4 @@
-/**
- * T28 验收自测：审计报告。
- *
- *   node src/core/audit-report-self-test.ts
- *
- * 重点：
- *   A/B **checks 必须能指向具体证据**（哪条节点、哪条留痕），做不到就不该出现在报告里；
- *   C **报告自身有指纹**（改了就对不上）——否则"审计报告"本身可以被随意编辑，等于没有；
- *   D Markdown 与事实一致；"未提供"要如实呈现，不能假装"没有拒绝记录"。
- */
+// T28 验收自测：审计报告。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -38,14 +29,14 @@ function baseDoc(): DocumentModel {
 }
 
 /**
- * 造一份文档并改造内容节点（审计**只读**文档，因此夹具可以直接改 provenance）。
+ * 造一份文档并改造内容节点（审计只读文档，因此夹具可以直接改 provenance）。
  *
- * 注意这里刻意**不再走 `WriteSession.open`** 重算机读信息，原因有两条（都是实测踩出来的）：
- *   1) 写会话会**克隆**文档，改了原对象等于白改；
- *   2) 写会话打开时会校验文档，而夹具故意造的就是"未确认的 AI 内容 / 缺 provenance"这类**非法状态**，
+ * 注意这里刻意不再走 `WriteSession.open` 重算机读信息，原因有两条（都是实测踩出来的）：
+ *   1) 写会话会克隆文档，改了原对象等于白改；
+ *   2) 写会话打开时会校验文档，而夹具故意造的就是"未确认的 AI 内容 / 缺 provenance"这类非法状态，
  *      一旦走写路径就直接抛错，测的就不是审计而是写路径了。
  * 审计只比较 `sourceHash` 与内容哈希，直接把快照对齐即可。
- */
+  */
 function withNodes(mutate: (nodes: Record<string, DocNode>, doc: DocumentModel) => void): DocumentModel {
   const doc = baseDoc();
   mutate(doc.nodes as Record<string, DocNode>, doc);
@@ -66,7 +57,6 @@ function checkOf(report: AuditReport, id: string): { pass: boolean; detail: stri
 }
 
 async function main(): Promise<void> {
-  /* ============================ A 事实统计 ============================ */
 
   await test('A1 事实统计：节点/留痕/AI/导入/人工 计数与文档一致', () => {
     const doc = withNodes((nodes) => {
@@ -117,8 +107,6 @@ async function main(): Promise<void> {
     assertEqual(withLog.gateRejections[0]?.code, 'E_IMPORTED_UNCONFIRMED', '错误码应保留');
     assert(renderAuditReportMarkdown(withLog).includes('## 六、门控拒绝记录'), '提供时应渲染该小节');
   });
-
-  /* ============================== B checks ============================== */
 
   await test('B1 AI 来源不完整 → 失败并给出**具体节点**（否则无法复核）', () => {
     const doc = withNodes((nodes) => {
@@ -229,8 +217,6 @@ async function main(): Promise<void> {
     assert(broken.detail.includes('索引漂移'), '原因应写进证据');
   });
 
-  /* =========================== C 报告自身指纹 =========================== */
-
   await test('C1 报告指纹：同输入稳定；改任一字段即变（否则报告本身可被随意编辑）', () => {
     const doc = withNodes((nodes) => {
       const node = (Object.values(nodes) as DocNode[]).find((item) => item.type === 'text')!;
@@ -245,8 +231,6 @@ async function main(): Promise<void> {
     assertEqual(verifyAuditReport(tampered).ok, false, '改一个数字后指纹必须对不上');
     assertEqual(verifyAuditReport(first).ok, true, '未改动应通过');
   });
-
-  /* ============================ D Markdown ============================ */
 
   await test('D1 Markdown 含关键小节，AI 明细条数与事实一致，且标明"不构成合规结论"', () => {
     const doc = withNodes((nodes) => {
@@ -272,8 +256,6 @@ async function main(): Promise<void> {
     const passed = report.checks.filter((check) => check.pass).length;
     assert(renderAuditReportMarkdown(report).includes(`（${passed}/${report.checks.length} 通过）`), '摘要应反映实际通过数');
   });
-
-  /* ============================== E 边界 ============================== */
 
   await test('E1 无 AI / 无导入 / 无签名 / 无门控日志的文档：报告可生成且不崩', () => {
     const doc = withNodes(() => {});

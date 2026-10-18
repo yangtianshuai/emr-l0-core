@@ -1,16 +1,4 @@
-/**
- * 跨文书一致性检查自测（L2 · I6）。
- *
- *   node src/model/consistency-self-test.ts
- *
- * 本套的重点不是"能查出问题"，而是**不查出不该查的问题**：
- *   C1~C3 基本行为：同编码不同值才报；同值不报；只有一份有不报；
- *   C4 **会自然变化的项（血压/体温/检验值）一律不报** ← 这类工具最常见的死法就是误报；
- *   C5 分类与级别：身份类 → block，稳定事实类 → warn（且**仅展示级别**）；
- *   C6 **不做语义推断**：不同编码之间的矛盾（"无高血压" vs 诊断"高血压"）**不报** ——
- *      不是做不到，而是做不到可信（需要评测集才能声称误报率）；
- *   C7 提示草稿发给**每一份**文书，不替医生决定"以哪一份为准"。
- */
+// 跨文书一致性检查自测（L2 · I6）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { checkConsistency, toSuggestionDrafts } from './consistency.ts';
@@ -107,8 +95,8 @@ async function main(): Promise<void> {
   });
 
   await test('C6 **不做语义推断**：不同编码之间的矛盾（"无高血压" vs 诊断"高血压"）不报', () => {
-    /* 这条是**有意的空白**，不是漏做：文本蕴含需要模型，其误报率在没有评测集时无法声称。
-       一条明显误报会让医生此后忽略所有提示 —— 那比不做更糟。 */
+    /* 这条是有意的空白，不是漏做：文本蕴含需要模型，其误报率在没有评测集时无法声称。
+       一条明显误报会让医生此后忽略所有提示 —— 那比不做更糟。  */
     const issues = checkConsistency([
       { docId: 'doc-A', block: block([{ tag: tagOf('PAST-HISTORY', '既往史'), value: '否认高血压病史' }]) },
       { docId: 'doc-B', block: block([{ tag: tagOf('DIAGNOSIS', '诊断'), value: '高血压 2 级' }]) },

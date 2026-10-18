@@ -1,35 +1,4 @@
-/**
- * 采集编排（C3a）：把"采集源吐出的帧"变成"一组待落位的建议"。
- *
- * ## 它解决的问题
- *
- * C1 的分片规则、C2 的"提交一段音频 → 回文本"、以及 `/api/dictate` 收真实转写，
- * 三件都已经就位，但**没有任何一处把它们串起来**：
- *
- * ```
- *  [本模块] 采集源.onFrame ──► 流式分片器 ──► 逐片取 PCM ──► WAV ──► transcriber（同源路由）
- *                                                                        │
- *                                        提交给 /api/dictate ◄── 收集文本/失败/空结果
- * ```
- *
- * 串起来的这一层**与宿主形态无关**：录音发生在浏览器还是桌面壳里，
- * 只是换上来的 `CaptureSource` 不同（见 `capture-source.ts` 的槽位约定）。
- *
- * ## 四条纪律（都在编排层落地）
- *
- * 1) **不可用就不开始**：`probe()` 不通过直接抛错（带 why + howTo），
- *    **不打开设备、不发一个字节** —— 与"端点未配置时不静默退回模拟转写"同一条纪律；
- * 2) **逐段提交、逐段回显**：一句话说完就发出去，不等整段录完
- *    （设计第八节 `transcribing`：「转写中 3 段 / 已完成 1 段」）；
- * 3) **某段失败不阻塞其余段**，但失败段数、空结果段数、过短丢弃段数**全部如实回报**；
- * 4) **不代编时间区间**：片上交给转写的是流式分片器给出的 `[startSec, endSec]`，
- *    客户端**只负责把对应那段 PCM 拼出来**（拼错等于给了 ASR 另一段音频）。
- *
- * ## 它不做的事
- *
- * 不申请麦克风权限（那是采集源的事）、不落笔（建议仍然要走内核门控）、
- * 不决定置信度（服务端按配置上限填，见 `validateSubmittedSegments`）。
- */
+// 采集编排（C3a）：把"采集源吐出的帧"变成"一组待落位的建议"。
 
 import {
   CaptureError,
@@ -41,8 +10,6 @@ import {
   type SubmittedSegment,
 } from './capture.ts';
 import { CaptureSourceError, describeSourceFailure, type CaptureFrame, type CaptureSource } from './capture-source.ts';
-
-/* ============================== 依赖 ============================== */
 
 /** 转写一段音频（真实形态是 `POST /api/dictation/capture/segment`，同源） */
 export interface SegmentTranscriber {
@@ -59,17 +26,8 @@ export interface DictationSubmitter {
   }>;
 }
 
-/* ============================== 状态与结果 ============================== */
-
 export type CapturePhase = 'recording' | 'transcribing' | 'submitting' | 'done' | 'failed';
 
-/**
- * 界面要渲染的全部状态。
- *
- * 为什么把它做成回调而不是让界面自己去拼：**"录音必须可见"是设计里唯一一条不讨论取舍的要求**
- * （病房里的人有权知道自己在被录）。把相位与计时集中在一处产出，界面就只剩"照着画"，
- * 而"忘了画计时"这类缺陷也就不可能在某一处悄悄发生。
- */
 export interface CaptureProgress {
   phase: CapturePhase;
   /** 从开始采集算起的累计时长（秒）—— 录音态的计时（S1：暂停恢复不重置） */
@@ -80,13 +38,13 @@ export interface CaptureProgress {
   finalized: number;
   /** 已成功拿到文本的段数 */
   transcribed: number;
-  /** 失败段：**如实回报**，不当成"什么都没说" */
+  /** 失败段：如实回报，不当成"什么都没说"  */
   failures: CaptureFailure[];
 }
 
 export interface CaptureOutcome {
   sessionId: string;
-  /** 部署声明的模型标识（取自转写响应，**不在客户端写死**） */
+  /** 部署声明的模型标识（取自转写响应，不在客户端写死）  */
   asrModelId: string;
   /** 供界面标注"ASR 未提供置信度，按上限处理"（由服务端给出，界面照抄） */
   confidenceNote?: string;
@@ -110,7 +68,7 @@ export interface CaptureOutcome {
 }
 
 export interface CaptureRunRequest {
-  /** 采集会话 ID：一次"说一段" = 一个会话（**不是 ASR 的 `task_id`**，见 C1 的 G 类判断） */
+  /** 采集会话 ID：一次"说一段" = 一个会话（不是 ASR 的 `task_id`，见 C1 的 G 类判断）  */
   sessionId: string;
   source: CaptureSource;
   segment: SegmentConfig;
@@ -127,13 +85,13 @@ export interface CaptureRunDeps {
  * 走完一次采集，并把结果提交成建议。
  *
  * 失败归属的划分（与 C1 的 `captureSession` 同口径）：
- *   - **分类失败**（`CaptureError`：字幕没拿到 / 超时 / 服务端拒收）→ 记进 `failures`，其余段照常；
- *   - **其他错误**（程序错误，或采集源本身的错误）→ **原样抛出**，不吞成"这段没说话"。
- */
+ *   - 分类失败（`CaptureError`：字幕没拿到 / 超时 / 服务端拒收）→ 记进 `failures`，其余段照常；
+ *   - 其他错误（程序错误，或采集源本身的错误）→ 原样抛出，不吞成"这段没说话"。
+  */
 export async function runDictationCapture(request: CaptureRunRequest, deps: CaptureRunDeps): Promise<CaptureOutcome> {
   const probe = request.source.probe();
   if (!probe.ok) {
-    /* 不可用就到此为止：**不打开设备、不发一个字节**（与"端点未配置"同一条纪律） */
+    /* 不可用就到此为止：不打开设备、不发一个字节（与"端点未配置"同一条纪律）  */
     throw new CaptureSourceError({
       code: probe.code,
       message: `采集源「${probe.sourceId}」不可用：${probe.message}`,
@@ -141,7 +99,6 @@ export async function runDictationCapture(request: CaptureRunRequest, deps: Capt
     });
   }
 
-  /* 帧 → 段（含 WAV）走的是**同一份实现**（`createChunkAssembler`）：本地客户端桥也用它 */
   const assemble = createChunkAssembler(request.segment);
   const pending: Array<{ plan: ChunkPlan; audio: Uint8Array }> = [];
   const chunks: CaptureChunk[] = [];
@@ -171,10 +128,10 @@ export async function runDictationCapture(request: CaptureRunRequest, deps: Capt
   /**
    * 把"转写队列"再往前推一格。
    *
-   * **必须集中在一处**：录完时那一段（由 `stop` 定稿）是在 `draining` 已兑现之后才入队的，
-   * 如果只在 `onFrame` 里挂链，那一段就**没人转**（chunks 里少一条，而它本来是一句话）。
+   * 必须集中在一处：录完时那一段（由 `stop` 定稿）是在 `draining` 已兑现之后才入队的，
+   * 如果只在 `onFrame` 里挂链，那一段就没人转（chunks 里少一条，而它本来是一句话）。
    * 这个竞态在"边录边转"（真实时间）下必现，在同步吐帧的自测里反而看不见 —— 所以自测也加了"让出一次"。
-   */
+    */
   const scheduleDrain = (): void => {
     draining = draining.then(() => drain());
   };
@@ -204,8 +161,6 @@ export async function runDictationCapture(request: CaptureRunRequest, deps: Capt
           transcribed += 1;
         }
       } catch (err) {
-        /* 与 C1 的 ASR 客户端同一口径：**传输层故障**算"这一段没转出来"（记进 failures、其余段照常），
-           而不是程序错误 —— 否则一次网关抖动就会被放大成一整次采集中断。 */
         const failure =
           err instanceof CaptureError
             ? err
@@ -282,7 +237,7 @@ export async function runDictationCapture(request: CaptureRunRequest, deps: Capt
   }
 
   if (chunks.length === 0) {
-    /* 一段有效文本都没有：**不提交**（提交空段会被服务端拒，而那看起来像链路坏了） */
+    /* 一段有效文本都没有：不提交（提交空段会被服务端拒，而那看起来像链路坏了）  */
     outcome.submit = { ok: false, skipped: true, code: 'E_NO_TARGET', message: '这次采集没有任何有效文本（全部是空结果或失败），没有可提交的建议' };
     phase = 'done';
     emit();

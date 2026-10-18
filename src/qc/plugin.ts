@@ -1,34 +1,4 @@
-/**
- * **算子插件**（T3）：让"新增一种算子"不必与应用同版本发版。
- *
- * ## 它与"包是数据"那条线的关系
- *
- * 包（规则包、判定方式）**永远不能带代码** —— 这条线不动。插件不是包：
- * 它是**部署方安装的签名组件**，装在运行时目录里，与应用同机、由实施方维护。
- * 分界因此是：
- *
- *   - 包 = 数据，"判什么"由它决定，**不签也能收**（因为它带不来代码）；
- *   - 插件 = 代码，"怎么算"由它决定，**必须验签**（因为它带来的是可执行的东西）。
- *
- * ## 三道门，缺一不可
- *
- * 1) **验签**：`qc-plugin.sig.json` 用部署密钥（运行时目录里的 `qc-plugin-key.txt`）
- *    对 `qc-plugin.json` 的**规范化摘要**做 HMAC；签名不符 = 一个字节都不 import。
- * 2) **验文件**：清单里每个文件都有 sha256，逐个比对 —— 签名覆盖清单，清单覆盖文件，
- *    于是"改了实现没改清单"会被拒。
- * 3) **验算子**：清单声明的算子必须与模块注册的**完全一致**（不多不少）。
- *    这条防的是"清单里写 3 个、实际装上 5 个"—— 那种插件审批时看的东西与跑起来的东西不是同一份。
- *
- * ## 为什么清单里写算子声明、模块里写实现
- *
- * 声明（名字 / 字段 / 取值形态 / 说明）是**可审阅的**：审批的人不需要读代码就能看出
- * "这个算子读什么、怎么填、用在哪"。实现放在模块里，只由 `defineOperator` 收下。
- *
- * ## 失败不是"跳过"
- *
- * 加载失败一律**记进 `failures` 并原样上报**（含目录与原因），不静默跳过 ——
- * 跳过会让"插件没生效"表现成"规则没命中"，而界面上一切正常。
- */
+// 算子插件（T3）：让"新增一种算子"不必与应用同版本发版。
 
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -62,9 +32,7 @@ export class QcPluginError extends Error {
   }
 }
 
-/* ------------------------------ 清单 ------------------------------ */
-
-/** 清单里的算子声明（**可序列化**：审批的人读的就是它） */
+/** 清单里的算子声明（可序列化：审批的人读的就是它）  */
 export interface QcPluginOperatorDecl {
   name: string;
   label: string;
@@ -99,8 +67,6 @@ export interface QcPluginSignature {
   hmac: string;
 }
 
-/* ------------------------------ 摘要与签名 ------------------------------ */
-
 export function sha256OfText(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
 }
@@ -109,12 +75,6 @@ export function sha256OfFile(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-/**
- * 规范化 JSON：**键按字典序排列、递归**。
- *
- * 为什么必须规范化：签名覆盖的是这份文本，而 `JSON.stringify` 的键序取决于写法。
- * 不规范化的话"原样重写一份清单"就会让签名失效 —— 那时人们只会去重签，而不是去问为什么。
- */
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -129,10 +89,10 @@ export function manifestDigestOf(manifest: QcPluginManifest): string {
 /**
  * 读一份 JSON 文件文本。
  *
- * **必须容忍开头的 BOM**：Windows 上的记事本、PowerShell 的 `Set-Content -Encoding utf8`
- * 都会给它加一个 `\uFEFF`，而 `JSON.parse` 遇到它直接抛。插件清单是**人工维护**的文件，
+ * 必须容忍开头的 BOM：Windows 上的记事本、PowerShell 的 `Set-Content -Encoding utf8`
+ * 都会给它加一个 `\uFEFF`，而 `JSON.parse` 遇到它直接抛。插件清单是人工维护的文件，
  * 在这上面"格式敏感"只会得到"照抄示例却装不上"，而错误信息还指向 JSON 语法（看起来像写错了）。
- */
+  */
 function parseJsonText(text: string): unknown {
   const trimmed = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
   return JSON.parse(trimmed);
@@ -142,7 +102,7 @@ export function hmacOf(digest: string, key: string): string {
   return createHmac('sha256', key).update(digest, 'utf8').digest('hex');
 }
 
-/** 生成一把部署密钥（写入 `qc-plugin-key.txt`；**不给它就不验签，宁可不装**） */
+/** 生成一把部署密钥（写入 `qc-plugin-key.txt`；不给它就不验签，宁可不装）  */
 export function generatePluginKey(): string {
   return randomBytes(32).toString('hex');
 }
@@ -161,17 +121,15 @@ export function writePluginKey(dir: string, key: string): string {
   return path;
 }
 
-/* --------------------------- 签名（给 CLI 用） --------------------------- */
-
 /**
  * 给一个插件目录签名：算出 `files` 的 sha256、写入清单、再写签名文件。
  *
- * 它**同时**做两件事（列文件 + 签名）是刻意的：分两步的话，"加了文件忘了更新清单"
+ * 它同时做两件事（列文件 + 签名）是刻意的：分两步的话，"加了文件忘了更新清单"
  * 会得到一份签名有效但清单不全的插件 —— 那种插件跑起来缺东西，而验签一路通过。
  *
  * `manifest` 里已有的 `pluginId / name / version / operators` 原样保留（人工写的部分）；
  * `files` / `entry` 由这里补齐。
- */
+  */
 export function signPluginDir(dir: string, key: string, keyId = 'default'): { manifest: QcPluginManifest; manifestPath: string; signaturePath: string } {
   const manifestPath = join(dir, QC_PLUGIN_MANIFEST_FILE);
   if (!existsSync(manifestPath)) {
@@ -207,8 +165,6 @@ export function signPluginDir(dir: string, key: string, keyId = 'default'): { ma
   writeFileSync(signaturePath, `${JSON.stringify(signature, null, 2)}\n`, 'utf8');
   return { manifest, manifestPath, signaturePath };
 }
-
-/* ------------------------------ 验签 ------------------------------ */
 
 export interface VerifiedPlugin {
   dir: string;
@@ -277,9 +233,7 @@ export function verifyPluginDir(dir: string, key: string): VerifiedPlugin {
   return { dir, manifest, signature, entryPath };
 }
 
-/* ------------------------------ 装载 ------------------------------ */
-
-/** 模块通过 `register(api)` 拿到的东西：**只能注册算子**，没有别的能力 */
+/** 模块通过 `register(api)` 拿到的东西：只能注册算子，没有别的能力  */
 export interface QcPluginApi {
   api: string;
   pluginId: string;
@@ -315,21 +269,21 @@ export interface QcPluginLoadReport {
 /**
  * 动态 import 的可替换实现（用例用它换来一份可复现的装载过程；生产用真的 import）。
  *
- * `cacheKey` 必须参与 URL：ESM 的模块缓存按 **URL** 命中，同一个路径第二次 import 拿到的是
- * 上一次的模块对象。装了新版本的插件、或自测里同名目录换了内容时，那会得到**旧代码**在新清单下跑 -
+ * `cacheKey` 必须参与 URL：ESM 的模块缓存按 URL 命中，同一个路径第二次 import 拿到的是
+ * 上一次的模块对象。装了新版本的插件、或自测里同名目录换了内容时，那会得到旧代码在新清单下跑 -
  * 而验签一路通过（清单与文件的摘要都是新的）。用清单摘要当版本标识，恰好是"这份签名的内容"。
- */
+  */
 export type PluginModuleImporter = (entryPath: string, cacheKey: string) => Promise<Record<string, unknown>>;
 
 const defaultImporter: PluginModuleImporter = async (entryPath, cacheKey) =>
   import(`${pathToFileURL(entryPath).href}?v=${encodeURIComponent(cacheKey)}`) as Promise<Record<string, unknown>>;
 
 /**
- * 装载一个插件（**已验签的目录**）：import 模块 → 调 `register(api)` → 注册算子。
+ * 装载一个插件（已验签的目录）：import 模块 → 调 `register(api)` → 注册算子。
  *
- * 校验清单与模块的一致性：清单声明的算子必须**恰好**等于模块注册的那些。
+ * 校验清单与模块的一致性：清单声明的算子必须恰好等于模块注册的那些。
  * 多一个 = 审批时看的东西与跑起来的东西不是同一份；少一个 = 引用它的规则永远不命中。
- */
+  */
 export async function loadVerifiedPlugin(
   verified: VerifiedPlugin,
   importer: PluginModuleImporter = defaultImporter,
@@ -397,7 +351,7 @@ export async function loadVerifiedPlugin(
     );
   }
 
-  /* 全部校验通过之后**才**真正写进算子表：中途失败不留半个插件在场 */
+  /* 全部校验通过之后才真正写进算子表：中途失败不留半个插件在场  */
   for (const name of registered) registerConditionOperator(registeredSpecs.get(name) as never);
 
   return {
@@ -416,11 +370,11 @@ export function unloadPluginOperators(names: readonly string[]): void {
 }
 
 /**
- * 从插件根目录装载**全部**插件。
+ * 从插件根目录装载全部插件。
  *
- * 逐个目录独立：一个装不上不影响其它（但**它会被记进 failures**，不会被跳过）。
+ * 逐个目录独立：一个装不上不影响其它（但它会被记进 failures，不会被跳过）。
  * 目录不存在 = 本机没装插件 —— 这不是错误，`dirPresent: false` 如实说出来。
- */
+  */
 export async function loadQcPlugins(options: {
   dir: string;
   key: string | null;

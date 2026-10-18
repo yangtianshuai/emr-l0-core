@@ -1,12 +1,4 @@
-/**
- * Node 内置模块的最小环境声明（临时）。
- *
- * 为什么需要：本项目当前**零 npm 依赖**（Node 直接跑 .ts），因此没有 @types/node。
- * 为了让 `tsc --noEmit` 能真正跑起来做类型检查，这里只手写实际用到的 API。
- *
- * 后续动作：项目引入 npm 依赖时，删除本文件并安装 @types/node（`npm i -D @types/node`），
- * 届时类型将由官方维护，覆盖面也更完整。
- */
+// Node 内置模块的最小环境声明（临时）。
 
 /** 全局：DOM lib 已声明 console，这里只补 process */
 declare const process: {
@@ -43,16 +35,16 @@ declare module 'node:fs' {
   /** data 支持 Uint8Array：导出 OFD 时直接写二进制容器（无需 Buffer） */
   export function writeFileSync(path: string, data: string | Uint8Array, encoding?: 'utf8'): void;
   /**
-   * 带写入选项的重载：写**服务端配置文件**时要用 `flag: 'wx'`（两个进程同时启动时只有一个写得成）
+   * 带写入选项的重载：写服务端配置文件时要用 `flag: 'wx'`（两个进程同时启动时只有一个写得成）
    * 与 `mode: 0o600`（它是一把钥匙，不是普通配置）。运行时 Node 本就支持，只是这里缺声明。
-   */
+    */
   export function writeFileSync(path: string, data: string | Uint8Array, options: { encoding?: 'utf8'; flag?: string; mode?: number }): void;
   /** 追加写入（自测与探针往产物里追加一行时用） */
   export function appendFileSync(path: string, data: string | Uint8Array, encoding?: 'utf8'): void;
   export function existsSync(path: string): boolean;
   export function mkdirSync(path: string, options: { recursive?: boolean }): string | undefined;
   export function readdirSync(path: string): string[];
-  /** 带 `withFileTypes` 的重载：装载算子插件时要**逐个目录**判（文件不是插件） */
+  /** 带 `withFileTypes` 的重载：装载算子插件时要逐个目录判（文件不是插件）  */
   export function readdirSync(path: string, options: { withFileTypes: true }): Array<{ name: string; isDirectory(): boolean }>;
   export function statSync(path: string): { isDirectory(): boolean };
   /** 删除文件（测试清理用；force 时文件不存在也不报错；recursive 删目录） */
@@ -141,9 +133,9 @@ declare module 'node:crypto' {
   export interface KeyObject {
     export(options: { format: 'der'; type: 'spki' | 'pkcs8' }): Uint8Array;
     /**
-     * 密钥类型自省。**对 SM2 曲线有坑**：原生生成的 key 是 'ec'，
+     * 密钥类型自省。对 SM2 曲线有坑：原生生成的 key 是 'ec'，
      * 而从 DER 导入的 SM2 公钥这里是 undefined（且验签恒失败）—— 见 provider.ts 的说明。
-     */
+      */
     readonly asymmetricKeyType?: string;
     readonly asymmetricKeyDetails?: { namedCurve?: string };
   }
@@ -156,8 +148,8 @@ declare module 'node:crypto' {
   export function createPublicKey(options: { key: Uint8Array; format: 'der'; type: 'spki' }): KeyObject;
   /**
    * 常数时间比较（比对口令哈希时用：按字节提前返回会泄漏"前几位对了"）。
-   * **长度不等时它会抛异常**，所以调用方必须先自己比长度 —— 这个约定写在调用处，不写在这里。
-   */
+   * 长度不等时它会抛异常，所以调用方必须先自己比长度 —— 这个约定写在调用处，不写在这里。
+    */
   export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean;
   export function sign(algorithm: string, data: Uint8Array, key: KeyObject): Uint8Array;
   export function verify(algorithm: string, data: Uint8Array, key: KeyObject, signature: Uint8Array): boolean;
@@ -173,12 +165,6 @@ declare module 'node:crypto' {
   }
   export function createCipheriv(algorithm: string, key: Uint8Array, iv: Uint8Array | null): Cipher;
 
-  /**
-   * HMAC（用于 HMAC-SM3 与 PBKDF2-HMAC-SM3）。
-   *
-   * 也用于**算子插件的签名**（`qc/plugin.ts`）：那条路走的是字符串密钥 + 十六进制输出，
-   * 所以 `update` 收字符串、`digest` 能直接给 hex —— 与下面那条字节流用法是同一个对象的两种形态。
-   */
   export interface Hmac {
     update(data: Uint8Array | string, encoding?: 'utf8' | 'latin1'): Hmac;
     digest(): Uint8Array;

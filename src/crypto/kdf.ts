@@ -1,23 +1,9 @@
-/**
- * 密钥派生：HMAC-SM3、PBKDF2-HMAC-SM3、以及 GB/T 32918.4 的 KDF。
- *
- * 用途分工：
- *   - **HMAC-SM3** 给认证加密做完整性（Encrypt-then-MAC，见 envelope.ts）；
- *   - **PBKDF2-HMAC-SM3** 把口令变成密钥（口令熵低，必须慢化）；
- *   - **SM3-KDF** 给 SM2 公钥加密生成密钥流（GB/T 32918.4 定义的那个计数器式 KDF）。
- *
- * ⚠️ 诚实边界：**PBKDF2-HMAC-SM3 没有公开的标准测试向量**（RFC 6070 只给了 HMAC-SHA1/SHA256）。
- *    因此这里不假装"通过标准向量"，改为验证三类可证伪的性质：
- *      ① 与运行时 OpenSSL 的 `createHmac('sm3')` 逐字节一致（HMAC 部分）；
- *      ② 确定性 + salt/迭代次数/长度各自的影响（改一个参数结果必变）；
- *      ③ 长度语义正确（前 N 字节与前一次派生的前 N 字节一致）。
- *    这些性质能抓住"参数没接进去""长度算错""常量搞反"这类真错误，但不能证明与某个第三方实现完全一致 —— 后者需要向量。
- */
+// 密钥派生：HMAC-SM3、PBKDF2-HMAC-SM3、以及 GB/T 32918.4 的 KDF。
+// - PBKDF2-HMAC-SM3 把口令变成密钥（口令熵低，必须慢化）；
 
 import { createHmac } from 'node:crypto';
 import { sm3, utf8 } from './sm3.ts';
 
-/** HMAC-SM3（块长 64 字节，输出 32 字节）。走运行时 OpenSSL：与 SM3 同源，避免自写填充细节 */
 export function hmacSm3(key: Uint8Array, data: Uint8Array): Uint8Array {
   const hmac = createHmac('sm3', key);
   hmac.update(data);
@@ -39,12 +25,6 @@ function int32be(value: number): Uint8Array {
   return new Uint8Array([(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff]);
 }
 
-/**
- * PBKDF2-HMAC-SM3（RFC 8018 的 PBKDF2，PRF 换成 HMAC-SM3）。
- *
- * 迭代次数不是"随便写个常数"：它决定离线暴力破解的成本。
- * 本仓库默认 `DEFAULT_PBKDF2_ITERATIONS`，测试里可以用小值（否则每个用例都要几百毫秒）。
- */
 export const DEFAULT_PBKDF2_ITERATIONS = 200_000;
 
 export function pbkdf2HmacSm3(
@@ -73,10 +53,6 @@ export function pbkdf2HmacSm3(
   return out.subarray(0, length);
 }
 
-/**
- * SM3-KDF（GB/T 32918.4）：`Ha_i = SM3(Z ‖ ct)`，ct 为 32 位大端计数器，从 1 开始，取前 klen 字节。
- * 标准要求：若派生结果**全为 0** 则必须报错（说明共享秘密异常），不能"凑合用"。
- */
 export function sm3Kdf(z: Uint8Array, klen: number): Uint8Array {
   if (!Number.isInteger(klen) || klen < 1) throw new Error(`KDF 输出长度必须为正整数，实际 ${klen}`);
   const blocks = Math.ceil(klen / 32);

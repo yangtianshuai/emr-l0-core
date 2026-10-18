@@ -1,11 +1,4 @@
-/**
- * Signatures.xml 的**读写放在同一个模块**。
- *
- * 为什么不让"导出侧写 XML、导入侧读 XML"各写一套：那是经典的漂移源 ——
- * 写入侧加个字段、读取侧不知道，结果"签得进去、认不出来"，
- * 而现象只是"验签失败"，排查要绕一大圈。放一个模块里，并用**往返用例**锁死：
- *   sign → 写 XML → 读回 → 逐字段相等 → 用读回的 block 再验签通过。
- */
+// Signatures.xml 的读写放在同一个模块。
 
 import { attrOf, childOf, findAll, findFirst, parseXml, textOf } from '../import/xml.ts';
 import type { ReferenceEntry, SignatureBlock } from './signature.ts';
@@ -14,7 +7,6 @@ function esc(text: string): string {
   return text.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char] as string);
 }
 
-/** 生成 Signatures.xml（第三方只需这份文件 + 被覆盖文件即可独立验签） */
 export function signaturesXml(block: SignatureBlock): string {
   const refs = block.references
     .map((reference) => `      <ofd:Reference FileRef="${esc(reference.path)}" DigestAlgorithm="SM3" Digest="${esc(reference.digest)}"/>`)

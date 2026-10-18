@@ -1,45 +1,13 @@
-/**
- * **模型形态**的内涵类质控引擎：把"外部质控引擎"换成**这台机器已经接上的那个模型**。
- *
- * ## 它仍然只是一个传输层（这一点是这个文件最重要的性质）
- *
- * 它把请求拼成提示词、把模型的回复取回来、**原样**交给 `validateEngineOutput`。
- * 防线在那一步，而不是在提示词里：模型天生爱给建议（"建议补充……"），
- * 而契约里**没有任何可以落笔的字段** —— 产出里一旦出现建议字段，**整份产出被拒**
- * （`FORBIDDEN_CONTENT_FIELDS` / `TOP_KEYS`）。
- *
- * 换句话说：提示词负责"尽量别这么干"，拒收负责"这么干没用"。
- * 这一条被写成了用例（`test:content-engine-model` 的 M3）—— 用一个**故意给建议**的假模型去撞它。
- *
- * ## 外壳（`api` / `engine`）由传输层填，不由模型填
- *
- * `api` 写错一个字符就是整份产出被拒；`engine.id/kind/version` 是"**这台机器上跑的是什么**"
- * 的陈述，模型答不出、也不该由它答。所以模型只负责 `judged` / `findings` / `unevaluated` 三段。
- * 模型自报的 `api`/`engine` 会被**我们的**值覆盖（外壳只此一份），
- * 但它多给的**其它**字段会原样带上去、交给校验去拒 —— 传输层不替模型"清理门户"。
- *
- * ## 与 HTTP 路同一条安全边界
- *
- * 这一路同样会把**病历内容**发给对方，所以同一套规矩（都与 `createHttpContentEngine` 共享）：
- *   ① 地址必须是 `https://`（明文 HTTP 只允许本机）——`resolveEngineEndpoint`，同一处实现；
- *   ② 令牌不进日志、不进错误信息；
- *   ③ **不重试**：质控是"跑一次给人看"的动作，失败如实报"未判定"。
- *
- * ## 没接入时**不构造它**
- *
- * 模型是 `offline` 或没有地址时，这个工厂**直接抛错** —— 调用方改用 `createUnavailableEngine`，
- * 让"没接上"走既有的未判定通道显式报出来，而不是"跑起来但什么都没判"
- * （后者在数据上与"没问题"完全同形，那是内涵质控最容易撒的谎）。
- */
+// 模型形态的内涵类质控引擎：把"外部质控引擎"换成这台机器已经接上的那个模型。
 
 import type { LoadedModelConfig } from '../ai/model-config-store.ts';
 import { CONTENT_ENGINE_API, resolveEngineEndpoint, type ContentQcEngine, type ContentQcRequest } from './content-engine.ts';
 
 export interface ModelEngineOptions {
   /**
-   * 取**当前生效**的模型接入配置。每次 `run` 都取一次 —— 与仓库其它配置同一口径：
+   * 取当前生效的模型接入配置。每次 `run` 都取一次 —— 与仓库其它配置同一口径：
    * 管理员改完立即生效，不做缓存（"改了要重启才生效"是运维最容易踩空的坑）。
-   */
+    */
   loadConfig: () => LoadedModelConfig;
   /** 测试可注入（默认用全局 fetch） */
   fetchImpl?: (input: string, init: Record<string, unknown>) => Promise<{
@@ -55,11 +23,11 @@ export interface ModelEngineOptions {
 export const MODEL_ENGINE_ID = 'qc-content-model';
 
 /**
- * 提示词：**照契约写**，但真正的约束在校验里。
+ * 提示词：照契约写，但真正的约束在校验里。
  *
  * 刻意不在这里复制一份"完整契约"（那会与 `describeContentContract()` 漂移）：
- * 该说的三件事说清楚 —— 只能用给的规则、只能报判过的与判不了的、**不许给建议**。
- */
+ * 该说的三件事说清楚 —— 只能用给的规则、只能报判过的与判不了的、不许给建议。
+  */
 export function buildModelPrompt(request: ContentQcRequest): string {
   return [
     '你在做病历内涵质控：**只判定，不改写**。',
@@ -155,7 +123,7 @@ export function createModelContentEngine(options: ModelEngineOptions): ContentQc
         const body = extractJsonObject(content) as Record<string, unknown>;
 
         /* 外壳是我们的：模型自报的 api/engine 一律被覆盖（它答的是别人的身份）。
-           模型多给的**其它**字段原样带上去 —— 由校验去拒，这里不替它清理门户。 */
+           模型多给的其它字段原样带上去 —— 由校验去拒，这里不替它清理门户。  */
         return {
           api: CONTENT_ENGINE_API,
           engine: { id: MODEL_ENGINE_ID, kind: 'model', version: '1', modelId: loaded.config.model },

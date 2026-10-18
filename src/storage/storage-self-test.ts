@@ -1,19 +1,5 @@
-/**
- * 数据库存储自测（D1~D11）。
- *
- *   node src/storage/storage-self-test.ts
- *
- * ## 这一套要守的四件事
- *
- * 1) **结构版本不猜**：库比程序新就拒绝启动；迁移失败就整体回滚，不留半个结构；
- * 2) **内容加密**：库文件里搜不到明文（诊断、主诉这类内容），能查的只有标识与时间；
- * 3) **读不出来 ≠ 没有**：口令错、摘要不符、只有结构没有正文，三种都必须显式报错，
- *    绝不返回"空文书" —— 那是把数据丢失伪装成"这份病历本来就没写"；
- * 4) **顺序即数据**：患者/就诊/文书的呈现顺序是数据的一部分，换台机器打开不能变。
- *
- * 迭代数在测试里压到 1000（默认 200_000，单次派生约 7.6 秒）：这只影响派生的**强度**，
- * 不影响任何存储语义 —— 而语义才是本套件要验的东西。
- */
+// 数据库存储自测（D1~D11）。
+// 3) 读不出来 ≠ 没有：口令错、摘要不符、只有结构没有正文，三种都必须显式报错，
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -28,7 +14,6 @@ import { WorkStore, openWorkStore, type StoredDoc, type WorkspaceStructure } fro
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'storage-selftest');
 const PASS = 'selftest-storage-passphrase';
-/** 只为把 7.6 秒的派生压到几十毫秒（理由见文件头） */
 const ITER = 1000;
 
 const suite = new TestSuite('数据库存储自测', [
@@ -38,16 +23,9 @@ const suite = new TestSuite('数据库存储自测', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/** ⚠️ 本环境 node:fs 类型声明缺 rmSync 的 recursive 选项（运行时支持） */
+/**  本环境 node:fs 类型声明缺 rmSync 的 recursive 选项（运行时支持）  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
-/**
- * 每个用例一个**独立的库文件**。
- *
- * 为什么不复用同一个文件再清掉：本环境的 `rmSync` 被"安全删除"垫片接管，
- * 删含 SQLite WAL 的目录会偶发失败（实测：抛在下一个用例的开头，把 8 个用例一起带崩）。
- * 换唯一文件名既避开了这个环境问题，又让用例之间的隔离更彻底。
- */
 let dbSeq = 0;
 function freshDbFile(): string {
   dbSeq += 1;
@@ -68,16 +46,16 @@ const fixture = (): DocumentModel => buildSyntheticDoc({ sections: 2, paragraphs
 /**
  * 把一份合成文书包成"工作区结构 + 该文书挂在一个住院就诊下"。
  *
- * `PatientRef` 的 `nameMasked` / `gender` 是**可选**的（匿名数据里可以没有），
+ * `PatientRef` 的 `nameMasked` / `gender` 是可选的（匿名数据里可以没有），
  * 而库里的列是 not null —— 于是这里有兜底值。这不是"编数据"，是"库里必须有值"这条
  * 约束的落点；真要区分"没有"与"空串"，该加的是 `null` 语义，那是另一件事。
- */
+  */
 function structureOf(
   doc: DocumentModel,
   docs: StoredDoc[] = [{ docId: doc.docId, title: '入院记录' }],
-  /* 就诊 id **必须与文书自带的一致**：外键会拦住"正文挂到一个不存在的就诊上"，
+  /* 就诊 id 必须与文书自带的一致：外键会拦住"正文挂到一个不存在的就诊上"，
      而这不是麻烦 —— 实测踩到：夹具里编了一个 V1、文书写的是 V_SYN，
-     结果正文写入被外键拒绝。那次拒绝是对的（它守住的是"孤儿正文"）。 */
+     结果正文写入被外键拒绝。那次拒绝是对的（它守住的是"孤儿正文"）。  */
   visitId = doc.encounter?.visitId ?? 'V1',
 ): WorkspaceStructure {
   return {
@@ -97,7 +75,6 @@ async function main(): Promise<void> {
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch {
-    /* 见 `freshDbFile` 的说明 */
   }
   mkdirSync(DIR, { recursive: true });
 
@@ -105,8 +82,8 @@ async function main(): Promise<void> {
     const file = freshDbFile();
     const first = open(file);
     assert(first.fresh, '新文件应被认成首次建库');
-    /* 按**迁移清单**推导而不是写死：下一次加迁移时这条不必改，
-       而"改测试来适配"正是最容易改出漏洞的地方（同 pack-store 自测的处置）。 */
+    /* 按迁移清单推导而不是写死：下一次加迁移时这条不必改，
+       而"改测试来适配"正是最容易改出漏洞的地方（同 pack-store 自测的处置）。  */
     assertEqual(first.applied, MIGRATIONS.map((migration) => migration.id), '应把清单里的迁移全部执行一遍');
     assertEqual(
       Number(first.db.prepare('select value from storage_meta where key = ?').get('schema_version')?.value),
@@ -146,8 +123,8 @@ async function main(): Promise<void> {
     let code = '';
     try {
       openDatabase(file, {
-        /* 目标版本取**当前版本 + 1**（而不是写死某个数字）：写死的话，每加一条迁移
-           这里就会先撞上"库里的版本比目标还新"，测的就不再是"迁移失败回滚"了（实测踩到）。 */
+        /* 目标版本取当前版本 + 1（而不是写死某个数字）：写死的话，每加一条迁移
+           这里就会先撞上"库里的版本比目标还新"，测的就不再是"迁移失败回滚"了（实测踩到）。  */
         schemaVersion: STORAGE_SCHEMA_VERSION + 1,
         at: '2026-10-12T00:00:00.000Z',
         migrations: [
@@ -210,7 +187,7 @@ async function main(): Promise<void> {
     for (const needle of ['胸痛', '主诉', '心内科会诊', '入院记录']) {
       assert(!haystack.includes(needle), `库文件里不该出现明文「${needle}」（含 WAL）`);
     }
-    /* 反过来：结构化元数据**是**明文可查的（这正是"列能查、内容加密"的落点） */
+    /* 反过来：结构化元数据是明文可查的（这正是"列能查、内容加密"的落点）  */
     assert(haystack.includes(doc.docId), '文书 id 应能直接查到（否则"按患者/就诊查"就无从谈起）');
   });
 
@@ -349,11 +326,11 @@ async function main(): Promise<void> {
   });
 
   await test('D13 从 v1 库迁到 v2：**已有数据不受影响**，且包表就位（迁移必须在有数据的库上验）', () => {
-    /* 这条守的是"迁移"这件事本身：新加的迁移在**已经有文书的库**上跑，
+    /* 这条守的是"迁移"这件事本身：新加的迁移在已经有文书的库上跑，
        不能动到任何既有行。只在空库上验迁移等于没验 —— 真实环境里升级时库里一定有数据
        （演示实例自己的库就是一路升上来的）。
-       ⚠️ 断言里**不写死迁移 id**：以后每加一条迁移都要改测试，而"改测试来适配"
-       正是最容易改出漏洞的地方（这条在 D1/D3 上已经吃过一次亏）。 */
+        断言里不写死迁移 id：以后每加一条迁移都要改测试，而"改测试来适配"
+       正是最容易改出漏洞的地方（这条在 D1/D3 上已经吃过一次亏）。  */
     const file = freshDbFile();
     const v1 = openDatabase(file, {
       schemaVersion: 1,
@@ -390,9 +367,9 @@ async function main(): Promise<void> {
 
   const code = suite.report();
   /* 收尾：清掉测试库（含 WAL/SHM）。
-     清理**不影响结论** —— 本环境的 `rmSync` 被"安全删除"垫片接管，对含 SQLite WAL 的目录
+     清理不影响结论 —— 本环境的 `rmSync` 被"安全删除"垫片接管，对含 SQLite WAL 的目录
      偶发失败（实测：抛在最后一行，把一次全绿的运行变成退出码非零）。
-     目录本就在 `.gitignore` 里，且下一轮开头还会再清一次，所以失败只如实说一声。 */
+     目录本就在 `.gitignore` 里，且下一轮开头还会再清一次，所以失败只如实说一声。  */
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch (err) {

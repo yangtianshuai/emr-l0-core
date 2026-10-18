@@ -1,15 +1,5 @@
-/**
- * json-patch 子集（TS 实现）。
- *
- * 与工具链 tools/model-check/lib/model-utils.mjs 的语义保持一致：
- *   - 路径为 JSON Pointer 风格（`/nodes/n_1/value`），`~0`/`~1` 转义；
- *   - 数组长度不同时整数组 replace（不做逐项增删），换取路径稳定与实现简单；
- *   - 根路径以 '' 或 '/' 表示，仅支持 replace。
- *
- * 为什么留痕的 patch 值不值得"手写"：手写 patch 是真实事故高发点（路径写错、漏字段、
- * 顺序错），因此写路径一律用"快照 → 变更后 diff"自动生成 patch，并由测试断言
- * `applyPatch(prev, patch)` 必须精确还原 `next`。
- */
+// json-patch 子集，与 tools/model-check/lib/model-utils.mjs 语义一致。
+// 路径为 JSON Pointer 风格；数组长度不同时整数组 replace；根路径仅支持 replace。
 
 import type { JsonValue, PatchOp } from '../model/types.ts';
 

@@ -1,39 +1,7 @@
-/**
- * 专科控件的**格**：键怎么算、一共有哪些格、每格是什么。
- *
- * ## 为什么要有这个文件
- *
- * 控件的 payload 是一张扁平的 `Record<string, JsonValue>`，而"哪一格"由**形状**决定：
- *
- *   - `scale` / `checklist`：一格一个字段 → 键就是字段 `key`；
- *   - `series`：一格是"第 N 条记录的某个字段" → `字段key.rN`（N 从 1 起）；
- *   - `matrix`：一格是"行 × 列 上的一个交点" → `r行key.c列key`。矩阵**不按字段填**：
- *     行列本身就是坐标，字段声明的是这些格子共同的取值类型与取值域。
- *   - `image`：一格一张影像 → 与 `scale` / `checklist` 同一条（字段即格）。
- *     它的值是一条**资源引用**（PACS / 院内地址），图的字节不进这份病历。
- *
- * 至少三处要用它：**写路径**（`core/session.ts` 的 `setControlValue` 校验"这一格存在吗"）、
- * **界面**（服务端按它生成每个格的键与名字下发，浏览器脚本因此不必知道键规则）、
- * **机读摊平**（`model/machine.ts` 把带 `tag` 的格摊成数据元）。
- *
- * 各拼一遍的症状是"医生填的值在导出里凭空不见"—— 写到 A 键、读的是 B 键，
- * 两处都不会报错。
- *
- * ## 空着与空字符串是两件事
- *
- * 没填过的格**不存在这个键**（不写 null）。所以清空一格的动作是**删掉键**，
- * 而不是写 null —— 否则"还没填"与"我确认这里是空的"就再也分不开
- * （`core/session.ts` 的 `setControlValue` 是那条纪律的落点）。
- */
+// 专科控件的格：键怎么算、一共有哪些格、每格是什么。
 
 import type { ControlFieldSnapshot, ControlNode, FieldDataType, JsonValue } from './types.ts';
 
-/**
- * `series` 没给 `rowCount` 时的默认行数。
- *
- * 为什么默认是 3 而不是 1：趋势要**至少两行**才画得出变化，而"只有一行"的时序控件
- * 在临床上没有意义（它退化成一个普通字段）。3 行是"入院当天能看出的最小趋势"。
- */
 export const SERIES_DEFAULT_ROWS = 3;
 
 /** `series` 的格键：`字段key.rN`（N 从 1 起） */
@@ -47,11 +15,11 @@ export function matrixCellKey(rowKey: string, columnKey: string): string {
 }
 
 /**
- * 一格：**键 + 它是什么**。
+ * 一格：键 + 它是什么。
  *
  * 界面上的每一格都从这里生成（含 label / 单位 / 取值域），于是
  * "医生看到的格子"与"写路径认的键"必然是同一份 —— 这正是要收在一处的原因。
- */
+  */
 export interface ControlCell {
   /** payload 的键 */
   key: string;
@@ -141,8 +109,8 @@ export function controlCellsOf(node: ControlGridNode): ControlCell[] {
     return cells;
   }
   /* `scale` / `checklist` / `image`：一格一个字段。
-     影像与量表在这里是同一条规则不是巧合 —— "一格一张图"与"一格一个评分"在**键**上
-     没有差别（都是字段 `key`），差别只在渲染器把它画成图还是画成输入框。 */
+     影像与量表在这里是同一条规则不是巧合 —— "一格一张图"与"一格一个评分"在键上
+     没有差别（都是字段 `key`），差别只在渲染器把它画成图还是画成输入框。  */
   return fields.map((field) => cellOfField(field, field.label));
 }
 
@@ -155,12 +123,12 @@ export function controlCellByKey(node: ControlGridNode, key: string): ControlCel
  * 某一格的值是否与它的 `dataType` 相符。
  *
  * 与 `template/engine.ts` 的 `matchesFieldType` 同一口径（数字给数字、是/否给布尔、
- * 其余给字符串），差别只有一处：**`null` 在这里不合法** ——
+ * 其余给字符串），差别只有一处：`null` 在这里不合法 ——
  * 控件的"没填"是"没有这个键"（见本文件头），所以清空一格是删键，不是写 null。
  *
- * 它同时服务**写路径**（`core/session.ts` 的 `setControlValue`）与**产物校验**
+ * 它同时服务写路径（`core/session.ts` 的 `setControlValue`）与产物校验
  * （`model/validate.ts`）：两处各写一份的结果是"写得进去、校验不过"。
- */
+  */
 export function matchesControlCellType(dataType: FieldDataType, value: JsonValue): boolean {
   if (value === null) return false;
   switch (dataType) {

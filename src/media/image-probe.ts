@@ -1,18 +1,4 @@
-/**
- * 图片探测（零依赖）：**只看头部字节**，得出格式、像素尺寸与 DPI。
- *
- * 为什么必须有这一层，而不是让调用方自己传宽高：
- *   ① 归档件里图片要**排版**（占多宽、多高、放不放得下一页），而排版的唯一依据是
- *      图片自己的比例。让界面把宽高一起报上来，等于相信"界面算的尺寸"——
- *      同一个文件从剪贴板贴、从文件拖、从 PACS 取，三条路的宽高来源各不相同，
- *      归档件就会因为"图是怎么进来的"而长得不一样；
- *   ② 上传口要**拒绝**非图片与超大文件。只信 `Content-Type` 是没用的：
- *      那个头由发起方随手写，改个扩展名或改个头就能把任意字节塞进归档件。
- *
- * 支持 PNG / JPEG / WebP 三种 —— 覆盖浏览器剪贴板、屏幕截图与院内常见导出的全部形态；
- * 其它格式（BMP / TIFF / DICOM）**明确拒绝**而不是"尽力而为"：写进归档件的字节
- * 必须是能确定解释的那几种，认不出来的格式将来没人能证明它当初是什么。
- */
+// 图片探测（零依赖）：只看头部字节，得出格式、像素尺寸与 DPI。
 
 /** 上传上限：8 MB。超出的图在 A4 正文宽度下已远超一页，且会显著拖慢签名与导出 */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -116,8 +102,8 @@ function probePng(bytes: Uint8Array): ProbedImage | null {
 
 /**
  * JPEG：SOF 段里是宽高；APP0/JFIF 里是 DPI。
- * 必须**跳过**每个段，不能按固定偏移读 —— 段长可变，且 EXIF 段可能很长。
- */
+ * 必须跳过每个段，不能按固定偏移读 —— 段长可变，且 EXIF 段可能很长。
+  */
 function probeJpeg(bytes: Uint8Array): ProbedImage | null {
   if ((bytes[0] ?? 0) !== 0xff || (bytes[1] ?? 0) !== 0xd8) return null;
   let dpi = DEFAULT_DPI;
@@ -202,17 +188,13 @@ function probeWebp(bytes: Uint8Array): ProbedImage | null {
 
 /**
  * 探测一张图。认不出来（非 PNG/JPEG/WebP、头部被截断、尺寸为 0）返回 null ——
- * 调用方必须把 null 当成**拒绝**，不要退回"按默认尺寸收下"。
- */
+ * 调用方必须把 null 当成拒绝，不要退回"按默认尺寸收下"。
+  */
 export function probeImage(bytes: Uint8Array): ProbedImage | null {
   if (bytes.length < 16) return null;
   return probePng(bytes) ?? probeJpeg(bytes) ?? probeWebp(bytes);
 }
 
-/**
- * 像素 → pt（版式单位）。1 pt = 1/72 英寸，所以 pt = px ÷ dpi × 72。
- * 结果**不在这里封顶**：封顶要按正文可用宽度算，那是排版方的事（见 `export/ofd.ts`）。
- */
 export function pixelsToPt(pixels: number, dpi: number): number {
   const safeDpi = dpi > 0 ? dpi : DEFAULT_DPI;
   return (pixels / safeDpi) * 72;

@@ -1,24 +1,4 @@
-/**
- * T28 审计报告：把散落在各处的事实汇总成**一份可核对的产物**。
- *
- * 为什么需要：本系统已经能回答"这份病历是谁写的、AI 参与了多少、有没有被签章、有没有被加密交付"，
- * 但这些事实分散在 `provenance` / `revisions` / `signatureRefs` / `machineReadable` / 门控日志里。
- * **核查场景（等级评审、病历质控、纠纷取证）需要的不是"系统里有这些数据"，而是一份能交出去的纸面。**
- *
- * 设计原则（每条都是为了让它"经得起核对"）：
- *   1) **事实与结论分开**：`facts` 是原始统计，`checks` 是机器可判定的条目 ——
- *      让人能复核"结论是怎么来的"，而不是只看到一个"通过"；
- *   2) **checks 只做能判定的**：不做"这份病历写得好不好"这类主观判断；
- *      每条 check 必须能给出**具体证据**（哪个节点、哪条留痕），否则不许出现在报告里；
- *   3) **报告自身有指纹**：`reportDigest` 覆盖全部内容（不含自身），改一个字就对不上 ——
- *      否则"审计报告"本身可以被随意编辑，等于没有；
- *   4) **纯函数 + 注入时间**：同输入同输出（除 `generatedAt`），便于自动化对拍与归档比对。
- *
- * ⚠️ 诚实边界：
- *   - 报告**不等于合规结论**：它只汇总"本系统能证明的事实"，不判断是否符合病历书写规范或评级标准；
- *   - 门控拒绝记录来自调用方传入的日志（本模块不持久化日志）——**不传就没有这一节**，报告里会显式写明；
- *   - 签名部分只**转述**已有签名与验签结果，本模块不重新验签（验签是签名模块的职责，避免两处口径）。
- */
+// T28 审计报告：把散落在各处的事实汇总成一份可核对的产物。
 
 import { hashNodes } from '../model/hash.ts';
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
@@ -34,7 +14,7 @@ export interface AuditInput {
   doc: DocumentModel;
   /** 生成时刻（注入以保证"同输入同输出"） */
   generatedAt: string;
-  /** 门控拒绝记录（来自服务端日志；**不传就注明"未提供"**） */
+  /** 门控拒绝记录（来自服务端日志；不传就注明"未提供"）  */
   gateRejections?: AuditGateRejection[];
   /** 更细致的不变量检查结果（如 `session.verifyInvariants()`）：本模块不重复实现校验器 */
   invariants?: string[];
@@ -118,14 +98,14 @@ function tagCodeOf(node: DocNode): string | undefined {
 }
 
 /**
- * 从留痕里定位某节点**最后一次变更**的记录（按文档级 rev 从后往前找第一条 targetId 匹配的）。
+ * 从留痕里定位某节点最后一次变更的记录（按文档级 rev 从后往前找第一条 targetId 匹配的）。
  *
- * ⚠️ 早期版本拿 `node.rev` 去比 `entry.rev`，结果是"所有确认都查不到留痕"（审计报告立刻报出来）。
- * 原因是两者**根本不是一回事**：
- *   - `revisions[].rev` 是**文档级序号**（= revisions.length，用于乐观锁）；
- *   - `node.rev` 是**节点级版本号**（该节点被改过几次）。
+ *  早期版本拿 `node.rev` 去比 `entry.rev`，结果是"所有确认都查不到留痕"（审计报告立刻报出来）。
+ * 原因是两者根本不是一回事：
+ *   - `revisions[].rev` 是文档级序号（= revisions.length，用于乐观锁）；
+ *   - `node.rev` 是节点级版本号（该节点被改过几次）。
  * 这类"看起来同名、实则两个口径"的字段最容易被误用，因此在报告里只按"最后一条针对该节点的留痕"定位。
- */
+  */
 function lastChangeOf(doc: DocumentModel, node: DocNode): DocumentModel['revisions'][number] | undefined {
   for (let index = doc.revisions.length - 1; index >= 0; index -= 1) {
     const entry = doc.revisions[index]!;
@@ -136,8 +116,8 @@ function lastChangeOf(doc: DocumentModel, node: DocNode): DocumentModel['revisio
 
 /**
  * 生成审计报告。
- * `checks` 的每一条都必须能指向**具体证据**：做不到就不写进报告（避免"看起来专业但无法复核"的结论）。
- */
+ * `checks` 的每一条都必须能指向具体证据：做不到就不写进报告（避免"看起来专业但无法复核"的结论）。
+  */
 export function buildAuditReport(input: AuditInput): AuditReport {
   const { doc, generatedAt } = input;
   const nodes = Object.values(doc.nodes) as DocNode[];
@@ -218,8 +198,8 @@ export function buildAuditReport(input: AuditInput): AuditReport {
     {
       id: 'SIGNATURE_COVERS_MACHINE_READABLE',
       description: '机读信息载体在签名覆盖范围内（否则结构化数据可被替换而不破坏签名）',
-      /* ⚠️ covers 记的是**容器内文件路径**（如 `MachineReadable.xml`），不是逻辑段名 ——
-         早期按字符串 `machineReadable` 去匹配，结果"明明覆盖了却报未覆盖"（由审计报告实测发现）。 */
+      /*  covers 记的是容器内文件路径（如 `MachineReadable.xml`），不是逻辑段名 ——
+         早期按字符串 `machineReadable` 去匹配，结果"明明覆盖了却报未覆盖"（由审计报告实测发现）。  */
       pass:
         machine === undefined ||
         (doc.signatureRefs ?? []).every((reference) => (reference.covers ?? []).some((path) => /machine/i.test(path))),
@@ -319,8 +299,8 @@ const yn = (value: boolean): string => (value ? '✅' : '❌');
 
 /**
  * 渲染为人可读的 Markdown。
- * **结论文本必须与 checks 一致**：报告里既要有"通过/未通过"的摘要，也要能逐条看到证据。
- */
+ * 结论文本必须与 checks 一致：报告里既要有"通过/未通过"的摘要，也要能逐条看到证据。
+  */
 export function renderAuditReportMarkdown(report: AuditReport): string {
   const passed = report.checks.filter((check) => check.pass).length;
   const lines: string[] = [

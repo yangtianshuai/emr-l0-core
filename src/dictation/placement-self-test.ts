@@ -1,17 +1,4 @@
-/**
- * 语音落位可配置形态自测（V1）。
- *
- *   node src/dictation/placement-self-test.ts
- *
- * 锁死七件事（对应 `docs/L2-语音落位可配置形态设计.md` 第十节）：
- *   P1 命中规则即落到映射节点；
- *   P2 **未命中即"未落位"**，绝不兜底到第一个节点（含 ordered 候选不足）；
- *   P3 置信度上限必须小于关键内容阈值，越界 / 非法一律报错（不静默取默认）；
- *   P4 落位**不改变门控**：关键内容上仍必须"改后采纳"；
- *   P5 配置不得放宽内核约束：落到非文本节点由 `dictate` 硬拒；
- *   P6 落位只产建议：不改 rev、不留痕；
- *   P7 `external` 未实现必须 fail-closed，不静默退回其他策略。
- */
+// 语音落位可配置形态自测（V1）。
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -107,7 +94,6 @@ async function main(): Promise<void> {
   await test('P2 未命中即"未落位"：不兜底到第一个节点（含 ordered 候选不足）', () => {
     const { session, ids } = open();
 
-    /* ① 规则不命中 */
     const configured = localConfig({ strategy: 'section-title', sectionMap: { '现病史': ids.textIds[1] as NodeId } });
     const outcomes = placeSegments(
       { segments: [{ index: 1, text: '患者三天前出现咳嗽。', confidence: 0.9 }], candidates: collectCandidates(session.indexes, configured) },
@@ -119,7 +105,6 @@ async function main(): Promise<void> {
       `必须回报未落位，实际：${outcomes.warnings.join(' | ')}`,
     );
 
-    /* ② ordered 策略下候选不足：多出的段未落位（修正"段多就退回第一个节点"的旧行为） */
     const narrow = localConfig({ strategy: 'ordered', candidate: { onlyTextNodes: true, withinSections: ['sec1'] } });
     const candidates = collectCandidates(session.indexes, narrow);
     assertEqual(candidates.nodeIds.length, 2, 'sec1 之下只有 2 个文本节点');
@@ -231,9 +216,9 @@ async function main(): Promise<void> {
 
       assertEqual(codeOf(() => savePlacementConfig(kv, { confidenceCeiling: 0.95 }, 'ADMIN')), 'E_PLACEMENT_CEILING_TOO_HIGH', '非法配置不得落库');
 
-      /* 外部落位密钥：**单独一行、加密、永不回显**（与模型/采集密钥同一套纪律）。
+      /* 外部落位密钥：单独一行、加密、永不回显（与模型/采集密钥同一套纪律）。
          三种状态逐条钉住，因为"没传 apiKey"被当成"清空"的代价很具体：
-         管理员只改个地址，密钥就没了，而现场表现是"外部落位突然 401"。 */
+         管理员只改个地址，密钥就没了，而现场表现是"外部落位突然 401"。  */
       const withKey = savePlacementConfig(
         kv,
         { strategy: 'external', external: { endpoint: 'http://127.0.0.1:9100/place' }, apiKey: 'place-secret-1' },
@@ -255,10 +240,10 @@ async function main(): Promise<void> {
       assertEqual(cleared.apiKeyAction, 'cleared', '显式 null 应清除');
       assertEqual(sealedBlobOf(fixture, PLACEMENT_API_KEY_KEY), null, '清除必须是真删那一行（不留空壳）');
 
-      /* 库里那一行读不出来（口令换过 / 被人改过）→ **不许当作"没配过"**。
+      /* 库里那一行读不出来（口令换过 / 被人改过）→ 不许当作"没配过"。
          文件时代这里模拟的是"写一段半截 JSON"；现在写不出半截 JSON 了
          （密封信封带 MAC，"半截"这种损坏已经不可能出现），但"解不开"仍然可能，
-         而且它是更危险的那种 —— 现场会表现成"我配的落位没了"。 */
+         而且它是更危险的那种 —— 现场会表现成"我配的落位没了"。  */
       writeCorruptRow(fixture, PLACEMENT_CONFIG_KEY);
       assertEqual(codeOf(() => loadPlacementConfig(kv)), 'E_PLACEMENT_CONFIG_INVALID', '读不出来的配置不得当作"没配过"');
     } finally {
@@ -309,15 +294,12 @@ async function main(): Promise<void> {
         transport: async () => ({ status: 200, body: JSON.stringify({ placements }) }),
       });
 
-    /* ① 不在候选集内的节点（越界）：服务完全可能这么干，绝不能按它落位 */
     assertEqual(await asyncCodeOf(() => call([{ index: 1, nodeId: 'n_root' }])), 'E_PLACEMENT_UNKNOWN_NODE', '越界 nodeId 必须被拒');
-    /* ② 段号不属于本次转写（服务"顺手引用上文节点"） */
     assertEqual(
       await asyncCodeOf(() => call([{ index: 99, nodeId: ids.textIds[0] }])),
       'E_PLACEMENT_UNKNOWN_NODE',
       '不属于本次的段号必须被拒',
     );
-    /* ③ 只给一段（另一段没把握）：允许，缺的那段就是"未落位" */
     const partial = await call([{ index: 1, nodeId: ids.textIds[0] }]);
     assertEqual(partial.items.map((item) => item.nodeId), [ids.textIds[0], null], '未给出的段应为未落位（交人工指定）');
     assertEqual(partial.unplaced, 1, '未落位数应如实回报');
@@ -335,8 +317,8 @@ async function main(): Promise<void> {
       '服务返回非 2xx 应报错（错误信息不带响应体）',
     );
 
-    /* 超时：transport **永不返回**且不理会 abort —— 必须靠 race 兜住，
-       否则"服务挂住"在现场表现为"落位没反应"，排查方向会完全跑偏 */
+    /* 超时：transport 永不返回且不理会 abort —— 必须靠 race 兜住，
+       否则"服务挂住"在现场表现为"落位没反应"，排查方向会完全跑偏  */
     const timeout = validatePlacementConfig({ strategy: 'external', external: { endpoint: 'http://placement.test/place', timeoutMs: 30 } });
     assertEqual(
       await asyncCodeOf(() => resolvePlacements({ segments, candidates }, timeout, { transport: () => new Promise(() => {}) })),

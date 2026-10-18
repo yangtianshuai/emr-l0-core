@@ -1,29 +1,5 @@
-/**
- * 命令行：口令轮换（把库里所有密封行重新密封到新口令）。
- *
- * ## 用法
- *
- * ```bash
- * npm run state:rekey                  # 试运行：只报告"有几行、能不能全部读通"，不写任何东西
- * npm run state:rekey -- --apply --new-key-file D:/keys/new.txt
- * npm run state:rekey -- --apply --new-key-file D:/keys/new.txt --yes    # 跳过交互确认（脚本用）
- * ```
- *
- * ## 三条刻意的选择
- *
- * 1. **默认只试运行**。轮换不可逆（换完旧口令就打不开了），而执行前最该确认的是
- *    "我手里这把旧口令对不对" —— 试运行用零代价回答它。
- * 2. **新口令从文件读，不从命令行参数读**。参数会进 shell 历史、`ps` 输出与 npm 日志
- *    （同 `auth/user-cli.ts` 的理由）。也不用标准输入：那一个流要留给"确认"这一步。
- * 3. **不自动改服务端配置文件**。工具替你把新口令写进 `server-config.json` 听起来贴心，
- *    实际是把"钥匙只存在于这一处、且已经换了"这件事藏起来 —— 万一写进去的值与真正生效的
- *    不一致，库就打不开了。所以它只**打印该写什么**，由人自己决定何时改、改完何时重启。
- *
- * ## 执行前必须做的一件事
- *
- * **停掉服务进程**。服务内存里是旧口令派生的密钥与派生缓存，在轮换进行中写入的任何一行
- * 都会用旧口令 —— 事务保护不了这种跨进程混合（详见 `storage/rekey.ts` 文件头）。
- */
+// 命令行：口令轮换（把库里所有密封行重新密封到新口令）。
+// 1. 默认只试运行。轮换不可逆（换完旧口令就打不开了），而执行前最该确认的是
 
 import { existsSync, readFileSync } from 'node:fs';
 import { MIGRATIONS, STORAGE_SCHEMA_VERSION } from '../storage/schema.ts';
@@ -32,8 +8,8 @@ import { applyRekey, describeRekeyPlan, planRekey } from '../storage/rekey.ts';
 import { resolveRuntimeLayout } from './runtime-dir.ts';
 import { loadServerConfig, serverConfigPath, stateKeyOf, stateSaltHexOf } from './server-config.ts';
 
-/* ⚠️ 本环境的 `@types/node` 对 `readFileSync` 只声明了字符串路径（运行时支持 fd 0 = 标准输入）。
-   与 `auth/user-cli.ts` 同一套局部断言。 */
+/*  本环境的 `@types/node` 对 `readFileSync` 只声明了字符串路径（运行时支持 fd 0 = 标准输入）。
+   与 `auth/user-cli.ts` 同一套局部断言。  */
 const fsx = (await import('node:fs')) as unknown as {
   readFileSync: (path: string | number, options: string) => string;
 };
@@ -89,7 +65,7 @@ function requireValue(argv: readonly string[], index: number, name: string): str
   return value.trim();
 }
 
-/** 从文件读一行口令：**只去行尾换行**（口令本身可以含空格，顺手 trim 会静默改掉它） */
+/** 从文件读一行口令：只去行尾换行（口令本身可以含空格，顺手 trim 会静默改掉它）  */
 function readKeyFile(file: string): string {
   if (!existsSync(file)) die(`新口令文件不存在：${file}`);
   let raw: string;

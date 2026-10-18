@@ -1,17 +1,4 @@
-/**
- * T22 验收自测：契约 HTTP 服务端。
- *
- *   node src/server/http-self-test.ts
- *
- * 分两部分：
- *   A 协议层契约（直接打 HTTP）：身份缺失、路由不存在、错误码→状态码映射、文档隔离、导出摘要……
- *   B 端到端验收：把工具链的 **S4 同一套 26 条用例** 通过 `http-store-adapter` 指向本服务，
- *     要求与内存参考实现结论完全一致（26/26）。这一条是 T22 的正式验收命令，
- *     在这里被固化成一条用例 —— 以后改服务端就跑它。
- *
- * 为什么必须两层都测：A 层管"协议对不对"（状态码、头、路由），B 层管"业务语义对不对"（门控是否仍生效）。
- * 只跑 B 会出现"协议细节错了但用例恰好没覆盖"，只跑 A 会出现"接口通了但门控被绕过"。
- */
+// T22 验收自测：契约 HTTP 服务端。
 
 import { spawn, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -48,8 +35,6 @@ async function call(
   path: string,
   options: { body?: unknown; actor?: { id: string; kind: string }; headers?: Record<string, string>; base?: string } = {},
 ): Promise<HttpResult> {
-  /* 顺序有讲究：先铺 headers，再让 actor 覆盖 X-Actor-*。
-     这样"带 AI 凭证 + 请求头自称 human"这种伪装场景可以精确构造出来 */
   const headers: Record<string, string> = { 'content-type': 'application/json', ...(options.headers ?? {}) };
   if (options.actor) {
     headers['X-Actor-Id'] = options.actor.id;
@@ -130,7 +115,6 @@ async function startServer(): Promise<void> {
       const res = await fetch(`${BASE}/documents/__probe__`);
       if (res.status === 404 || res.status === 200) return;
     } catch {
-      /* 尚未就绪 */
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
@@ -170,15 +154,12 @@ async function startVerifiedServer(): Promise<{ kill(): void }> {
       const res = await fetch(`${VERIFIED_BASE}/health`);
       if (res.ok) return spawned;
     } catch {
-      /* 尚未就绪 */
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   spawned.kill();
   throw new Error('verified 模式服务端启动超时（15s）');
 }
-
-/* --------------------------------- 用例 --------------------------------- */
 
 async function main(): Promise<void> {
   await startServer();
@@ -343,9 +324,6 @@ async function main(): Promise<void> {
   });
 
   await test('D2 对照组：trusted 模式下 AI 自称 human 能直接写病历（这就是要修的问题）', async () => {
-    /* 这条用例**固定住当前的漏洞**，不是认可它。两个作用：
-       ① 证明"身份可自报"确实导致门控失效 —— 不是理论推演，是可执行证据；
-       ② 若有人把 trusted 当生产配置，D1 的显式标注与这条用例会同时暴露它。 */
     const docId = await createDoc();
     const res = await call('POST', `/documents/${docId}/commands`, {
       actor: { id: 'ai-pipeline', kind: 'human' }, // ← 自称 human
@@ -357,15 +335,11 @@ async function main(): Promise<void> {
   await test('D3 verified 模式：身份由凭证决定，自称 human 的 AI 仍被拒（门控真正生效）', async () => {
     const server = await startVerifiedServer();
     try {
-      /* ① 无凭证 → 401。用 401 而不是 403：身份不可信 与 身份无权 是两件事 */
       const noToken = await call('POST', '/documents', { base: VERIFIED_BASE, body: { doc: baseDoc('doc_verified_1') } });
       assertEqual(noToken.status, 401, `verified 模式无凭证应 401，实际 ${noToken.status}`);
       assertEqual(noToken.body.code, 'E_ACTOR_UNVERIFIED', '错误码应为 E_ACTOR_UNVERIFIED');
       assertEqual(noToken.headers['x-l0-actor-verified'], 'true', '响应头应标注已启用验证模式');
 
-      /* ② 无效凭证 → 401（fail-closed）。
-         注意凭证内容必须是 ASCII：HTTP 头值不允许非 ASCII，否则 fetch 在客户端就抛错，
-         根本到不了服务端 —— 若真用中文凭证，现场会表现为"网络错误"而不是"凭证无效"，很难查。 */
       const badToken = await call('POST', '/documents', {
         base: VERIFIED_BASE,
         headers: { authorization: 'Bearer invalid-token-not-registered' },
@@ -373,7 +347,6 @@ async function main(): Promise<void> {
       });
       assertEqual(badToken.status, 401, '无效凭证应 401');
 
-      /* ③ 合法 human 凭证：正常路径不受影响 */
       const created = await call('POST', '/documents', {
         base: VERIFIED_BASE,
         headers: { authorization: `Bearer ${HUMAN_TOKEN}` },
@@ -382,7 +355,6 @@ async function main(): Promise<void> {
       assertEqual(created.status, 201, `合法凭证应能建文档：${JSON.stringify(created.body)}`);
       const docId = String(created.body.docId);
 
-      /* ④ 核心断言：AI 凭证 + 请求头自称 human。kind 只认凭证 → AI 直写必须被拒 */
       const spoof = await call('POST', `/documents/${docId}/commands`, {
         base: VERIFIED_BASE,
         headers: { authorization: `Bearer ${AI_TOKEN}` },
@@ -414,17 +386,14 @@ async function main(): Promise<void> {
   await test('D4 AI 上下文取数接口：范围必填、默认脱敏、身份必填', async () => {
     const docId = await createDoc();
 
-    /* ① 不传范围 → 400：无范围取数等于把整份病历交给模型 */
     const noScope = await call('GET', `/documents/${docId}/ai-context`, { actor: HUMAN });
     assertEqual(noScope.status, 400, `不传范围应 400，实际 ${noScope.status}`);
     assertEqual(noScope.body.code, 'E_AI_CONTEXT_SCOPE_REQUIRED', '错误码应为 E_AI_CONTEXT_SCOPE_REQUIRED');
 
-    /* ② 缺身份 → 400（取数接口与写操作同一套身份规则：它把病历内容交给外部模型） */
     const noActor = await call('GET', `/documents/${docId}/ai-context?nodeId=n_t`);
     assertEqual(noActor.status, 400, '取数不传身份应 400');
     assertEqual(noActor.body.code, 'E_ACTOR_REQUIRED', '错误码应为 E_ACTOR_REQUIRED');
 
-    /* ③ 正常取数：默认不带患者标识，且绝不含 patientId */
     const ok = await call('GET', `/documents/${docId}/ai-context?nodeId=n_t&contextBefore=1`, { actor: AI });
     assertEqual(ok.status, 200, `取上下文应 200：${JSON.stringify(ok.body)}`);
     assertEqual(ok.body.patient, undefined, '默认不得带患者标识');
@@ -433,7 +402,6 @@ async function main(): Promise<void> {
     assert(items.some((item) => item.role === 'target'), '应含目标条目');
     assertEqual(ok.headers['x-l0-actor-verified'], 'false', '响应头仍应标注"身份未验证"（trusted 模式）');
 
-    /* ④ 显式要求患者标识：只给掩码 */
     const withPatient = await call('GET', `/documents/${docId}/ai-context?nodeId=n_t&includePatient=true`, { actor: AI });
     const patient = withPatient.body.patient as { nameMasked?: string } | undefined;
     assertEqual(patient?.nameMasked, '张**', '患者姓名应为掩码');

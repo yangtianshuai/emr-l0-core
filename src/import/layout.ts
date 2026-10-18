@@ -1,22 +1,4 @@
-/**
- * T26 · 版式段落重建（几何启发式）。
- *
- * 版式文件（OFD/PDF）里的文字是"画"上去的：**没有段落语义**，只有每个文本片段的坐标。
- * 这个模块要做的就是把坐标重新聚成段落，减少人工整理的量。
- *
- * 判定线索（全部来自几何，不依赖任何厂商私有字段 —— 这样对别家文件同样有效）：
- *   1) **行距**：段内行距稳定，段间会出现更大的间距（导出端必须把边界画出来，见 ofd.ts 的说明）；
- *   2) **首行缩进**：中文排版里正文段首行缩进，是第二重独立线索；
- *   3) **字号**：字号明显变大且独占一行 → 标题；
- *   4) **左边界回到段首**：续行左边界＝段左边界，新段落才可能缩进/回到更靠左。
- *
- * ⚠️ 诚实边界（必须传到界面上）：
- *   - 这是**启发式**，不是标准规定的语义还原；每段都带 `evidence` 与 `confidence`，
- *     `low` 置信度意味着"没找到线索、只是按页合并"，界面必须让人看出来；
- *   - 一页里只有一段且行距均匀、无缩进时，**段落边界在原理上不可恢复**——
- *     此时如实合并并标注 low，而不是"猜出"一堆假段落；
- *   - 章节归属（哪段属于哪一章）不在本模块职责内，仍由人工整理。
- */
+// T26 · 版式段落重建（几何启发式）。
 
 export interface LayoutLine {
   page: number;
@@ -60,13 +42,6 @@ export interface RebuildOptions {
   indentRatio?: number;
   /** 字号变化比例：字号 > 上一行 × (1+ratio) → 标题/新段（默认 0.15） */
   sizeRatio?: number;
-  /**
-   * 绝对判据：无法估计"段内基准行距"时，用 `基准字号 × 该倍数` 作参考（默认 1.5）。
-   * 为什么必须有这条：
-   *   若**每一段都只有一行**，版式里只有一种间距（全部等于"行距 + 段前间距"），
-   *   没有"段内行距"可作基准 —— 相对判据会整体失效（实测：14 段被合并成 4 段）。
-   *   中文排版的行距通常不超过 1.5 倍字号，超过就可以怀疑其中含段前间距。
-   */
   absoluteGapRatio?: number;
   /** 无坐标线索时的降级策略（默认 per-page） */
   fallback?: 'per-page' | 'per-line';
@@ -78,8 +53,6 @@ export interface RebuildResult {
   warnings: string[];
   stats: { inputLines: number; visualLines: number; paragraphs: number; high: number; medium: number; low: number };
 }
-
-/* ------------------------------- 小工具 ------------------------------- */
 
 const ASCII_WORD_END = /[A-Za-z0-9]$/;
 const ASCII_WORD_START = /^[A-Za-z0-9]/;
@@ -95,16 +68,16 @@ export function joinLines(previous: string, next: string): string {
 }
 
 /**
- * 估计"基准值"：按 0.5pt 分桶统计**出现次数最多**的值，并列时**取较小值**。
+ * 估计"基准值"：按 0.5pt 分桶统计出现次数最多的值，并列时取较小值。
  *
- * ⚠️ **不能用中位数**（实测踩到两次）：
+ *  不能用中位数（实测踩到两次）：
  *   1) 基准行距：当"段间间距"与"段内行距"次数相当时，中位数会取到段间距本身
  *      （`[22,16,22,16,22,16]` 的中位数是 22），阈值被抬到 29.7，真正的段间距 22 反而不触发
  *      —— 整页被合并成一段；
  *   2) 基准字号：标题与正文各占一半时，中位数落在两者之间，
  *      于是"标题字号 > 基准 × 1.15"永远不成立，标题识别不出来。
  * 取"频次最高且更小"的那个值，这两个场景都能稳定命中正文的行距与字号。
- */
+  */
 function estimateBaseline(values: number[]): number {
   const positive = values.filter((value) => value > 0.01);
   if (positive.length === 0) return 0;
@@ -181,8 +154,6 @@ function buildVisualLines(lines: LayoutLine[]): VisualLine[] {
   return out;
 }
 
-/* ------------------------------- 主流程 ------------------------------- */
-
 export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions = {}): RebuildResult {
   const gapRatio = options.gapRatio ?? 1.25;
   const indentRatio = options.indentRatio ?? 1.5;
@@ -252,8 +223,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
     for (let i = 1; i < withY.length; i += 1) gaps.push(withY[i]!.y - withY[i - 1]!.y);
     const baselineGap = estimateLineGap(gaps);
     const baselineSize = estimateBaseSize(withY.map((line) => line.size));
-    /* 参考行距：优先用估计出的段内行距；估计不出来、或估计值本身就偏大（很可能把段间距
-       当成了行距）时，退到绝对判据（字号 × absoluteGapRatio）。 */
     const absoluteGap = baselineSize * absoluteGapRatio;
     const referenceGap = baselineGap > 0 && baselineGap <= absoluteGap ? baselineGap : absoluteGap;
     const usingAbsolute = !(baselineGap > 0 && baselineGap <= absoluteGap);
@@ -268,8 +237,8 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
       const evidence: string[] = [];
       let isTitle = false;
 
-      /* 缺坐标的行无法参与几何判定：**独立成段保留文本**（丢弃会让正文凭空少一段，
-         而"少了一段"在病历里意味着漏数据，远比"多切一段"严重）。 */
+      /* 缺坐标的行无法参与几何判定：独立成段保留文本（丢弃会让正文凭空少一段，
+         而"少了一段"在病历里意味着漏数据，远比"多切一段"严重）。  */
       if (!Number.isFinite(line.y)) {
         if (current) {
           paragraphs.push(current);
@@ -289,8 +258,8 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
       }
 
       if (!current) {
-        /* 页/文档的第一段没有"切分依据"（它就是开头），但**字号大本身是正向证据**：
-           标题应当至少记为 medium，否则"第一段标题"永远显示低置信，low 比例失去提示意义。 */
+        /* 页/文档的第一段没有"切分依据"（它就是开头），但字号大本身是正向证据：
+           标题应当至少记为 medium，否则"第一段标题"永远显示低置信，low 比例失去提示意义。  */
         const looksTitle = line.size >= baselineSize * (1 + sizeRatio) && line.fragments === 1;
         current = {
           page,
@@ -344,9 +313,9 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
       if (shouldBreak) {
         paragraphs.push(current);
         paragraphBreaks += 1;
-        /* ⚠️ 置信度属于**新切出的段**（它带着刚收集到的 evidence）。
-           早期实现把 `current.confidence = ...` 写在 push 之后，结果设到了**被切开的旧段**上，
-           新旧两段的置信度完全错位（实测：有两条证据的段显示 low，无证据的段显示 high）。 */
+        /*  置信度属于新切出的段（它带着刚收集到的 evidence）。
+           早期实现把 `current.confidence = ...` 写在 push 之后，结果设到了被切开的旧段上，
+           新旧两段的置信度完全错位（实测：有两条证据的段显示 low，无证据的段显示 high）。  */
         current = {
           page,
           text: line.text,
@@ -366,12 +335,12 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
         current.lineCount += 1;
         current.fontSize = (current.fontSize * (current.lineCount - 1) + line.size) / current.lineCount;
       }
-      /* 段左边界取段内**最靠左**的位置：正文段首行缩进时，若以首行为界，续行会变成"负缩进"，
-         而下一段的首行相对它反而没有缩进 —— 缩进线索就此失效（实测踩到）。 */
+      /* 段左边界取段内最靠左的位置：正文段首行缩进时，若以首行为界，续行会变成"负缩进"，
+         而下一段的首行相对它反而没有缩进 —— 缩进线索就此失效（实测踩到）。  */
       currentLeft = Math.min(currentLeft, line.x);
       current.left = currentLeft;
       /* 段内首行相对段左边界的内缩：> 0 说明"本段以缩进开头"，
-         这是对**本段**成立的正向证据（与"凭什么切在这里"是两件事）。 */
+         这是对本段成立的正向证据（与"凭什么切在这里"是两件事）。  */
       current.firstLineIndent = Math.max(0, currentFirstX - currentLeft);
       previousLine = line;
     }

@@ -1,14 +1,5 @@
-/**
- * 审计链头锚定自测（A1~A13）。
- *
- *   node src/core/audit-anchor-self-test.ts
- *
- * 这套用例要回答的核心问题只有一个：**链内校验查不出来的两类改动，锚点查得出来吗。**
- *   - A4 删尾（链的前缀依然完好）
- *   - A6 删一条 + 重新编号 + 重算整条链（连 `seq` 都连续、`load()` 报"无恙"）
- * 反过来，A8 是**把边界做成可执行的事实**：拿得到签名私钥的人（本例是公开的演示种子）
- * 删尾后重签锚点，这套机制**检不出来** —— 所以它不能对外说成"防篡改已解决"。
- */
+// 审计链头锚定自测（A1~A13）。
+// 反过来，A8 是把边界做成可执行的事实：拿得到签名私钥的人（本例是公开的演示种子）
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openDbFixture } from '../testing/db-fixture.ts';
@@ -62,7 +53,7 @@ function record(index: number): Omit<AdminAuditRecord, 'seq'> {
   };
 }
 
-/** 建一条 n 条记录的链（**写在库里**），返回读出来的记录 */
+/** 建一条 n 条记录的链（写在库里），返回读出来的记录  */
 function buildChain(n: number): ChainedAdminAuditRecord[] {
   db.exec('delete from admin_audit');
   const log = new AdminAuditLog(db);
@@ -74,11 +65,11 @@ function buildChain(n: number): ChainedAdminAuditRecord[] {
 }
 
 /**
- * 把整条链**重写并重算**：删掉若干条、重新编号、逐条重算 `prevHash`/`hash`（直接改库）。
+ * 把整条链重写并重算：删掉若干条、重新编号、逐条重算 `prevHash`/`hash`（直接改库）。
  *
  * 这是最狠的一类篡改：`seq` 连续、`prevHash` 连续、每条自身 hash 自洽 ——
  * `admin-audit-store.load()` 会报"没有任何问题"。它是锚点存在的全部理由。
- */
+  */
 function rewriteChain(
   removeSeq: number[] = [],
   mutate?: (records: ChainedAdminAuditRecord[]) => void,
@@ -149,8 +140,8 @@ async function main(): Promise<void> {
     assertEqual(report.unanchored, 2, '但要如实报出"其后的 2 条尚无锚点"');
     assert(report.message.includes('尚无锚点'), `信息要提示再锚定，实际：${report.message}`);
 
-    /* 也正因为如此：**锚点之后那几条被删，用这个锚点是查不出来的**。
-       这条断言是"必须周期性锚定"的机器证据，而不是一句口号。 */
+    /* 也正因为如此：锚点之后那几条被删，用这个锚点是查不出来的。
+       这条断言是"必须周期性锚定"的机器证据，而不是一句口号。  */
     const truncated = buildChain(3);
     const blind = verifyAnchor(truncated, anchor, { verify });
     assertEqual(blind.status, 'match', '锚点只覆盖到第 3 条，删掉第 4/5 条时它看不出问题 —— 这就是要周期性锚定的原因');
@@ -218,8 +209,8 @@ async function main(): Promise<void> {
   await test('A8 **已知边界**：拿得到签名私钥的人删尾后重签锚点 → 检不出来', () => {
     /* 这条不是"缺陷待修"，而是这套机制的边界本身：本仓库的锚点种子（`L0_AUDIT_ANCHOR_SEED`）
        默认是公开演示种子，任何拿到代码的人都能推导出私钥。
-       所以它**防不了"有权限的人"** —— 真正要防，需要私钥在受控设备里，
-       且**公钥钉在审计查看方**（不在被审的这台机器上）。 */
+       所以它防不了"有权限的人" —— 真正要防，需要私钥在受控设备里，
+       且公钥钉在审计查看方（不在被审的这台机器上）。  */
     const full = buildChain(5);
     void signAnchor(headOf(full)!, '2026-10-12T05:00:00.000Z', signer); /* 旧锚点：这里故意不用它 */
 
@@ -242,7 +233,7 @@ async function main(): Promise<void> {
     assertEqual(report.status, 'mismatch', '"有签名但我验不了"不能当作"验过了没问题"');
     assertEqual(report.code, ANCHOR_ERRORS.E_AUDIT_ANCHOR_SIGNATURE, '错误码');
     assert(report.message.includes('fail-closed'), `信息要说明为什么拒绝，实际：${report.message}`);
-    /* 未签名的锚点则必须在**没有**验签能力时也能用（否则等于强制要求签名） */
+    /* 未签名的锚点则必须在没有验签能力时也能用（否则等于强制要求签名）  */
     const unsigned = { seq: anchor.seq, hash: anchor.hash, at: anchor.at };
     const okReport = verifyAnchor(records, unsigned, {});
     assertEqual(okReport.status, 'match', '未签名锚点不要求验签能力');
@@ -259,8 +250,8 @@ async function main(): Promise<void> {
 
   await test('A11 锚点入库：非法形状**写不进去**，重复锚定是幂等的', () => {
     /* 文件时代的这条用例守的是"尾行残行 / 中间行坏 JSON 不许静默跳过"。
-       入库之后那两类损坏**不可能出现**（一行要么在要么不在，列上还有 NOT NULL 与主键）——
-       不是不再关心，而是它换成了另一类失败：非法形状根本写不进去。 */
+       入库之后那两类损坏不可能出现（一行要么在要么不在，列上还有 NOT NULL 与主键）——
+       不是不再关心，而是它换成了另一类失败：非法形状根本写不进去。  */
     db.exec('delete from admin_audit_anchor');
     const store = new AuditAnchorStore(db);
     assertEqual(store.load().firstRun, true, '库里没有锚点应报 firstRun');
@@ -270,8 +261,8 @@ async function main(): Promise<void> {
     assertEqual(new AuditAnchorStore(db).load().anchors.length, 2, '重新读出来还是两条');
     assertEqual(store.latest()?.seq, 2, 'latest 应给最后一条');
 
-    /* **同一条链头锚两次 = 同一条**：文件时代每次"再锚一次"都会多一行（实测堆到 286 条） ——
-       而"锚了多少次"与"链被锚到了哪里"是两件事，混在一起之后谁也看不懂。 */
+    /* 同一条链头锚两次 = 同一条：文件时代每次"再锚一次"都会多一行（实测堆到 286 条） ——
+       而"锚了多少次"与"链被锚到了哪里"是两件事，混在一起之后谁也看不懂。  */
     assertEqual(store.append({ seq: 2, hash: 'b'.repeat(64), at: '2026-10-12T03:00:00.000Z' }), false, '重复锚定不产生第二行');
     assertEqual(new AuditAnchorStore(db).load().anchors.length, 2, '库里仍然只有两条');
 
@@ -300,10 +291,10 @@ async function main(): Promise<void> {
   });
 
   await test('A13 **锚点要能被带出这台机器**（它与链同库，同机另一处挡不住同一个人）', () => {
-    /* 这条用例的旧版本断言"锚点在另一个文件里"。入库之后那句话**不再成立**，
+    /* 这条用例的旧版本断言"锚点在另一个文件里"。入库之后那句话不再成立，
        而它本来也不该是那句：同一台机器上的两个文件、两张表，都挡不住同一个有权限的人。
-       锚点的价值在于**把它带出被审的这台机器**（由审计查看方保存）——
-       所以这里钉住的是"导出锚点所需的信息齐全"，而不是"它躺在哪个载体上"。 */
+       锚点的价值在于把它带出被审的这台机器（由审计查看方保存）——
+       所以这里钉住的是"导出锚点所需的信息齐全"，而不是"它躺在哪个载体上"。  */
     db.exec('delete from admin_audit_anchor');
     const store = new AuditAnchorStore(db);
     assertEqual(store.table, 'admin_audit_anchor', '表名要能对使用者交代（它不是内部细节）');

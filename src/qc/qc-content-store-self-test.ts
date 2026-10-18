@@ -1,15 +1,4 @@
-/**
- * 内涵质控配置落库自测（`qc/qc-content-store.ts`）。
- *
- *   node src/qc/qc-content-store-self-test.ts
- *
- * 锁死五条：
- *   QC1 空库 = "引擎未接入 + 无规则"（**空是合法状态**，不是错误）；
- *   QC2 引擎形态与地址入库；凭据单独一行、加密、**永不回显**；
- *   QC3 形态校验 fail-closed（http 缺地址拒绝、model 不接受第二个地址）；
- *   QC4 规则清单**逐条校验**：坏的那条报出来，好的照常用（不整份拒绝，也不静默丢）；
- *   QC5 旧规则文件一次性搬运**带记账闸门**（清空规则后不会被旧文件悄悄导回来）。
- */
+// 内涵质控配置落库自测（`qc/qc-content-store.ts`）。
 
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -175,7 +164,7 @@ async function main(): Promise<void> {
       assertEqual(again.ran, false, '记了账就不再碰旧文件');
       assertEqual(again.imported, 0, '第二次不该再导入');
 
-      /* **这条才是记账的意义**：管理员清空了规则，旧文件不许把它导回来（清除是安全动作） */
+      /* 这条才是记账的意义：管理员清空了规则，旧文件不许把它导回来（清除是安全动作）  */
       const cleared = saveQcContentConfig(fixture.kv, { engine: { kind: 'none' }, rules: [] }, 'ADMIN', { at: AT });
       assertEqual(cleared.loaded.rules.length, 0, '前置：规则已清空');
       const after = importQcRulesOnce({ workStore: fixture.workStore, kv: fixture.kv, file, at: AT });

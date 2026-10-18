@@ -1,10 +1,4 @@
-/**
- * 预问诊自测（P1~P6）。
- *
- *   node src/previsit/previsit-self-test.ts
- *
- * 全部离线：入参是合成对象，落点走"摊平后的章节锚点"，不读库、不建文档树。
- */
+// 预问诊自测（P1~P6）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {

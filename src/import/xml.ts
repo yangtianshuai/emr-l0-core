@@ -1,21 +1,12 @@
-/**
- * T25 · 极简 XML 解析器（零依赖）。
- *
- * 为什么自己写而不引库：本项目"零 npm 依赖"是硬约束（医院内网装机环境常无法联网装包），
- * 而导入只需要**读取**：元素、属性、文本、自闭合标签、注释、CDATA、实体转义。
- * OFD 的 XML 是机器生成的、结构规整，这个子集足够；**不实现** DTD、命名空间解析、
- * XPath、属性默认值等——不用的能力不写，写了就要维护。
- *
- * 查找一律按**本地名**匹配（忽略前缀）：`ofd:TextCode` 与 `TextCode` 等价，
- * 因为各家 OFD 写入器的前缀命名并不统一（`ofd` / `ofd1` / 默认命名空间都有）。
- */
+// 极简 XML 解析器（零依赖），只覆盖 OFD 需要的读取子集。
+// 查找一律按本地名匹配（忽略前缀）：ofd:TextCode 与 TextCode 等价。
 
 export interface XmlNode {
   /** 原始名（保留前缀），例如 ofd:TextCode */
   name: string;
   attrs: Record<string, string>;
   children: XmlNode[];
-  /** 直接文本片段（不递归子元素） */
+  /** 直接文本片段（不含子元素） */
   text: string;
 }
 
@@ -55,7 +46,6 @@ function parseAttrs(raw: string): Record<string, string> {
   return attrs;
 }
 
-/** 解析 XML 文本，返回根节点（若有多根则返回一个虚拟根 `#document`） */
 export function parseXml(source: string): XmlNode {
   const root: XmlNode = { name: '#document', attrs: {}, children: [], text: '' };
   const stack: XmlNode[] = [root];
@@ -69,14 +59,12 @@ export function parseXml(source: string): XmlNode {
     }
     if (lt > cursor) stack[stack.length - 1]!.text += decodeEntities(source.slice(cursor, lt));
 
-    /* 注释 */
     if (source.startsWith('<!--', lt)) {
       const end = source.indexOf('-->', lt + 4);
       if (end < 0) throw new XmlError('注释未闭合');
       cursor = end + 3;
       continue;
     }
-    /* CDATA */
     if (source.startsWith('<![CDATA[', lt)) {
       const end = source.indexOf(']]>', lt + 9);
       if (end < 0) throw new XmlError('CDATA 未闭合');
@@ -84,14 +72,12 @@ export function parseXml(source: string): XmlNode {
       cursor = end + 3;
       continue;
     }
-    /* 声明 / DOCTYPE */
     if (source.startsWith('<?', lt) || source.startsWith('<!', lt)) {
       const end = source.indexOf('>', lt);
       if (end < 0) throw new XmlError('声明未闭合');
       cursor = end + 1;
       continue;
     }
-    /* 结束标签 */
     if (source.startsWith('</', lt)) {
       const end = source.indexOf('>', lt);
       if (end < 0) throw new XmlError('结束标签未闭合');
@@ -102,7 +88,6 @@ export function parseXml(source: string): XmlNode {
       cursor = end + 1;
       continue;
     }
-    /* 开始 / 自闭合标签 */
     const end = findTagEnd(source, lt);
     if (end < 0) throw new XmlError('开始标签未闭合');
     const inner = source.slice(lt + 1, end);
@@ -121,7 +106,7 @@ export function parseXml(source: string): XmlNode {
   return root;
 }
 
-/** 找到标签的 '>'（跳过属性值里的 '>'；不处理 DTD 内部子集，OFD 不会出现） */
+// 跳过属性值里的 '>'；不处理 DTD 内部子集（OFD 不会出现）
 function findTagEnd(source: string, from: number): number {
   let quote: string | null = null;
   for (let index = from + 1; index < source.length; index += 1) {
@@ -136,8 +121,6 @@ function findTagEnd(source: string, from: number): number {
   return -1;
 }
 
-/* ----------------------------- 便捷查询 ----------------------------- */
-
 export function childrenOf(node: XmlNode, name: string): XmlNode[] {
   return node.children.filter((child) => localName(child.name) === name);
 }
@@ -146,7 +129,6 @@ export function childOf(node: XmlNode, name: string): XmlNode | undefined {
   return node.children.find((child) => localName(child.name) === name);
 }
 
-/** 递归查找所有同名元素 */
 export function findAll(node: XmlNode, name: string, acc: XmlNode[] = []): XmlNode[] {
   for (const child of node.children) {
     if (localName(child.name) === name) acc.push(child);
@@ -162,12 +144,11 @@ export function findFirst(node: XmlNode, name: string): XmlNode | undefined {
 export function attrOf(node: XmlNode | undefined, name: string): string | undefined {
   if (!node) return undefined;
   if (node.attrs[name] !== undefined) return node.attrs[name];
-  /* 属性可能带前缀（如 xlink:href），按本地名兜底 */
+  // 属性可能带前缀（如 xlink:href），按本地名兜底
   const key = Object.keys(node.attrs).find((item) => localName(item) === name);
   return key ? node.attrs[key] : undefined;
 }
 
-/** 元素内所有后代文本（含子元素内文本），用于 TextCode / DataElement 取值 */
 export function textOf(node: XmlNode | undefined): string {
   if (!node) return '';
   let out = node.text;

@@ -1,37 +1,4 @@
-/**
- * OpenAI 兼容的模型适配器（`POST {endpoint}/chat/completions`）。
- *
- * 选这个协议不是因为它最好，而是因为**本机推理与一体机大多兼容它**
- * （vLLM / Ollama / 多数国产推理服务的兼容端点），于是"换模型"多数时候只改配置。
- *
- * ## transport 为什么可注入
- *
- * 自测用的是一台**假模型**：真实 `fetch` 由调用方传入，测试传入一个返回固定响应的函数。
- * 于是"请求怎么构造、响应怎么解析、错误怎么处理"这三件最容易出错的事**可以离线被测**，
- * 而自测不必依赖一台真实服务。
- *
- * 反过来说：让自测去连真模型，等于让自测**偶尔失败**，而那种失败最终会被所有人忽略。
- *
- * ## 响应体 ≠ 模型输出
- *
- * `/chat/completions` 的响应**不是**模型的输出本身，而是一个信封：
- * `{"choices":[{"message":{"content":"<模型的输出>"}}]}` —— 模型说的那段话是 `content` 这个
- * **字符串**。把响应体直接当模型输出解析，现场表现就是"连上了、也没 401，
- * 却永远报没有 suggestions 字段"，而错误信息里又看不到响应体，几乎无从推断。
- * 所以这里必须先拆信封（见 `unwrapModelOutput`）。
- *
- * ## 错误信息里为什么**不带响应体**
- *
- * 模型服务的错误响应经常**回显请求内容**（"invalid input: <你发的那段病历>"）。
- * 把它抄进日志，等于为了排查方便把病历内容又抄了一份到另一个地方。
- * 所以这里只报状态码与"响应体未记录"，排查靠 traceId 与服务端日志。
- *
- * ## 超时与"不落笔"
- *
- * 超时用 `AbortController` 主动中止，并且**任何失败都直接抛出**：
- * 不产出建议、不重试落笔、不退回模板。一次"什么都没发生"的失败，
- * 远好过一次"用模板假装成功"。
- */
+// OpenAI 兼容的模型适配器（`POST {endpoint}/chat/completions`）。
 
 import type { AiAdapter, AiSuggestRequest, AiSuggestResponse, AiSuggestionDraft, AiSuggestionMode } from './adapter.ts';
 import { AiOutputError, validateSuggestions } from './adapter.ts';
@@ -46,7 +13,7 @@ export interface ModelTransportRequest {
 
 export interface ModelTransportResponse {
   status: number;
-  /** 响应体文本；**只在内存里用于解析**，不写日志、不进留痕、不放进错误信息 */
+  /** 响应体文本；只在内存里用于解析，不写日志、不进留痕、不放进错误信息  */
   body: string;
 }
 
@@ -82,11 +49,11 @@ const MODE_INSTRUCTION: Record<AiSuggestionMode, string> = {
  * 组装提示词。
  *
  * 三条刻意的约束：
- *   - **只给脱敏后的文本**（上下文包已经是脱敏产物，这里不再碰文档）；
- *   - **显式要求 JSON 且给出确切字段**：不依赖 `response_format`（不是所有兼容服务都支持它，
+ *   - 只给脱敏后的文本（上下文包已经是脱敏产物，这里不再碰文档）；
+ *   - 显式要求 JSON 且给出确切字段：不依赖 `response_format`（不是所有兼容服务都支持它，
  *     发了可能直接 400），而是在提示词里说清 + 解析时容错提取；
- *   - **明确只允许落在给定 nodeId 上**：模型"顺手引用上文节点"是最常见的越界方式。
- */
+ *   - 明确只允许落在给定 nodeId 上：模型"顺手引用上文节点"是最常见的越界方式。
+  */
 function buildPrompt(request: AiSuggestRequest): string {
   const contextLines = request.context.items
     .map((item) => `- [${item.role}] nodeId=${item.nodeId}${item.tag ? ` tag=${item.tag}` : ''}：${item.text}`)
@@ -111,11 +78,11 @@ function buildPrompt(request: AiSuggestRequest): string {
 /**
  * 从模型输出里提取 JSON。
  *
- * 容错是**必要**的，不是宽容：即使提示词说了"不要代码块"，模型仍经常包一层
+ * 容错是必要的，不是宽容：即使提示词说了"不要代码块"，模型仍经常包一层
  * ```json 围栏或加一句"好的，以下是建议"。为此直接判失败，会让接入在第一天就不可用。
- * 但容错到此为止 —— **提取出来的结构仍要过 `validateSuggestions`**，
+ * 但容错到此为止 —— 提取出来的结构仍要过 `validateSuggestions`，
  * 那是"能不能落笔"的判断，不该有任何宽容余地。
- */
+  */
 function extractJson(text: string): unknown {
   const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   try {
@@ -135,16 +102,16 @@ function extractJson(text: string): unknown {
 }
 
 /**
- * 拆开 OpenAI 兼容的**响应信封**，取出模型正文。
+ * 拆开 OpenAI 兼容的响应信封，取出模型正文。
  *
  * 收两种形状 —— 这不是"宽容"，取出来的东西仍要过 `validateSuggestions`：
  *   - 标准 chat 信封：`choices[0].message.content`（字符串；多模态服务可能是分段数组，
  *     只拼文本段，图像等分段忽略）；
- *   - 自建网关直出建议 JSON：没有 `choices` 时，**响应体本身**即模型输出。
+ *   - 自建网关直出建议 JSON：没有 `choices` 时，响应体本身即模型输出。
  *
  * `finish_reason` 一并带出来：它是"输出被截断"这条线索的唯一来源，
  * 而截断的症状（JSON 断在半截）最容易被读成"模型不听话"。
- */
+  */
 function unwrapModelOutput(bodyText: string): { content: string; finishReason?: string } {
   let envelope: unknown;
   try {
@@ -201,12 +168,12 @@ export function createHttpAdapter(
     transport?: ModelTransport;
     fetchImpl?: typeof fetch;
     /**
-     * 密钥**直接给出**（由调用方从库里的 `config.ai-model.apiKey` 解出来）。
+     * 密钥直接给出（由调用方从库里的 `config.ai-model.apiKey` 解出来）。
      *
-     * 它**不进配置对象、不进日志**；调用方只把值递到这一层用一次。
+     * 它不进配置对象、不进日志；调用方只把值递到这一层用一次。
      * 没有密钥时请求会以 401 失败，而现场现象是"模型没反应" ——
      * 所以界面那一侧必须把 `apiKeyPresent` 报出来，避免把排查方向引偏。
-     */
+      */
     apiKey?: string;
   } = {},
 ): AiAdapter {
@@ -234,9 +201,9 @@ export function createHttpAdapter(
         temperature: 0.2,
         messages: [{ role: 'user', content: buildPrompt(request) }],
       });
-      /* 超时**不能只靠 transport 自觉响应 abort**：一个不理会 signal 的实现会让请求永远挂着，
+      /* 超时不能只靠 transport 自觉响应 abort：一个不理会 signal 的实现会让请求永远挂着，
          而"挂着的请求"在现场表现为"AI 没反应"，排查方向会完全跑偏。
-         所以额外 race 一个到点即 reject 的 promise —— 传输层守不守规矩，超时都成立。 */
+         所以额外 race 一个到点即 reject 的 promise —— 传输层守不守规矩，超时都成立。  */
       const timedOut = new Promise<never>((_, reject) => {
         controller.signal.addEventListener('abort', () =>
           reject(new AiRequestError('E_AI_TIMEOUT', `模型调用超时（${config.timeoutMs}ms）已中止，未产生任何建议`)),
@@ -297,7 +264,7 @@ export function createHttpAdapter(
         throw new AiRequestError('E_AI_NO_CONTENT', '模型输出里没有 suggestions 字段（响应体未记录）');
       }
       /* 校验在适配器内部完成：它最清楚自己的原始格式，也最该为"产出能不能用"负责。
-         调用方若使用第三方适配器，**仍应再过一遍** `validateSuggestions`。 */
+         调用方若使用第三方适配器，仍应再过一遍 `validateSuggestions`。  */
       const items: AiSuggestionDraft[] = validateSuggestions(rawItems, request);
       const response: AiSuggestResponse = {
         items,
@@ -309,10 +276,10 @@ export function createHttpAdapter(
           outputChars: items.reduce((sum, item) => sum + item.text.length, 0),
         },
       };
-      /* `skipped` **原样带出，不在这里校验**：它与 `suggestions` 一样来自响应体，
+      /* `skipped` 原样带出，不在这里校验：它与 `suggestions` 一样来自响应体，
          而"跳过声明是不是在说谎"（幻觉 nodeId、说没写又写了）只有拿范围去比对才能判 ——
          那是 `resolveSilenceReport` 的活。适配器在这里过滤，等于把
-         "模型说了假话"这件事悄悄擦掉，而它恰恰是最该被看见的一种沉默。 */
+         "模型说了假话"这件事悄悄擦掉，而它恰恰是最该被看见的一种沉默。  */
       if (envelope.skipped !== undefined) response.skipped = envelope.skipped;
       return response;
     },

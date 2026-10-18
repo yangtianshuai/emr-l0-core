@@ -1,16 +1,4 @@
-/**
- * WS/T 500 导入的黄金样例。
- *
- * ⚠️ 声明：本样例由本项目**手写**，只覆盖"本项目需要映射的元素"
- * （文档头、患者、章节树、叙述文本、entry/observation 数据元、无值条目、无编码条目、
- * 非 WS/T 500 的 codeSystem、命名空间前缀混用）。
- * 它**不是**一份合规的 WS/T 500 文档，也**不构成任何符合性声明**；
- * 未经真实厂商/平台导出的文档验证前，不得据此对外声称"支持 WS/T 500"。
- *
- * 用途有两个：
- *   1) 自测的期望值来源（黄金样例比对：映射结果必须逐项等于人工核对的期望）；
- *   2) 产出 `artifacts/wst500-sample.xml`，供 Demo 直接点击导入体验完整链路。
- */
+// WS/T 500 导入的黄金样例。
 
 export const WST500_SAMPLE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:cd="urn:hl7-org:v3">
@@ -162,8 +150,8 @@ export const WST500_GBK_DECLARED_XML = `<?xml version="1.0" encoding="GBK"?>
 
 /**
  * 黄金期望：人工逐项核对的结果。
- * 任何一项对不上都说明**映射规则变了**（而不是"测试太严"）——这正是黄金样例的价值。
- */
+ * 任何一项对不上都说明映射规则变了（而不是"测试太严"）——这正是黄金样例的价值。
+  */
 export const WST500_SAMPLE_EXPECT = {
   documentId: 'DOC_OPD_20261008_001',
   docTypeCode: 'WST500.01.001',

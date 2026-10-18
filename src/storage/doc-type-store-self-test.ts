@@ -1,15 +1,4 @@
-/**
- * 文书类型自测（T1~T5）。
- *
- *   node src/storage/doc-type-store-self-test.ts
- *
- * 守五件事：
- *   T1 三态：没配 = **空**（不编一套默认类型出来）、配了能读回、坏了**抛错**（不当"没配过"）；
- *   T2 校验：**同体系内**编码唯一、显示名非空；**跨体系同码合法**（这条与科室字典刻意不同）；
- *   T3 停用 ≠ 删除：新建时选不到它，但**既有模板与已开出的病历照样显示它的名字**；
- *   T4 体系：缺省为 `local`，不认识的值当场报（它与文档模型的 `docType.system` 是同一套取值）；
- *   T5 播种标记：播过就记住 —— 删光类型后重启，它不会自己长回来。
- */
+// 文书类型自测（T1~T5）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openConfigFixture, writeCorruptRow } from '../testing/config-fixture.ts';
@@ -71,8 +60,8 @@ async function main(): Promise<void> {
         '体系白名单随视图下发：界面的下拉与后端校验取同一处，不各写一份',
       );
 
-      /* 坏行：口令换过 / 有人改过那一行。**必须抛错**，不能当作"没配过" ——
-         当成没配过会让所有按类型定位的质控规则静默不判，而没人知道。 */
+      /* 坏行：口令换过 / 有人改过那一行。必须抛错，不能当作"没配过" ——
+         当成没配过会让所有按类型定位的质控规则静默不判，而没人知道。  */
       writeCorruptRow(fixture, DOC_TYPE_CONFIG_KEY);
       assertEqual(codeOf(() => loadDocTypes(fixture.kv)), 'E_DOC_TYPE_INVALID', '解不开必须报，不许静默降级');
     } finally {
@@ -113,9 +102,9 @@ async function main(): Promise<void> {
         '同一体系内编码重复要报：重复时"这条规则盯的是哪一类文书"就没有确定答案',
       );
 
-      /* **本字典与科室字典的关键差别**：判重键是 `system/code`。
+      /* 本字典与科室字典的关键差别：判重键是 `system/code`。
          国标 `WST500/A01` 与院内 `local/A01` 是两个东西，共存是合法配置 ——
-         照抄科室那条"编码唯一"会把它误判成重复，而那正是最需要支持的场景。 */
+         照抄科室那条"编码唯一"会把它误判成重复，而那正是最需要支持的场景。  */
       const both = saveDocTypes(
         fixture.kv,
         [{ system: 'WST500', code: 'A01', display: '国标甲' }, { system: 'local', code: 'A01', display: '院内甲' }],

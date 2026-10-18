@@ -1,16 +1,4 @@
-/**
- * 科室字典自测（D1~D5）。
- *
- *   node src/storage/department-store-self-test.ts
- *
- * 守四件事：
- *   D1 三态：没配 = **空**（不编一套默认科室出来）、配了能读回、坏了**抛错**（不当"没配过"）；
- *   D2 校验：编码唯一、名称非空 —— "这份文书限哪个科"只能有一个答案；
- *   D3 停用 ≠ 删除：新配置里选不到它，但**既有内容照样显示它的名字**；
- *   D4 归一：老数据里的"呼吸内科"与字典里的 `DEPT_RESP` 说的是同一个科
- *      （读取时对齐，**不改病历**）；
- *   D5 播种标记：播过就记住 —— 删光科室后重启，它不会自己长回来。
- */
+// 科室字典自测（D1~D5）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openConfigFixture, writeCorruptRow } from '../testing/config-fixture.ts';
@@ -66,8 +54,8 @@ async function main(): Promise<void> {
       const described = describeDepartments(reloaded);
       assertEqual(described.enabledCount, 2, '启用数供界面直接显示');
 
-      /* 坏行：口令换过 / 有人改过那一行。**必须抛错**，不能当作"没配过" ——
-         当成没配过会让所有"限科室"的判定静默失效（全院通用），而没人知道。 */
+      /* 坏行：口令换过 / 有人改过那一行。必须抛错，不能当作"没配过" ——
+         当成没配过会让所有"限科室"的判定静默失效（全院通用），而没人知道。  */
       writeCorruptRow(fixture, DEPARTMENT_CONFIG_KEY);
       assertEqual(codeOf(() => loadDepartments(fixture.kv)), 'E_DEPT_INVALID', '解不开必须报，不许静默降级');
     } finally {

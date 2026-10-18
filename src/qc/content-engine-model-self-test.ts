@@ -1,12 +1,4 @@
-/**
- * 模型形态的内涵类质控引擎自测（M1~M8）。
- *
- *   node src/qc/content-engine-model-self-test.ts
- *
- * 重点是 **M3**：用一个**故意给建议**的假模型去撞契约 ——
- * 提示词只是"尽量别这么干"，**拒收才是"这么干没用"**。
- * 这条是"不得产出建议"那条类型级约束在真模型上的检验点。
- */
+// 模型形态的内涵类质控引擎自测（M1~M8）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
@@ -37,7 +29,6 @@ const REQUEST: ContentQcRequest = {
   omittedNodes: 0,
 };
 
-/** 模型接入配置（`LoadedModelConfig` 的最小可用形态） */
 const modelConfig = (overrides: Record<string, unknown> = {}) => () =>
   ({
     config: {
@@ -115,8 +106,8 @@ async function main(): Promise<void> {
   });
 
   await test('M3 **模型给了建议 → 整份产出被拒**（提示词不是防线，拒收才是）', async () => {
-    /* 这是这条路的**核心性质**：模型（尤其换了提示词、或被人诱导之后）给出"建议补充……"，
-       而契约里没有任何可以落笔的字段 —— 于是它不是"被悄悄丢掉"，而是**整份产出被拒**。 */
+    /* 这是这条路的核心性质：模型（尤其换了提示词、或被人诱导之后）给出"建议补充……"，
+       而契约里没有任何可以落笔的字段 —— 于是它不是"被悄悄丢掉"，而是整份产出被拒。  */
     const withSuggestion = JSON.stringify({
       judged: ['R-1'],
       findings: [
@@ -147,9 +138,9 @@ async function main(): Promise<void> {
   });
 
   await test('M4 违背单条约束（quote 不是原文 / 级别升级）→ **逐条拒**（与"整份拒"是两级）', async () => {
-    /* 两级要分清：**外壳级**问题（契约、禁字段、缺 judged）整份拒；
-       **单条**问题只拒那一条（其余判定仍然可用）。混成一级，会让"一条引文不准"
-       把整次质控作废 —— 而现场需要的是"这条不算数、别的照看"。 */
+    /* 两级要分清：外壳级问题（契约、禁字段、缺 judged）整份拒；
+       单条问题只拒那一条（其余判定仍然可用）。混成一级，会让"一条引文不准"
+       把整次质控作废 —— 而现场需要的是"这条不算数、别的照看"。  */
     const badQuote = JSON.stringify({
       judged: ['R-1'],
       findings: [{ ruleId: 'R-1', nodeId: 'n-1', severity: 'warn', title: 't', rationale: 'r', quote: '这句话不在原文里' }],
@@ -219,7 +210,7 @@ async function main(): Promise<void> {
     } catch (err) {
       message = (err as Error).message;
     }
-    /* `run` 是异步的：构造成功、run 里抛 —— 关键结论相同：**不发出这一趟** */
+    /* `run` 是异步的：构造成功、run 里抛 —— 关键结论相同：不发出这一趟  */
     void message;
   });
 

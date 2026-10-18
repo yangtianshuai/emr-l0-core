@@ -1,10 +1,4 @@
-/**
- * 类型守卫：把 unknown 收窄为模型类型。
- *
- * 守卫是"边界"：外部输入（HTTP 请求体、导入文件、迁移前文档）必须先过守卫，
- * 否则类型系统的保证在运行时并不成立 —— 尤其本项目要求"未知字段拒绝"，
- * 宽松的守卫会让非法数据静默进入内核。
- */
+// 类型守卫：把 unknown 收窄为模型类型。
 
 import type { DocNode, DocumentModel, EvidenceRef, MachineReadableBlock, Provenance, RevisionEntry, TextNode, FieldNode, SectionNode, TableNode } from './types.ts';
 

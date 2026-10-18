@@ -1,18 +1,5 @@
-/**
- * 后台账号（用户名 + 口令 + 角色）自测（U1~U13）。
- *
- *   node src/auth/user-store-self-test.ts
- *
- * ## 这一套要守的四件事
- *
- * 1) **口令只以哈希存在**：库文件里搜不到口令明文，且同一个口令在两个账号上哈希不同
- *    （盐独立 —— 共用盐会让攻破一个账号等于攻破另一个）；
- * 2) **三种失败分得开**（不存在 / 口令错 / 已停用）：给用户的文案合并，但服务端的
- *    判定必须分开，否则审计里那句"有人在试不存在的账号"就写不出来；
- * 3) **三条 fail-closed 红线**：最后一个管理员不能没、不能把自己关在门外、
- *    口令不短于门槛 —— 这三条错一次就是"谁也进不去管理后台"；
- * 4) **参数自描述**：提高 scrypt 参数不会让既有口令一起失效。
- */
+// 后台账号（用户名 + 口令 + 角色）自测（U1~U13）。
+// 1) 口令只以哈希存在：库文件里搜不到口令明文，且同一个口令在两个账号上哈希不同
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { mkdirSync } from 'node:fs';
@@ -31,7 +18,7 @@ import {
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'user-store-selftest');
 
-/** ⚠️ 本环境 node:fs 类型声明缺 rmSync 的 recursive 选项（运行时支持），同 storage-self-test */
+/**  本环境 node:fs 类型声明缺 rmSync 的 recursive 选项（运行时支持），同 storage-self-test  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
 const suite = new TestSuite('后台账号自测', [
@@ -56,12 +43,12 @@ function openStore(): { store: UserStore; db: ReturnType<typeof openDatabase>['d
 const PASSWORD = 'correct-horse-battery';
 
 /**
- * U10 需要**自己算一条参数不同的哈希**，所以这里也得直接调 scrypt。
+ * U10 需要自己算一条参数不同的哈希，所以这里也得直接调 scrypt。
  *
  * 不复用 `user-store.ts` 内部那份断言（那里是按用到的形状局部断言 node:crypto）：
  * 测试若借了实现内部的绕行方式，"实现换了绕法、测试跟着换"就会变成一条迟早会被做错的维护动作。
- * ⚠️ 本环境 `@types/node` 里 `node:crypto` 类型不完整，故用变量说明符 + 局部断言。
- */
+ *  本环境 `@types/node` 里 `node:crypto` 类型不完整，故用变量说明符 + 局部断言。
+  */
 const cryptoSpecifier = 'node:crypto';
 const nodeCrypto = (await import(cryptoSpecifier)) as unknown as {
   randomBytes: (size: number) => Uint8Array;
@@ -70,12 +57,6 @@ const nodeCrypto = (await import(cryptoSpecifier)) as unknown as {
 const b64 = (bytes: Uint8Array): string =>
   (globalThis as unknown as { Buffer: { from(b: Uint8Array): { toString(enc: string): string } } }).Buffer.from(bytes).toString('base64');
 
-/**
- * 取错误码后断言。**为什么要自带一个 `assertThrows`**：harness 那个要一个函数式谓词，
- * 而这一套里 90% 的断言只关心"是不是这个 code" —— 写成谓词会把
- * "期望 E_USER_LAST_ADMIN"这句话埋进一个 lambda 里，读起来反而更难核对。
- * 名字刻意与 harness 的同名（语义一致、形状更窄），调用处因此不必两套写法。
- */
 function codeOf(fn: () => unknown): string {
   try {
     fn();
@@ -89,25 +70,23 @@ function assertThrows(fn: () => unknown, expected: string, message = '应当以�
   assertEqual(codeOf(fn), expected, message);
 }
 
-/** 库文件里能不能搜到这段明文（**这是本套件最重要的一条断言**：哈希不是加密） */
+/** 库文件里能不能搜到这段明文（这是本套件最重要的一条断言：哈希不是加密）  */
 function dbContainsPlaintext(db: { prepare: (sql: string) => { all: (...p: unknown[]) => Array<Record<string, unknown>> } }, needle: string): boolean {
   const rows = db.prepare('select username, role, password_hash, updated_by from admin_users').all();
   return JSON.stringify(rows).includes(needle);
 }
 
 async function main(): Promise<void> {
-  /* 开头清一次。**不清就会撞上上一轮留下的同名库文件** ——
+  /* 开头清一次。不清就会撞上上一轮留下的同名库文件 ——
      实测：第二次运行时 U1 读到"已有 1 个管理员"（那是上一轮 run 建的），
      于是 11 条用例一起红，而它们指向的是一个测试卫生问题、不是产品缺陷。
-     容忍失败的理由同 `storage-self-test`：本环境的 rmSync 被"安全删除"垫片接管。 */
+     容忍失败的理由同 `storage-self-test`：本环境的 rmSync 被"安全删除"垫片接管。  */
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch {
     /* 残留的旧库文件不会与本次的 `case-N.db` 撞名（下面先递增再拼名） */
   }
   mkdirSync(DIR, { recursive: true });
-
-  /* ------------------------------ U 账号仓储 ------------------------------ */
 
   await test('U1 空库 = 未初始化；建第一个管理员后计数正确', () => {
     const { store } = openStore();
@@ -139,7 +118,7 @@ async function main(): Promise<void> {
     store.create({ username: 'qc1', password: PASSWORD, role: 'qc', by: 'installer' });
     const rows = db.prepare('select username, password_hash from admin_users order by username').all();
     assertEqual(String(rows[0].password_hash) === String(rows[1].password_hash), false, '两条哈希必须不同（盐独立）');
-    /* 哈希不同但**验证都通过** —— 这才说明差异来自盐而不是"存错了" */
+    /* 哈希不同但验证都通过 —— 这才说明差异来自盐而不是"存错了"  */
     assertEqual(verifyPassword(PASSWORD, String(rows[0].password_hash)), true, '第一条仍能验证通过');
     assertEqual(verifyPassword(PASSWORD, String(rows[1].password_hash)), true, '第二条仍能验证通过');
   });
@@ -147,7 +126,7 @@ async function main(): Promise<void> {
   await test('U4 三种失败分得开：不存在 / 口令错 / 已停用（文案合并、判定分开）', () => {
     const { store } = openStore();
     store.create({ username: 'admin', password: PASSWORD, role: 'admin', by: 'installer' });
-    /* 被停用的是**非管理员**：管理员一律停用会先撞上"最后一个管理员"红线（那是 U7 的场景） */
+    /* 被停用的是非管理员：管理员一律停用会先撞上"最后一个管理员"红线（那是 U7 的场景）  */
     store.create({ username: 'qc1', password: PASSWORD, role: 'qc', by: 'installer' });
 
     assertEqual(store.verify('admin', 'wrong-password').ok, false, '口令错应当失败');
@@ -161,7 +140,7 @@ async function main(): Promise<void> {
     const disabled = store.verify('qc1', PASSWORD);
     assertEqual(disabled.ok === false ? disabled.code : '', 'E_USER_DISABLED', '停用后即使是正确口令也应被拒');
 
-    /* **先验口令、再报停用**：否则"这个账号存在但被停用"不用口令就能问出来 */
+    /* 先验口令、再报停用：否则"这个账号存在但被停用"不用口令就能问出来  */
     const disabledWrong = store.verify('qc1', 'wrong-password');
     assertEqual(disabledWrong.ok === false ? disabledWrong.code : '', 'E_USER_BAD_PASSWORD', '停用 + 口令错应先报"口令错"');
 
@@ -175,7 +154,7 @@ async function main(): Promise<void> {
     assertEqual(store.get('doctor.zhang')?.username, 'Doctor.Zhang', '查询应大小写不敏感');
     assertEqual(store.verify('DOCTOR.ZHANG', PASSWORD).ok, true, '换个大小写也应能登录');
     assertEqual(store.canonicalUsernameOf('doctor.zhang'), 'Doctor.Zhang', '会话里的名字要取库里的写法（否则审计里会出现"两个名字"）');
-    /* 大小写不同但同名 → **拒绝**：否则界面上会出现两个看起来一样的账号 */
+    /* 大小写不同但同名 → 拒绝：否则界面上会出现两个看起来一样的账号  */
     assertThrows(() => store.create({ username: 'doctor.zhang', password: PASSWORD, role: 'qc', by: 'installer' }), 'E_USER_EXISTS');
     assertEqual(store.count(), 1, '不允许建出大小写不同的双胞胎');
   });
@@ -211,7 +190,7 @@ async function main(): Promise<void> {
     assertEqual(store.enabledAdminCount(), 1, '此时只剩 admin2 一个可用管理员');
     assertThrows(() => store.remove({ username: 'admin2', by: 'cli' }), 'E_USER_LAST_ADMIN', '最后一个仍然不能被删');
 
-    /* **被停用的管理员不算"可用"**：只剩一个"停用的管理员"与一个都没有是同一件事 */
+    /* 被停用的管理员不算"可用"：只剩一个"停用的管理员"与一个都没有是同一件事  */
     store.create({ username: 'admin3', password: PASSWORD, role: 'admin', by: 'cli' });
     assertEqual(store.enabledAdminCount(), 2, '现在有 2 个可用管理员');
     store.setDisabled({ username: 'admin2', disabled: true, by: 'cli' });
@@ -233,8 +212,8 @@ async function main(): Promise<void> {
     assertEqual(store.verify('admin', PASSWORD).ok, false, '旧口令必须立刻失效');
 
     /* 空的操作者要拒绝：`updated_by` 如实地记下"是谁做的"是本表存在的理由之一。
-       这一条的**每一条写路径**都要成立 —— 初版只写在"改角色/停用"的分支里，
-       于是"改口令"成了唯一一条可以不留操作者的路径（被本条抓住）。 */
+       这一条的每一条写路径都要成立 —— 初版只写在"改角色/停用"的分支里，
+       于是"改口令"成了唯一一条可以不留操作者的路径（被本条抓住）。  */
     for (const act of [
       () => store.setPassword({ username: 'admin2', password: next, by: '' }),
       () => store.setPassword({ username: 'admin2', password: next, by: '   ' }),
@@ -269,8 +248,8 @@ async function main(): Promise<void> {
   });
 
   await test('U10 参数自描述：换一组 scrypt 参数写下的哈希仍能验证（提高参数不会让口令一起失效）', () => {
-    /* 手写一条**参数不同**的哈希（N=1024）：模拟"将来把 N 抬上去之后，库里还留着旧口令"。
-       若实现是"按当前常量重算再比"，这条用例会失败 —— 那正是要挡住的行为。 */
+    /* 手写一条参数不同的哈希（N=1024）：模拟"将来把 N 抬上去之后，库里还留着旧口令"。
+       若实现是"按当前常量重算再比"，这条用例会失败 —— 那正是要挡住的行为。  */
     const salt = nodeCrypto.randomBytes(16);
     const legacyN = 1024;
     const derived = nodeCrypto.scryptSync(PASSWORD, salt, 32, { N: legacyN, r: 8, p: 1 });
@@ -330,7 +309,7 @@ async function main(): Promise<void> {
   });
 
 const code = suite.report();
-  /* 收尾清理**不影响结论**（同 `storage-self-test`：对含 WAL 的目录偶发失败） */
+  /* 收尾清理不影响结论（同 `storage-self-test`：对含 WAL 的目录偶发失败）  */
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch (err) {

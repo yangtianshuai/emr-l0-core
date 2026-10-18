@@ -1,25 +1,6 @@
-/**
- * 授权登记**从旧密封文件搬进库**的一次性动作。
- *
- * ## 三条规则（与 `audit-files-import.ts` 同源）
- *
- * **① 只在库里一条都没有时导入，并且**不混来源**。** 授权登记是"这台机器认不认某份授权"的唯一依据；
- * 库里已有记录时把旧文件再倒进去，等于让两批"谁被授权过"的记录并排存在，
- * 而它们的编号体系（grantId）来自不同时间点的签发平台 —— 混起来之后，
- * "这个 grantId 是哪一批的"就没人答得上来。
- *
- * **② 读不出来就不搬，且不记账。** 旧文件是密封的，解不开只有两种原因：口令不对，或文件被改过。
- * 两种都不该被"跳过继续"，也不该被记成"搬过了" —— 记了就再也不会重试，
- * 而正确的处置（找回口令 / 换用正确的文件）恰恰需要它能再试一次。
- *
- * **③ 逐条校验必需字段，坏的那条单独报出来。** 与质检规则清单同一条纪律：
- * 不因为一条坏就把整份拒绝（那会让人以为文件全废了），也不静默丢（那会让"登记少了"没人知道）。
- *
- * ## 为什么不删旧文件
- *
- * 与审计、部署参数那两处一致：**文件留着作回滚凭据**，而且删掉它会让"重跑一次"变成不可能
- * （要重跑只需删掉 `import_ledger` 里那一行）。
- */
+// 授权登记从旧密封文件搬进库的一次性动作。
+// ② 读不出来就不搬，且不记账。 旧文件是密封的，解不开只有两种原因：口令不对，或文件被改过。
+// 而正确的处置（找回口令 / 换用正确的文件）恰恰需要它能再试一次。
 
 import { existsSync } from 'node:fs';
 import { loadSealedPayload } from '../core/store.ts';
@@ -29,7 +10,7 @@ import { saveReadingGrant, type ReadingGrantStoreOptions } from './reading-grant
 export const READING_GRANTS_LEDGER_ID = 'reading-grants-import';
 
 export interface ReadingGrantsImportResult {
-  /** 这次有没有真的执行（被记账拦住时为 false —— 那是**正常**结果，不是错误） */
+  /** 这次有没有真的执行（被记账拦住时为 false —— 那是正常结果，不是错误）  */
   ran: boolean;
   imported: number;
   /** 旧文件里一共有多少条（用来核对"是不是都进来了"） */
@@ -50,9 +31,9 @@ interface LegacyRecordShape {
 /**
  * 从一条旧记录里取出"可查的四列"。取不出来就返回 null（由调用方计入 skipped）。
  *
- * 这里**只做最小校验**（两个 id 必须有）：整条记录原样进载荷，
+ * 这里只做最小校验（两个 id 必须有）：整条记录原样进载荷，
  * 它的完整形状由 demo 层自己认（`storage` 不该知道 `ReadingRecord` 的全部字段）。
- */
+  */
 function columnsOf(record: unknown): { grantId: string; docId: string; revoked: boolean; readCount: number } | null {
   const shape = record as LegacyRecordShape;
   const grantId = shape?.credential?.grant?.grantId;
@@ -82,7 +63,7 @@ export function importReadingGrantsOnce(deps: {
   }
   const exists = deps.exists ?? existsSync;
   if (!exists(deps.file)) {
-    /* 没有旧文件 → **不记账**：部署时后放进来仍然该被搬一次 */
+    /* 没有旧文件 → 不记账：部署时后放进来仍然该被搬一次  */
     return { ran: true, ...empty, reason: '没有旧的授权登记文件' };
   }
 
@@ -90,14 +71,14 @@ export function importReadingGrantsOnce(deps: {
     (deps.db.prepare('select count(*) as n from reading_grants').get() as { n?: number } | undefined)?.n ?? 0,
   );
   if (existing > 0) {
-    /* 库里已有登记：**绝不混来源**（两批 grantId 并排存在，事后谁也说不清哪条是哪一批的） */
+    /* 库里已有登记：绝不混来源（两批 grantId 并排存在，事后谁也说不清哪条是哪一批的）  */
     deps.workStore.ledgerMark(READING_GRANTS_LEDGER_ID, `库里已有 ${existing} 条授权登记，旧文件不导入（保留原处）`);
     return { ran: true, ...empty, reason: `库里已有 ${existing} 条授权登记：不导入旧文件（不混来源）` };
   }
 
   const loaded = loadSealedPayload<{ version?: number; grants?: unknown[] }>(deps.file, deps.passphrase);
   if (!loaded.ok) {
-    /* 读不出来**不记账**：记了就再也不会重试，而正确的处置（口令 / 文件）恰恰需要能再试 */
+    /* 读不出来不记账：记了就再也不会重试，而正确的处置（口令 / 文件）恰恰需要能再试  */
     return {
       ran: true,
       ...empty,

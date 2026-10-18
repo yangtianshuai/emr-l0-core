@@ -1,21 +1,4 @@
-/**
- * 检验/体征趋势 —— **派生视图**，不是文档结构。
- *
- * 核心判断：趋势**不进文档树**。
- *   1) 文档是**签名对象**，签章后不可改；而趋势数据每天在增长 ——
- *      把趋势做成文档里的一个结构，签章后就再也追不上了（临床上正是签章之后还在看趋势）；
- *   2) 正确做法：每个采样值 = 一个独立 `field` 节点（带 `sampledAt`、独立留痕），
- *      趋势 = 把这些节点按同一聚合键 + 时间排序算出来的视图。
- *   这与"机读信息是派生物"的既有原则一致：**派生数据不手工维护**。
- *
- * 聚合键的优先级：`sourceKey`（如 `LIS.WBC`）→ 否则 `tags[0]` 的 `system:code`。
- * 两条都可能缺：缺了就**无法聚合**，只能如实报告为"孤立点"，而不是硬凑成趋势。
- *
- * 本模块只做"排序 + 极值 + 异常标记"，**不做**：
- *   - 单位换算（不同单位的同名检验值必须人工确认后才能比，这里只提示单位不一致）；
- *   - 采样错误识别（把日期填错的点排到首位，本模块不会发现）；
- *   - "变化是否已写入病程记录"的一致性提示（那是质控，需要与文本比对）。
- */
+// 检验/体征趋势 —— 派生视图，不是文档结构。
 
 import type { DataElementTag, DocumentModel, JsonValue, NodeId, ProvenanceOrigin } from './types.ts';
 import { orderedNodeIds } from './machine.ts';
@@ -41,7 +24,7 @@ export interface TrendSeries {
   label: string;
   unit?: string;
   referenceRange?: { low?: number; high?: number; text?: string; unit?: string };
-  /** 时间升序；**缺 sampledAt 的点排在最后**（不丢数据，但要让人看出来） */
+  /** 时间升序；缺 sampledAt 的点排在最后（不丢数据，但要让人看出来）  */
   points: TrendPoint[];
   stats: {
     count: number;
@@ -115,7 +98,7 @@ export function buildTrends(doc: DocumentModel): TrendSeries[] {
 
   const series: TrendSeries[] = [];
   for (const [key, bucket] of buckets) {
-    /* 有时间的按时间升序；**没时间的排在最后**（不丢数据，但要让人看出来） */
+    /* 有时间的按时间升序；没时间的排在最后（不丢数据，但要让人看出来）  */
     const timed = bucket.points.filter((point) => point.at !== undefined);
     const untimed = bucket.points.filter((point) => point.at === undefined);
     timed.sort((a, b) => (a.at as string).localeCompare(b.at as string));

@@ -1,29 +1,6 @@
-/**
- * T18c 受控加密阅读：把「加密」与「受控阅读」缝成**一条链**。
- *
- * 之前的形态是两层各自为政：
- *   - 加密（envelope.ts）解决"文件离库后是密文"，但密钥怎么交给该看的人？口令模式又回到"共享口令"；
- *   - 受控阅读（controlled-reading.ts）解决"授权范围/期限/次数/终端"，但文件本身是明文，
- *     授权挡不住"拿到文件的人"（这条一直写在诚实边界里）。
- *
- * 本模块的做法是**授权即密钥交付**：把"内容密钥（被接收方公钥封装）"写进**授权书**，
- * 而授权书是被 SM2-SM3 签名的。于是三件事同时成立：
- *   ① 改接收方/改密钥 → 签名验不过（授权书被篡改）；
- *   ② 把授权书转给第三人 → 他没有对应私钥，解不出内容密钥（**换终端也没用**）；
- *   ③ 拿 A 文档的授权去读 B 文档 → 两处封装解出来的密钥不一致，本地直接拒绝。
- * 于是"凭证不可转让"从**自报的环境标识**升级为**密码学约束**。
- *
- * 加密对象是**文档 JSON**（`writeSession.exportJson()` 的产物），而不是 OFD 容器 ——
- * 因为受控阅读的粒度是文档模型（章节/字段级白名单）。要加密 OFD 容器请直接用 envelope 的口令/公钥接口。
- *
- * ⚠️ 诚实边界：
- *   - 授权校验（有效期/次数/终端/章节白名单）发生在**解密之后**：技术上密钥已经解出、明文已还原，
- *     校验失败时结果被丢弃而不会返回。若要"连解密都不做"，需要把授权校验前移，
- *     代价是密钥解封与文档绑定校验分处两地（本模块选择"先解后校验"，理由是可验证性更强：
- *     文档指纹校验必须在拿到文档之后才能进行）；
- *   - 次数记账仍由调用方持久化（本模块只判定），强制点在服务端集中记账；
- *   - 不防"接收方自己把解出的明文另行保存"——这是授权阅读的固有限制，不是实现缺陷。
- */
+// T18c 受控加密阅读：把「加密」与「受控阅读」缝成一条链。
+// - 加密（envelope.ts）解决"文件离库后是密文"，但密钥怎么交给该看的人？口令模式又回到"共享口令"；
+// ② 把授权书转给第三人 → 他没有对应私钥，解不出内容密钥（换终端也没用）；
 
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
 import {
@@ -53,9 +30,9 @@ export interface SealedForReading {
 }
 
 /**
- * 加密一份**文档 JSON** 并生成交付片段。
+ * 加密一份文档 JSON 并生成交付片段。
  * `dek`/`iv` 只在测试与复现时显式传入；生产一律随机。
- */
+  */
 export function sealForReading(
   plaintext: Uint8Array,
   recipient: RecipientPublicKey,
@@ -96,7 +73,7 @@ export interface SealedReadingResult {
   reasons: string[];
   /** 受控视图（章节白名单已生效，未授权章节不进视图） */
   view?: ReadingView;
-  /** 解出的明文（仅 ok 时返回；校验失败时**不返回**，避免"被拒了却还能拿到内容"） */
+  /** 解出的明文（仅 ok 时返回；校验失败时不返回，避免"被拒了却还能拿到内容"）  */
   plaintext?: Uint8Array;
 }
 
@@ -123,12 +100,13 @@ export interface OpenSealedParams {
  * 受控加密阅读：凭证与交付片段核对 → 解封密钥 → 解密 → 反序列化 → 走完整受控阅读校验 → 返回视图。
  *
  * 顺序说明：先用私钥解封并解密（私钥本身就界定了"谁是接收方"），
- * 再做授权校验（有效期/次数/终端/章节/文档指纹）。校验不过时**明文不返回**。
- */
+ * 再做授权校验（有效期/次数/终端/章节/文档指纹）。校验不过时明文不返回。
+  */
 export function openSealedForReading(params: OpenSealedParams): SealedReadingResult {
   const { envelope, credential, recipient, context } = params;
 
-  /* ① 凭证本身与撤销（不涉及文档内容，先做掉，避免"无效凭证也做私钥运算"） */
+  // ① 凭证本身与撤销（不涉及文档内容，先做掉，避免"无效凭证也做私钥运算"）
+
   const credentialCheck = verifyCredential(credential);
   if (!credentialCheck.ok) {
     return {
@@ -141,7 +119,6 @@ export function openSealedForReading(params: OpenSealedParams): SealedReadingRes
     return { ok: false, code: 'E_GRANT_REVOKED', reasons: [`授权 ${credential.grant.grantId} 已被撤销`] };
   }
 
-  /* ② 授权书里必须带密钥交付片段，否则这就是一份"没给钥匙的授权" */
   const delivery = credential.grant.keyDelivery;
   if (!delivery) {
     return {
@@ -161,7 +138,6 @@ export function openSealedForReading(params: OpenSealedParams): SealedReadingRes
     };
   }
 
-  /* ③ 信封必须也是给同一个接收方的（否则就是"授权书与密文对不上"） */
   const kdf = envelope?.header?.kdf;
   if (!envelope?.header || typeof envelope.ciphertext !== 'string') {
     return { ok: false, code: 'E_ENVELOPE_MALFORMED', reasons: ['信封结构不完整'] };
@@ -183,7 +159,6 @@ export function openSealedForReading(params: OpenSealedParams): SealedReadingRes
     };
   }
 
-  /* ④ 两处封装必须解出**同一把**内容密钥：这是"授权书交付的就是这份密文用的密钥"的证明 */
   const fromCredential = unwrapWrappedKey(delivery.wrappedKey, recipient.privateKey);
   if (!fromCredential.ok) {
     return { ok: false, code: fromCredential.code, reasons: [fromCredential.reason] };

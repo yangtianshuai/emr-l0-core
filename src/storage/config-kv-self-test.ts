@@ -1,14 +1,4 @@
-/**
- * 部署参数键值层 + 旧文件搬家自测（K1~K8）。
- *
- *   node src/storage/config-kv-self-test.ts
- *
- * 守三件事：
- *   K1/K2 三态与密封：**解不开 ≠ 没有**；同一张表一律密封（不做"有的加密有的明文"）；
- *   K3 清掉就是**真删行**（写空壳会让"我清掉了"变成假话 —— 这里踩过）；
- *   K4~K8 搬家：**不覆盖已有的**、**记了账就不再碰旧文件**（否则被清除的密钥会自己回来）、
- *         有失败**不记账**（记了那份就永远搬不过来）。
- */
+// 部署参数键值层 + 旧文件搬家自测（K1~K8）。
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -85,7 +75,7 @@ async function main(): Promise<void> {
       assertEqual(blob?.includes('11434'), false, '地址也不以明文躺着（同一张表不做两种待遇）');
       assert(JSON.parse(String(blob))?.header !== undefined, '存的应当是信封（有 header）');
 
-      /* 摘要列：存**密文**的摘要而不是明文的 —— 明文摘要在低熵密钥上等于给离线爆破留靶子 */
+      /* 摘要列：存密文的摘要而不是明文的 —— 明文摘要在低熵密钥上等于给离线爆破留靶子  */
       const row = fixture.workStore.getSealed<{ apiKey: string }>(MODEL_CONFIG_KEY);
       assertEqual(row.ok && row.found && row.data.apiKey, 'secret-key-1', '读回经密封层仍然正确');
     } finally {
@@ -136,7 +126,7 @@ async function main(): Promise<void> {
       assertEqual(fixture.kv.read(MODEL_KEY_KEY), 'old-secret', '旧密钥应能被解出并搬进来（解不开就不搬，见 K8）');
       assertEqual(fixture.kv.read<{ confidenceCeiling: number }>(PLACEMENT_CONFIG_KEY)?.confidenceCeiling, 0.8, '落位配置也要搬');
 
-      /* 旧文件**不删**：它们是回滚凭据（想退回旧程序 + 旧文件时还有据可依） */
+      /* 旧文件不删：它们是回滚凭据（想退回旧程序 + 旧文件时还有据可依）  */
       assertEqual(planLegacyConfigImport(fixture.kv, fixture.dir).items.length, 0, '搬完之后"待搬"应为空');
       assertEqual(planLegacyConfigImport(fixture.kv, fixture.dir).skipped.length, 3, '三份都应记为"库里已有"（文件仍在原处）');
     } finally {
@@ -148,8 +138,8 @@ async function main(): Promise<void> {
     const fixture = openConfigFixture({ prefix: 'l0-kv-' });
     try {
       fixture.kv.write(MODEL_CONFIG_KEY, { version: 1, model: '库里已有的这一份' });
-      /* 库里那一行**解不开**：最危险的情形。拿 read 去判"有没有"会把它当成"没有"，
-         于是旧文件顺手覆盖掉唯一的一份数据 —— 所以判据必须是 has（只看行在不在）。 */
+      /* 库里那一行解不开：最危险的情形。拿 read 去判"有没有"会把它当成"没有"，
+         于是旧文件顺手覆盖掉唯一的一份数据 —— 所以判据必须是 has（只看行在不在）。  */
       writeCorruptRow(fixture, PLACEMENT_CONFIG_KEY);
       writeFileSync(join(fixture.dir, MODEL_CONFIG_FILE), legacyModelConfig('旧文件里的那一份'), 'utf8');
       writeFileSync(join(fixture.dir, PLACEMENT_CONFIG_FILE), JSON.stringify({ version: 1, strategy: 'ordered' }), 'utf8');
@@ -189,11 +179,11 @@ async function main(): Promise<void> {
       assertEqual(first.imported.length, 2, '前置：两份搬进来了');
       assertEqual(fixture.kv.read(MODEL_KEY_KEY), 'old-secret', '前置：密钥在库里');
 
-      /* 管理员在界面上**清除**密钥（这是安全动作） */
+      /* 管理员在界面上清除密钥（这是安全动作）  */
       fixture.kv.remove(MODEL_KEY_KEY);
       assertEqual(fixture.kv.read(MODEL_KEY_KEY), null, '前置：已清除');
 
-      /* 重启（再跑一次搬家）：旧文件还在状态目录里，但**记账拦住了它** */
+      /* 重启（再跑一次搬家）：旧文件还在状态目录里，但记账拦住了它  */
       const second = importLegacyConfigOnce({
         workStore: fixture.workStore,
         kv: fixture.kv,
@@ -239,7 +229,7 @@ async function main(): Promise<void> {
     const fixture = openConfigFixture({ prefix: 'l0-kv-' });
     try {
       writeFileSync(join(fixture.dir, MODEL_CONFIG_FILE), legacyModelConfig(), 'utf8');
-      /* 用**另一个口令**加密的旧密钥：当前口令解不开 */
+      /* 用另一个口令加密的旧密钥：当前口令解不开  */
       writeFileSync(
         join(fixture.dir, MODEL_KEY_FILE),
         JSON.stringify(encryptEnvelope(new TextEncoder().encode('old-secret'), { passphrase: '另一个口令', iterations: 1000 })),

@@ -1,18 +1,4 @@
-/**
- * T27 验收自测：WS/T 500（电子病历共享文档）XML 导出。
- *
- *   node src/export/wst500-export-self-test.ts
- *
- * 覆盖五层：
- *   A 头部结构（根元素/命名空间/文书类型/时间/患者，含性别与日期的编码映射）
- *   B 章节与内容（嵌套章节、叙述文本、entry/observation、**不编造缺失的编码**）
- *   C 纪律（姓名只写掩码、AI 参与度随文档走、标签体系 OID 可注入、XML 转义）
- *   D **闭环**：导出 → 导入 → 逐项一致；再导出 → 结构幂等
- *   E 确定性与边界
- *
- * 本模块的验收标准不是"生成了 XML"，而是**对方系统读回来之后内容一致**：
- * 只测"XML 长得像"是自欺 —— 标签、单位、层级、来源，任何一个对不上都意味着交换失败。
- */
+// T27 验收自测：WS/T 500（电子病历共享文档）XML 导出。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -86,7 +72,6 @@ function flatten(sections: Wst500Section[]): Wst500Section[] {
 }
 
 async function main(): Promise<void> {
-  /* ============================ A 头部结构 ============================ */
 
   await test('A1 头部：根元素与命名空间、文书 id/code/title、effectiveTime 为 CDA 格式', () => {
     const { xml } = buildWst500Xml(fixture());
@@ -112,8 +97,6 @@ async function main(): Promise<void> {
     assert(buildWst500Xml(doc).xml.includes('code="9" displayName="未说明"'), 'U 应映射为 code=9/未说明');
     assert(!buildWst500Xml(doc).xml.includes('<birthTime'), '没有出生日期时不得凭空写 birthTime');
   });
-
-  /* ============================ B 章节与内容 ============================ */
 
   await test('B1 章节树：顶层 section 写在 structuredBody 下，嵌套章节用 component/section', () => {
     const { doc } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1 });
@@ -181,8 +164,6 @@ async function main(): Promise<void> {
     assert(xml.includes('<l0:acceptedBy extension="DR_ACCEPT"/>'), '采纳人应随文档保留');
   });
 
-  /* ============================== C 纪律 ============================== */
-
   await test('C1 姓名只写掩码：导出不得包含明文姓名（模型里没有明文，也不许从别处补）', () => {
     const { xml } = buildWst500Xml(fixture());
     assert(xml.includes('<name>王**</name>'), '姓名应写掩码');
@@ -226,8 +207,6 @@ async function main(): Promise<void> {
     assert(warnings.some((text) => text.includes('不承载签章')), '已签章文档必须提示签章效力不在共享文档上');
     assert(warnings.some((text) => text.includes('符合性声明')), '必须声明"不构成符合性声明"');
   });
-
-  /* ============================== D 闭环 ============================== */
 
   await test('D1 闭环：导出 → 导入，章节数/标题/层级/段落数/字段数逐项一致', () => {
     const doc = fixture();
@@ -313,8 +292,6 @@ async function main(): Promise<void> {
     assertEqual(aiField!.provenance?.derivedFrom?.confidence, 0.93, 'derivedFrom 应保留置信度');
   });
 
-  /* ========================= 确定性与边界 ========================= */
-
   await test('E1 确定性：同一文档两次导出字节完全一致', () => {
     const doc = fixture();
     assertEqual(buildWst500Xml(doc).xml, buildWst500Xml(doc).xml, '两次导出应完全一致');
@@ -354,7 +331,7 @@ async function main(): Promise<void> {
     assert(xml.includes('<value xsi:type="PQ" value="12.5" unit="℃"/>'), '数值应写 PQ（带单位）');
     assert(xml.includes('<value xsi:type="ST">阳性</value>'), '文本应写 ST');
     /* 空值不写 value：写 `<value xsi:type="ST"></value>` 会被对方读成"结果为空/阴性"。
-       断言必须**切到该 observation 内部** —— 只看"其后 200 字符"会撞上后面数据元的 value。 */
+       断言必须切到该 observation 内部 —— 只看"其后 200 字符"会撞上后面数据元的 value。  */
     const emptyObservation = xml.slice(xml.indexOf('<code code="E"')).split('</observation>')[0] ?? '';
     assert(!emptyObservation.includes('<value'), '空值不得写出 value 元素（会被误读为"阴性/正常"）');
   });

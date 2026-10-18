@@ -1,15 +1,4 @@
-/**
- * 系统策略落库自测（`storage/system-config.ts`）。
- *
- *   node src/storage/system-config-self-test.ts
- *
- * 锁死四条：
- *   SY1 空库 → 默认（鉴权 open / 会话 480 / 限流默认 / 每 1 条锚一次 / 内置演示种子）；
- *   SY2 保存后能读回，并记下"是谁改的"（改 `authMode` 是"把门打开"那类操作）；
- *   SY3 **非法值一律拒绝**（静默取默认会让"我配了 strict"变成没人知道的假话）；
- *   SY4 种子三态（不传不改 / null 清除即真删行 / 字符串设新值），且**永不回显**；
- *       库里那条读不出来时**不当作"没配过"**（那会让 strict 悄悄退回 open）。
- */
+// 系统策略落库自测（`storage/system-config.ts`）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openConfigFixture, sealedBlobOf, writeCorruptRow } from '../testing/config-fixture.ts';
@@ -74,7 +63,7 @@ async function main(): Promise<void> {
       assertEqual(loaded.updatedBy, 'ADMIN', '应记下是谁改的');
       assertEqual(loaded.updatedAt, AT, '应记下改动时刻');
 
-      /* 库里那一行**必须是密封的**：同一张表里"有的加密有的明文"是最危险的状态 */
+      /* 库里那一行必须是密封的：同一张表里"有的加密有的明文"是最危险的状态  */
       const blob = sealedBlobOf(fixture, SYSTEM_CONFIG_KEY);
       assert(blob !== null && blob.length > 0, '策略行应当存在');
       assertEqual(blob?.includes('strict'), false, '策略值不得明文躺在库里');
@@ -108,7 +97,6 @@ async function main(): Promise<void> {
   await test('SY4 种子三态 + **永不回显** + 读不出来不静默', () => {
     const fixture = openConfigFixture({ prefix: 'l0-system-config-' });
     try {
-      /* ① 设新值 */
       const set = saveSystemConfig(fixture.kv, { authMode: 'open', anchorSeed: 'anchor-seed-1' }, 'ADMIN', { at: AT });
       assertEqual(set.anchorSeedAction, 'set', '设新值应如实回报动作');
       assertEqual(set.loaded.anchorSeedConfigured, true, '已配置自定义种子');
@@ -116,18 +104,15 @@ async function main(): Promise<void> {
       assertEqual(JSON.stringify(view).includes('anchor-seed-1'), false, '**视图里不得出现种子值**（它是签名私钥的种子）');
       assertEqual(sealedBlobOf(fixture, SYSTEM_ANCHOR_SEED_KEY)?.includes('anchor-seed-1'), false, '种子那一行不得是明文');
 
-      /* ② 不传 = 不改 */
       const kept = saveSystemConfig(fixture.kv, { authMode: 'open', anchorEvery: 2 }, 'ADMIN', { at: AT });
       assertEqual(kept.anchorSeedAction, 'unchanged', '没传 anchorSeed 时不得动那一行');
       assertEqual(kept.loaded.anchorSeed, 'anchor-seed-1', '改别的字段不该把种子弄丢');
 
-      /* ③ null = 清除，且**真删那一行** */
       const cleared = saveSystemConfig(fixture.kv, { authMode: 'open', anchorSeed: null }, 'ADMIN', { at: AT });
       assertEqual(cleared.anchorSeedAction, 'cleared', '清除应如实回报');
       assertEqual(cleared.loaded.anchorSeed, DEMO_ANCHOR_SEED, '清除后回到内置演示种子');
       assertEqual(sealedBlobOf(fixture, SYSTEM_ANCHOR_SEED_KEY), null, '清除必须是真删行（留着密文等于"我清掉了"是假话）');
 
-      /* ④ 解不开 ≠ 没配过 */
       writeCorruptRow(fixture, SYSTEM_CONFIG_KEY);
       assertEqual(codeOf(() => loadSystemConfig(fixture.kv)), 'E_SYSTEM_CONFIG_INVALID', '策略读不出来时不得当作"没配过"（那会让 strict 悄悄退回 open）');
     } finally {

@@ -1,19 +1,4 @@
-/**
- * T01 验收自测（零依赖，可直接运行）：
- *
- *   node src/model/self-test.ts
- *
- * 覆盖 T01 的通过标准：
- *   - 序列化往返语义零差异（对应 S2 F1~F8）
- *   - 结构校验 + 11 条语义规则与工具链 S5 **等价**（同一批夹具、同一套规则码）
- *   - 未知 schemaVersion 报 E_SCHEMA_VERSION_UNKNOWN
- *   - 迁移链可用（0.9.0 → 1.0.0），且迁移产物能通过校验
- *   - canonical 哈希与工具链实现**逐字节一致**（打乱键序后仍一致）
- *
- * 另外会产出两个交叉验收文件，交给工具链复核：
- *   tools/model-check/samples/ts-model-output.json    （canonical 序列化产物）
- *   tools/model-check/samples/ts-model-migrated.json  （迁移后文档）
- */
+// T01 验收自测（零依赖，可直接运行）：。
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,8 +18,6 @@ const INVALID = join(SAMPLES, 'invalid', 'sample-note.invalid.json');
 const SIGNED = join(SAMPLES, 's4-signed-doc.json');
 
 const EXPECTED_SEMANTIC_CODES = Object.values(SEMANTIC_CODES).slice().sort();
-
-/* ------------------------------ 测试框架 ------------------------------ */
 
 const suite = new TestSuite('T01 模型层自测', [
   '交叉验收（交给工具链复核）：',
@@ -60,8 +43,6 @@ function reverseKeys(value: unknown): unknown {
   }
   return value;
 }
-
-/* --------------------------------- 用例 --------------------------------- */
 
 async function main(): Promise<void> {
   const validRaw = readJson(VALID);
@@ -184,7 +165,6 @@ async function main(): Promise<void> {
     assertEqual(code, 'E_GUARD_FAILED', '残缺文档应抛 E_GUARD_FAILED');
   });
 
-  /* ------------------------- 产出交叉验收文件 ------------------------- */
   await test('产出交叉验收文件（供 S2/S5 复核）', () => {
     if (!existsSync(SAMPLES)) mkdirSync(SAMPLES, { recursive: true });
     const doc = fromJson(validRaw);
@@ -203,7 +183,6 @@ async function main(): Promise<void> {
     assert(existsSync(join(SAMPLES, 'ts-model-migrated.json')), '应写出 ts-model-migrated.json');
   });
 
-  /* --------------------------------- 输出 --------------------------------- */
   process.exit(suite.report());
 }
 

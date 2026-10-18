@@ -1,34 +1,4 @@
-/**
- * 语音采集层自测（C1）。
- *
- *   node src/dictation/capture-self-test.ts
- *
- * 锁死十四件事（对应 `docs/L2-语音采集设计.md` 第十二节 AU1~AU14，另加 AU15 覆盖 WAV 头组装）：
- *   AU1 超长强制切分，且相邻分片**首尾相接**（S2）；
- *   AU2 短于 `minSeconds` 丢弃，但**计入上报**（S4）；
- *   AU3 `result` 为空串：合法结果，丢弃并计数；
- *   AU4 某段上传 5xx：只该段失败，其余照常（失败不阻塞、不静默）；
- *   AU5 轮询一直 `processing`：超时即判失败，**不无限等**（该接口没有失败态）；
- *   AU6 `code !== 200` / `task_id` 为空：抛错且**不重试**；
- *   AU7 配置非法一律报错，不静默取默认；
- *   AU8 端点未配置：采集入口不可用（fail-closed），**不静默退回"模拟转写"**；
- *   AU9 暂停恢复**不重置起点**（S1）；
- *   AU10 汇总**不重排**：段号与区间原样，重排是 `normalizeSegments` 的职责（S3）；
- *   AU11 置信度一律等于上限（<0.90），且关键内容上仍必须"改后采纳"；
- *   AU12 `retainAudio=false`：成功、失败、非预期异常三条路径都删掉临时音频；
- *   AU13 `transcriptionId` 是**采集会话 ID**（与 `task_id` 无关），`evidence.ref` 形如 `sess#3@9.1-12.4s`；
- *   AU14 端到端组装：有效段与失败段**各归各位**，`dictate` 不认识"失败"；
- *   AU15 WAV 头固定 16k / 单声道 / 16-bit，且非 16-bit PCM 一律拒。
- *   AU16 采集配置存储：**界面 > 环境变量 > 默认**；密钥永不回显且单独一行；读不出来不静默；
- *   AU17 入站 multipart：只认"一个 audio 文件分段"，多余分段/字段名不符/被截断一律拒。
- *   AU34 浏览器侧段规则 ≡ `capture.ts`：分片逐字段、WAV 逐字节（**两份实现的对照证明**）；
- *   AU35 浏览器侧探测与失败语义 ≡ `capture.ts`：逐句一致（照错的那一句去修，就是白跑一趟）；
- *   AU36 浏览器侧定帧：时间轴首尾相接、按停不丢尾巴、重采样到 16 kHz（流式 ≡ 一次喂）；
- *   AU37 浏览器麦克风源：探测不碰设备、只由人 start、按停立刻兑现且真的放开设备。
- *
- * **全部离线**：假时钟、假 transport、假临时文件存储，不碰真实麦克风、不连真实 ASR。
- * 让自测去开麦克风或连真实服务，等于让自测偶尔失败 —— 那种失败最终会被所有人忽略。
- */
+// 语音采集层自测（C1）。
 
 import { TestSuite, assert, assertEqual, codeOfAsync } from '../testing/harness.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -82,8 +52,6 @@ import {
 } from './capture-source.ts';
 import { runDictationCapture } from './capture-client.ts';
 import { checkBridgeToken, createCaptureBridge, tokenFromRequest } from './capture-bridge.ts';
-/* 浏览器侧实现（C3b④）：分片 / WAV / 探测 / 失败语义在浏览器里各有一份（经典脚本拿不到 TS）。
-   "两份实现迟早分叉"这件事不靠自觉 —— AU34/AU35 就是把那份文件真的 import 进 Node 逐条对拍。 */
 import {
   CAPTURE_WEB_AUDIO,
   buildWavHeaderWeb,
@@ -108,7 +76,7 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 const HUMAN: Actor = { id: 'DR_WANG', kind: 'human' };
 const AI: Actor = { id: 'asr-pipeline', kind: 'ai' };
 
-/** 造一段 16k 单声道 16-bit PCM：内容是假的，**格式必须是真的**（格式不对，对拍就没有意义） */
+/** 造一段 16k 单声道 16-bit PCM：内容是假的，格式必须是真的（格式不对，对拍就没有意义）  */
 function pcmOf(seconds: number, voiced: boolean): Uint8Array {
   const samples = Math.round(CAPTURE_AUDIO.sampleRate * seconds);
   const pcm = new Uint8Array(samples * 2);
@@ -124,9 +92,9 @@ const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0
 /**
  * 假麦克风：假 `getUserMedia` + 假 AudioContext。
  *
- * 自测**绝不去开真麦克风**：那种自测会在没有设备的机器上失败，
+ * 自测绝不去开真麦克风：那种自测会在没有设备的机器上失败，
  * 而反复失败的自测最终会被所有人忽略（比没有自测更糟）。
- */
+  */
 function makeFakeMic(): {
   options: {
     env: { isSecureContext: boolean; hasGetUserMedia: boolean; hasAudioContext: boolean };
@@ -205,8 +173,6 @@ function configWith(patch: Parameters<typeof validateCaptureConfig>[0] = {}): Ca
 
 const SEGMENT: Partial<SegmentConfig> = { silenceMs: 800, maxSeconds: 30, minSeconds: 1 };
 
-/* ------------------------------ 事件流构造 ------------------------------ */
-
 const vframe = (startSec: number, endSec: number): CaptureInput => ({ kind: 'frame', startSec, endSec, voiced: true });
 const sframe = (startSec: number, endSec: number): CaptureInput => ({ kind: 'frame', startSec, endSec, voiced: false });
 const pause = (atSec: number): CaptureInput => ({ kind: 'pause', atSec });
@@ -230,8 +196,6 @@ function byPause(windows: Array<[number, number]>, tail: number): CaptureInput[]
   events.push(vframe(tail, tail + 1), stop(tail + 1));
   return events;
 }
-
-/* ------------------------------ 假件 ------------------------------ */
 
 interface FakeClock {
   now: () => number;
@@ -295,21 +259,19 @@ function okAsr(textFor: (index: number) => string): FakeAsr {
   );
 }
 
-/* ------------------------------ 云厂商假件 ------------------------------ */
-
 /**
- * 发出去的那一段 WAV：内容不重要，**形状与长度**重要（用例要断言"发出去的还是取出来的那一段"）。
+ * 发出去的那一段 WAV：内容不重要，形状与长度重要（用例要断言"发出去的还是取出来的那一段"）。
  * 用 `encodeCaptureWav` 造而不是手写字节数组：长度 3200 是 16-bit 整数倍 ✓，
  * 而且这样一来"采集端产出的规格"与"发出去的字节"在用例里是同一份来源。
- */
+  */
 const WAV_BYTES = encodeCaptureWav(new Uint8Array(3200));
 
 /**
- * 三家的返回码**照其公开文档写在这里，与实现各自独立**。
+ * 三家的返回码照其公开文档写在这里，与实现各自独立。
  *
  * 独立是关键：若测试常量直接 import 实现里的私有常量，两边一起改错时用例照样绿 ——
  * 那种绿灯比没有用例更糟（它给了"已验证"的错觉）。
- */
+  */
 const BAIDU_EMPTY_CODE = 3302;
 const BAIDU_BAD_AUDIO_CODE = 3301;
 const BAIDU_TOKEN_INVALID_CODE = 110;
@@ -450,17 +412,15 @@ function fixedSource(frames: CaptureFrame[], probe: CaptureProbe = { ok: true, s
     async start(onFrame) {
       for (const frame of frames) {
         onFrame(frame);
-        /* **每帧之间让出一次**：真实采集里帧是隔一段时间到达的，中间那几段会在"录的过程中"就转完；
+        /* 每帧之间让出一次：真实采集里帧是隔一段时间到达的，中间那几段会在"录的过程中"就转完；
            若这里同步吐完所有帧，编排里的时序竞态（例如"录完最后一段没人转"）会被自测掩盖 —— 实测踩到过。
-           让出一次之后，自测里的时序与真实时间下的时序同形。 */
+           让出一次之后，自测里的时序与真实时间下的时序同形。  */
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
     },
     async stop() {},
   };
 }
-
-/* ============================== 用例 ============================== */
 
 async function main(): Promise<void> {
   await test('AU1 超长强制切分：相邻分片首尾相接（end_i === start_{i+1}，S2）', () => {
@@ -601,7 +561,7 @@ async function main(): Promise<void> {
       assertEqual(codeOf(() => validateCaptureConfig(patch)), expected, `${name} 应报 ${expected}（不静默取默认值）`);
     }
 
-    /* 未配置是**合法状态**（界面要显示"未配置语音识别服务"），默认值只在这里补齐 */
+    /* 未配置是合法状态（界面要显示"未配置语音识别服务"），默认值只在这里补齐  */
     const fallback = validateCaptureConfig({});
     assertEqual(fallback.asr.endpoint, '', '未配置端点应为空串（采集入口据此 fail-closed）');
     assertEqual(fallback.asr.submitTimeoutMs, 15_000, '上传超时默认 15s');
@@ -651,7 +611,6 @@ async function main(): Promise<void> {
   });
 
   await test('AU10 汇总不重排：段号与区间原样带出，重排交给 normalizeSegments（S3）', async () => {
-    /* ① 正常路径：输出与时间同序（采集端定的段号就是最终段号） */
     const asr = okAsr((index) => `第 ${index} 段口述内容`);
     const result = await captureSession(
       {
@@ -666,9 +625,6 @@ async function main(): Promise<void> {
     assertEqual(result.chunks.map((chunk) => chunk.index), [1, 2, 3], '段号与时间同序');
     assertEqual(result.chunks.map((chunk) => chunk.startSec), [0, 1, 2], '时间区间原样');
 
-    /* ② 乱序由上游给出时：汇总**不顺手修正**，而是原样带出并交由 `normalizeSegments` 重排 ——
-       两处都排会让"乱序段数如实上报"这个数失去意义。段号与区间在这一层是采集端的产物，
-       改它等于伪造证据。 */
     const scrambled: CaptureResult = {
       sessionId: 'sess-scramble',
       asrModelId: ASR_MODEL,
@@ -730,7 +686,6 @@ async function main(): Promise<void> {
   await test('AU12 retainAudio=false：成功、失败、异常三条路径都删掉临时音频', async () => {
     const events = [...voiced(0, 1, 1), pause(1), ...voiced(1, 2, 1), pause(2), ...voiced(2, 3, 1), stop(3)];
 
-    /* ① 全部成功 */
     const okTemp = memoryTempStore();
     const okRun = await captureSession(
       { sessionId: 'sess-retain-ok', events, audioFor: () => AUDIO, tempStore: okTemp.store },
@@ -741,7 +696,6 @@ async function main(): Promise<void> {
     assertEqual(okTemp.removed.length, 3, '转写完成后应全部删除');
     assertEqual(okRun.audioRetained, false, '未留存应如实回报');
 
-    /* ② 有段失败：失败路径同样要删 */
     const failTemp = memoryTempStore();
     await captureSession(
       { sessionId: 'sess-retain-fail', events, audioFor: () => AUDIO, tempStore: failTemp.store },
@@ -759,7 +713,6 @@ async function main(): Promise<void> {
     );
     assertEqual(failTemp.removed.length, failTemp.written.length, '失败路径也要删干净（"不留存"只在成功路径成立就不是不留存）');
 
-    /* ③ 非预期异常（音频准备失败）：finally 仍要清理已写下的文件 */
     const boomTemp = memoryTempStore();
     let thrown: Error | null = null;
     try {
@@ -783,7 +736,6 @@ async function main(): Promise<void> {
     assertEqual(boomTemp.written.length, 1, '第 1 段已写下临时音频');
     assertEqual(boomTemp.removed.length, boomTemp.written.length, '异常路径也必须清理');
 
-    /* ④ 显式留存：不删，且如实回报 */
     const keepTemp = memoryTempStore();
     const kept = await captureSession(
       { sessionId: 'sess-retain-on', events, audioFor: () => AUDIO, tempStore: keepTemp.store },
@@ -905,18 +857,13 @@ async function main(): Promise<void> {
   await test('AU16 采集配置存储：库是唯一来源；密钥永不回显；读不出来不静默', () => {
     const fixture = openConfigFixture({ prefix: 'l0-capture-' });
     try {
-      /* ① 没配过：默认值是"未配置"，且未配置就是采集入口不可用（不是"退回模拟转写"） */
       const fresh = loadCaptureConfig(fixture.kv);
       assertEqual(fresh.source, 'default', '没配过应为默认');
       assertEqual(fresh.configured, false, '默认是未配置：采集入口随之不可用');
       assertEqual(fresh.config.retainAudio, false, '默认不留存音频');
 
-      /* ② **配置只有一个来源（库）**：环境变量这一档（`L0_CAPTURE_*`）在本轮取消。
-         钉住它，是因为那条现场最难查：改了界面、环境里还留着一份旧的，
-         看起来就像"我保存了却没生效"。 */
       assertEqual(loadCaptureConfig(fixture.kv).source, 'default', '库空时只能是 default（不会去看环境变量）');
 
-      /* ③ 保存进库即生效 */
       const saved = saveCaptureConfig(
         fixture.kv,
         { endpoint: 'http://asr2.test:9000', modelId: 'dept/asr:1.2@2026-10', pollTimeoutMs: 45_000, maxSeconds: 20, retainAudio: false, apiKey: 'secret-token-1' },
@@ -932,7 +879,6 @@ async function main(): Promise<void> {
       assertEqual(reloaded.source, 'store', '重新读也应来自库');
       assertEqual(reloaded.apiKey, 'secret-token-1', '密钥应能解出来供转发使用（只在内存里）');
 
-      /* ④ 密钥**永不回显**：视图里只有"是否就位"，且库里那一行不是明文 */
       const view = describeCaptureConfig(reloaded);
       assertEqual(view.apiKeyPresent, true, '视图应报"密钥已就位"');
       assertEqual(
@@ -953,7 +899,7 @@ async function main(): Promise<void> {
       assertEqual(cleared.loaded.apiKeyPresent, false, '清除后密钥不再就位');
       assertEqual(sealedBlobOf(fixture, CAPTURE_API_KEY_KEY), null, '清除后那一行必须真的不在库里');
 
-      /* ⑥ 非法值一律拒（**不静默取默认**），且非法配置不落库 */
+      /* ⑥ 非法值一律拒（不静默取默认），且非法配置不落库  */
       assertEqual(
         codeOf(() => saveCaptureConfig(fixture.kv, { endpoint: 'http://asr2.test:9000', modelId: 'dept/asr:1.2@2026-10', minSeconds: 30, maxSeconds: 30 }, 'ADMIN')),
         'E_CAPTURE_CONFIG_INVALID',
@@ -971,7 +917,7 @@ async function main(): Promise<void> {
       assertEqual(unconfigured.loaded.configured, false, '清空后应回到"未配置"');
       assertEqual(describeCaptureConfig(unconfigured.loaded).missing, ['服务地址', '模型标识'], '视图应说清缺哪几格');
 
-      /* ⑧ 库里那一行读不出来 → **不许当作"没配过"**（现场是"我配的采集没了"） */
+      /* ⑧ 库里那一行读不出来 → 不许当作"没配过"（现场是"我配的采集没了"）  */
       writeCorruptRow(fixture, CAPTURE_CONFIG_KEY);
       assertEqual(codeOf(() => loadCaptureConfig(fixture.kv)), 'E_CAPTURE_CONFIG_INVALID', '读不出来的配置不得当作"没配过"');
     } finally {
@@ -998,21 +944,18 @@ async function main(): Promise<void> {
       return out;
     };
 
-    /* ① 正常：取出的字节**与送进来的完全一致**（二进制安全，含 0x00 与 CRLF 序列） */
     const boundary = '----l0capture7f3a';
     const audio = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x0d, 0x0a, 0x1a, 0xff, 0x80]);
     const parsed = parseMultipartAudio(`multipart/form-data; boundary=${boundary}`, body([{ name: 'audio', filename: 'sess#1.wav', bytes: audio }], boundary));
     assertEqual(Array.from(parsed.bytes), Array.from(audio), '取出的字节必须与送进来的**逐字节一致**（音频是二进制，不能按字符处理）');
     assertEqual(parsed.filename, 'sess#1.wav', '文件名应如实带出（留痕/排障用）');
 
-    /* ② boundary 带引号（RFC 允许）也要认 */
     const quoted = parseMultipartAudio(
       `multipart/form-data; boundary="${boundary}"`,
       body([{ name: 'audio', filename: 'a.wav', bytes: audio }], boundary),
     );
     assertEqual(quoted.bytes.byteLength, audio.byteLength, '带引号的 boundary 同样应能解析');
 
-    /* ③ 字段名不符 / 不是文件 / 多余分段 / 被截断：一律拒，**不猜哪个是音频** */
     const cases: Array<[string, () => unknown]> = [
       [
         '不是 multipart',
@@ -1064,8 +1007,8 @@ async function main(): Promise<void> {
 
   await test('AU18 提交的转写段：只校验不代编；带 confidence 一律拒；乱序允许（S3）', () => {
     /* 这正是"采集结果 → 建议"那一跳的入口：文本与时间区间由采集端给，
-       服务端**只校验、不补**（补一个段号或一段区间就是伪造证据）。
-       同时它是唯一一处能把"置信度"塞进建议的地方 —— 所以这里必须挡死。 */
+       服务端只校验、不补（补一个段号或一段区间就是伪造证据）。
+       同时它是唯一一处能把"置信度"塞进建议的地方 —— 所以这里必须挡死。  */
     const accepted = validateSubmittedSegments(
       [
         { index: 2, text: '第二段口述内容', startSec: 9.1, endSec: 12.4 },
@@ -1116,8 +1059,8 @@ async function main(): Promise<void> {
   });
 
   await test('AU19 采集源探测：先判安全上下文，且每条拒绝都给出"怎么办"（第六节）', () => {
-    /* 判定顺序是有讲究的：`http://10.x` 下浏览器**根本不弹权限框**，
-       若把安全上下文排在后面，现场会显示成"未获得麦克风权限" —— 医生去设置里点半天也没用。 */
+    /* 判定顺序是有讲究的：`http://10.x` 下浏览器根本不弹权限框，
+       若把安全上下文排在后面，现场会显示成"未获得麦克风权限" —— 医生去设置里点半天也没用。  */
     const base = { isSecureContext: true, hasGetUserMedia: true, hasAudioContext: true };
     assertEqual(probeMicEnvironment(base).ok, true, '安全上下文 + 能力齐备时应可用');
     assertEqual(probeMicEnvironment(base).sourceId, 'browser-mic', '探测结果要带上是哪个源（多宿主并存时只报"不可用"答不出该换谁）');
@@ -1165,8 +1108,8 @@ async function main(): Promise<void> {
   });
 
   await test('AU21 演示采集源：按脚本时间线出帧、停止即兑现、不重复打开设备', async () => {
-    /* 演示源存在的理由与"靶子 ASR"完全一样：让整条链**今天就能真的跑一遍**。
-       它不做音量分析（那是真实 VAD 的事），`voiced` 由脚本给出 —— 因此分片行为可复现。 */
+    /* 演示源存在的理由与"靶子 ASR"完全一样：让整条链今天就能真的跑一遍。
+       它不做音量分析（那是真实 VAD 的事），`voiced` 由脚本给出 —— 因此分片行为可复现。  */
     const frames: CaptureFrame[] = [];
     const source = createSampleCaptureSource({
       timeline: [
@@ -1210,7 +1153,7 @@ async function main(): Promise<void> {
       '静音帧应全零',
     );
 
-    /* 按下停止要**尽快兑现**：把医生挂在"还在录"上是这条链上最糟的一种现场 */
+    /* 按下停止要尽快兑现：把医生挂在"还在录"上是这条链上最糟的一种现场  */
     let ticks = 0;
     const long = createSampleCaptureSource({
       timeline: [{ seconds: 600, voiced: true }],
@@ -1263,9 +1206,6 @@ async function main(): Promise<void> {
   });
 
   await test('AU23 客户端编排：帧 → 流式分片 → 逐段转写 → 提交；拼错音频/吞掉失败都会被抓', async () => {
-    /* 这条是 C3a 的核心：它证明"采集源 → 建议"这条链**在换上任意采集源之后都成立**。
-       断言里最要紧的两条：① 每段上传的音频**只能**是这一段对应的那些帧（拼错等于给了 ASR 另一段音频）；
-       ② 失败与空结果**如实带出**，不被当成"这段本来就没说话"。 */
     const frames = buildScriptedFrames();
     const uploaded: Array<{ index: number; audio: Uint8Array }> = [];
     const submitted: Array<{ transcriptionId: string; asrModelId: string; segments: SubmittedSegment[] }> = [];
@@ -1327,7 +1267,7 @@ async function main(): Promise<void> {
     assertEqual(outcome.submit?.groupId, 'g-c3', '提交结果要带回来（界面据此显示"已生成一组建议"）');
     assertEqual(phases.includes('recording') && phases.includes('transcribing') && phases.includes('done'), true, '相位要能让界面把"在录 / 在转 / 完成"画出来');
 
-    /* 源不可用：**一个字节都不发出去**（与"端点未配置"同一条纪律） */
+    /* 源不可用：一个字节都不发出去（与"端点未配置"同一条纪律）  */
     const denied: typeof uploaded = [];
     assertEqual(
       await codeOfAsync(async () =>
@@ -1370,7 +1310,7 @@ async function main(): Promise<void> {
 
   await test('AU24 桥：取走不等于处理完（未 ack 前重复取同一段），乱序 ack 被拒且不顺手删', () => {
     /* 这一条守的是"我说的话被吞了"这个最难查的现场：只有 ack 才推进队列。
-       页面一次网络抖动若就把段算作"已取走"，那一段就**静默消失**了。 */
+       页面一次网络抖动若就把段算作"已取走"，那一段就静默消失了。  */
     const bridge = createCaptureBridge({ sessionId: 'sess-bridge', segment: { silenceMs: 800, maxSeconds: 30, minSeconds: 1 } });
     const frames = buildScriptedFrames();
     for (const frame of frames) bridge.feed(frame);
@@ -1389,7 +1329,7 @@ async function main(): Promise<void> {
     assertEqual(bridge.audioOf(1)?.byteLength, first.audioBytes, '未 ack 时音频仍可取');
     assertEqual(bridge.audioOf(2), null, '还没轮到的段取不到音频（避免页面拿错段）');
 
-    /* 乱序 ack：**拒绝**，而不是从队列里顺手删一个 —— 顺手删的现场表现是"某一句不见了" */
+    /* 乱序 ack：拒绝，而不是从队列里顺手删一个 —— 顺手删的现场表现是"某一句不见了"  */
     const outOfOrder = bridge.ack(2, true);
     assertEqual(outOfOrder.ok, false, '乱序 ack 应被拒');
     assertEqual(outOfOrder.ok === false ? outOfOrder.code : '', 'E_BRIDGE_ACK_OUT_OF_ORDER', '要给专门的错误码（页面据此判断是不是自己那一侧错位了）');
@@ -1402,7 +1342,7 @@ async function main(): Promise<void> {
     const second = bridge.next();
     assert(second.kind === 'segment' && second.segment.index === 2, 'ack 之后应轮到第 2 段');
 
-    /* 失败也照样推进，但**必须记账**（S4：失败不阻塞其余段，但不许静默丢） */
+    /* 失败也照样推进，但必须记账（S4：失败不阻塞其余段，但不许静默丢）  */
     assertEqual(bridge.ack(2, false, { code: 'E_CAPTURE_ASR_TIMEOUT', message: '这一段超时了' }).ok, true, '失败的 ack 也应推进队列');
     assertEqual(bridge.progress().failed, 1, '失败段数应如实记账');
     assertEqual(bridge.progress().delivered, 2, '确认过的段数应如实计数');
@@ -1446,7 +1386,7 @@ async function main(): Promise<void> {
 
   await test('AU26 厂商默认值是院内服务；不认识的 kind 一律拒；旧库（v1）读出来仍是院内服务', () => {
     /* 这一格的默认值决定"忘了配"会怎样 —— 默认成公有云就等于"忘了配就把音频发去公网"。
-       所以它必须默认在院内，且"不认识的名字"要报错而不是悄悄回落（回落的方向是**数据流向**）。 */
+       所以它必须默认在院内，且"不认识的名字"要报错而不是悄悄回落（回落的方向是数据流向）。  */
     assertEqual(validateCaptureConfig({}).asr.kind, 'intranet-task', 'kind 默认必须是院内服务');
     assertEqual(vendorOf('intranet-task').leavesIntranet, false, '院内服务不出院');
     assertEqual(ASR_VENDORS['baidu-rest'].leavesIntranet, true, '百度会出院');
@@ -1456,12 +1396,12 @@ async function main(): Promise<void> {
       'E_CAPTURE_CONFIG_INVALID',
       '不认识的厂商名必须报错（静默回落 = 音频悄悄换个地方发）',
     );
-    /* 阿里云要 AppKey 这一格；它**不是密钥**，所以界面上它跟着地址走、不跟着密钥走 */
+    /* 阿里云要 AppKey 这一格；它不是密钥，所以界面上它跟着地址走、不跟着密钥走  */
     assertEqual(vendorOf('aliyun-nls').credentials, 'nls-token-and-appkey', '阿里云的凭据形态是 token + appkey');
     assertEqual(vendorOf('baidu-rest').credentials, 'access-key-pair', '百度是 AK/SK 一对');
 
-    /* 旧库兼容：v1 那一行没有 kind / appKey / 确认位 —— 读出来必须是**院内服务**，
-       否则升级的表现就是"我配的采集没了"（而备份里明明有）。 */
+    /* 旧库兼容：v1 那一行没有 kind / appKey / 确认位 —— 读出来必须是院内服务，
+       否则升级的表现就是"我配的采集没了"（而备份里明明有）。  */
     const fixture = openConfigFixture({ prefix: 'l0-capture-v1-' });
     try {
       fixture.kv.write(CAPTURE_CONFIG_KEY, {
@@ -1488,8 +1428,8 @@ async function main(): Promise<void> {
   });
 
   await test('AU27 公有云必须显式确认：没确认就拒绝（保存被拒 + 转写时一个字节都不发）', async () => {
-    /* 采集里唯一"数据流向"级别的开关。默认值必须是"不许"，确认必须是**显式的一次动作** ——
-       否则某天会有人在生产里留着一条云地址，而音频带着患者姓名发到公网。 */
+    /* 采集里唯一"数据流向"级别的开关。默认值必须是"不许"，确认必须是显式的一次动作 ——
+       否则某天会有人在生产里留着一条云地址，而音频带着患者姓名发到公网。  */
     assertEqual(
       codeOf(() =>
         validateCaptureConfig({ asr: { kind: 'baidu-rest', endpoint: vendorOf('baidu-rest').defaultEndpoint, modelId: ASR_MODEL } }),
@@ -1544,7 +1484,7 @@ async function main(): Promise<void> {
       '阿里云缺 AppKey 应判凭据缺失',
     );
 
-    /* 院内服务那一格是**可选** token：没 token 也照常工作 —— 否则就是把可选项做成了必填 */
+    /* 院内服务那一格是可选 token：没 token 也照常工作 —— 否则就是把可选项做成了必填  */
     const local = okAsr(() => '好');
     const localClient = createAsrClient(configWith().asr, { transport: local.transport, ...fakeClock() });
     assertEqual((await localClient.transcribe({ index: 1, audio: WAV_BYTES, sessionId: 's' })).text, '好', '院内服务不带 token 也该能转');
@@ -1579,7 +1519,7 @@ async function main(): Promise<void> {
     assertEqual(sent.token, 'tok-1', 'token 来自 OAuth');
     assertEqual(Buffer.from(String(sent.speech), 'base64').byteLength, WAV_BYTES.byteLength, 'base64 解回应是取出来的那一段音频');
 
-    /* 第二段**不再换 token**：逐段转写一次查房几十段，每段换一次等于把自己打进对方的限流表 */
+    /* 第二段不再换 token：逐段转写一次查房几十段，每段换一次等于把自己打进对方的限流表  */
     const second = await client.transcribe({ index: 2, audio: WAV_BYTES, sessionId: 'sess-bd' });
     assertEqual(second.text, '术后第一天', '第二段照常');
     assertEqual(cloud.calls.filter(isOauth).length, 1, 'token 应被缓存：只换一次');
@@ -1671,7 +1611,7 @@ async function main(): Promise<void> {
     assertEqual(clock.elapsed(), 0, '一次性请求一次都不该睡（轮询间隔在云厂商身上不参与任何事）');
     assertEqual(cloud.calls.filter((item) => item.method === 'GET' && !isOauth(item)).length, 0, '没有轮询 GET');
 
-    /* 预算耗尽时**连请求都不发**：明知来不及还去撞一下，只是把失败拖到超时之后 */
+    /* 预算耗尽时连请求都不发：明知来不及还去撞一下，只是把失败拖到超时之后  */
     let ticks = 0;
     const jumpy = createAsrClient(config.asr, {
       transport: cloud.transport,
@@ -1718,7 +1658,7 @@ async function main(): Promise<void> {
       assertEqual(JSON.stringify(view).includes('SK-9'), false, '**次凭据值也不得出现**');
       assertEqual(view.configured, true, '都配全了才可用');
 
-      /* 只改一格的补丁：**不该顺手把别的清空**（"我就调了下静音判停，采集没了"是最气人的一类现场） */
+      /* 只改一格的补丁：不该顺手把别的清空（"我就调了下静音判停，采集没了"是最气人的一类现场）  */
       const patched = saveCaptureConfig(fixture.kv, { silenceMs: 1_200 }, 'ADMIN');
       assertEqual(patched.loaded.config.asr.endpoint, vendorOf('baidu-rest').defaultEndpoint, '补丁保存不得清掉地址');
       assertEqual(patched.loaded.config.asr.kind, 'baidu-rest', '也不得把厂商改回默认');
@@ -1730,7 +1670,7 @@ async function main(): Promise<void> {
       assertEqual(describeCaptureConfig(cleared.loaded).configured, false, '凭据缺一格就该不可用');
       assertEqual((describeCaptureConfig(cleared.loaded).missing as string[]).includes('Secret Key'), true, '缺口要说得出是哪一格');
 
-      /* 换厂商**不自动清另一家的凭据**：否则"我改回院内服务，再换回来时全 401" */
+      /* 换厂商不自动清另一家的凭据：否则"我改回院内服务，再换回来时全 401"  */
       const back = saveCaptureConfig(fixture.kv, { kind: 'intranet-task', acknowledgePublicCloud: false }, 'ADMIN');
       assertEqual((describeCaptureConfig(back.loaded).missing as string[]).includes('Secret Key'), false, '院内服务不需要凭据，缺口里不该有它');
       const again = saveCaptureConfig(fixture.kv, { kind: 'baidu-rest', acknowledgePublicCloud: true }, 'ADMIN');
@@ -1743,8 +1683,8 @@ async function main(): Promise<void> {
 
   await test('AU34 浏览器侧段规则 ≡ capture.ts：分片逐字段、WAV 逐字节（两份实现的对照证明）', () => {
     /* 浏览器拿不到 TS（无打包步骤 + 经典脚本），所以"浏览器麦克风"这条路必然有第二份实现。
-       这条用例就是那两份实现不许分叉的**机器证明**：分片规则同时决定建议条数与时间区间，
-       分叉的表现是"演示里切得对、真机上切得不对"，而它只在现场、只在某一段录音上出现。 */
+       这条用例就是那两份实现不许分叉的机器证明：分片规则同时决定建议条数与时间区间，
+       分叉的表现是"演示里切得对、真机上切得不对"，而它只在现场、只在某一段录音上出现。  */
     const config: SegmentConfig = { silenceMs: 800, maxSeconds: 6, minSeconds: 1 };
     const events: CaptureInput[] = [];
     const frames: CaptureFrame[] = [];
@@ -1857,8 +1797,8 @@ async function main(): Promise<void> {
   });
 
   await test('AU36 浏览器侧定帧：时间轴首尾相接、按停不丢尾巴、重采样到 16 kHz', () => {
-    /* 帧的时间区间由**已产出样本数**算出（不是 wall clock）：wall clock 会因回调抖动算出重叠或缝隙，
-       而 S2 一旦失守，"那段时间说的话不属于任何段"且看不出来。 */
+    /* 帧的时间区间由已产出样本数算出（不是 wall clock）：wall clock 会因回调抖动算出重叠或缝隙，
+       而 S2 一旦失守，"那段时间说的话不属于任何段"且看不出来。  */
     const chunker = createFrameChunker({ sampleRate: 16_000, frameSec: 0.5, vadThreshold: 0.01 });
     const frames: CaptureFrame[] = [];
     const total = Math.round(16_000 * 1.3);

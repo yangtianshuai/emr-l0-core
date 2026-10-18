@@ -1,23 +1,4 @@
-/**
- * 医学表达式求值（K4 的"表达式"那一半）。
- *
- * ## 三条硬约束
- *
- * 1) **没有 `eval`、没有 `new Function`、没有解析器**。表达式是一棵 JSON 树，
- *    求值就是递归地查表调用。理由很直接：模板包来自外部（专科包要能独立交付），
- *    一旦它能带来可执行代码，"包是数据不是代码"这条纪律就整个失效了。
- * 2) **函数表是封闭的**。包里只能调用这里登记的函数；未知函数在**装载期**就被拒
- *    （`E_TPL_EXPR_UNKNOWN_FN`），不会等到某次求值才失败。
- * 3) **输入不足就返回 `null`，绝不编值**。身高没填，BMI 就是"算不出来"，
- *    不是 0、不是"用上一次的值"。给一个假的数远比给一个空更危险 ——
- *    假数会被当成测量结果，进而进机读信息、进签名范围。
- *
- * ## 为什么返回 `null` 而不是抛错
- *
- * 求值发生在**实例化**过程中，而"缺一个输入"是完全正常的中间状态（医生还没填完）。
- * 用异常表达它，会逼着调用方到处 try/catch，最后必然有人写成"catch 到就给 0"。
- * 用 `null` 表达，语义在类型里，忘了处理会编译不过。
- */
+// 医学表达式求值（K4 的"表达式"那一半）。
 
 import type { ExprNode, ExprValue, TemplateContext } from './types.ts';
 
@@ -31,15 +12,13 @@ export interface ExprFunction {
   /** 给人读的说明（界面与文档里展示"这个函数干什么"） */
   doc: string;
   /**
-   * 计算。**输入不足或类型不符一律返回 `null`**，不抛错、不兜底。
+   * 计算。输入不足或类型不符一律返回 `null`，不抛错、不兜底。
    * 参数里的 `null` 表示"上游算不出来" —— 实现可以直接短路返回 null。
-   */
+    */
   apply(args: Array<ExprValue | null>): ExprValue | null;
 }
 
-/* ------------------------------ 基础工具 ------------------------------ */
-
-/** 把参数收敛成数字表；任何一个不是数字就返回 null（**不求助于隐式转换**） */
+/** 把参数收敛成数字表；任何一个不是数字就返回 null（不求助于隐式转换）  */
 function nums(args: Array<ExprValue | null>): number[] | null {
   const out: number[] = [];
   for (const arg of args) {
@@ -49,7 +28,7 @@ function nums(args: Array<ExprValue | null>): number[] | null {
   return out;
 }
 
-/** ISO8601 → 毫秒；解析不出来返回 null（**不用"当前时间"兜底**） */
+/** ISO8601 → 毫秒；解析不出来返回 null（不用"当前时间"兜底）  */
 function timeOf(value: ExprValue | null): number | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
   const ms = Date.parse(value);
@@ -58,7 +37,7 @@ function timeOf(value: ExprValue | null): number | null {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** 两元**数字**函数（算术类） */
+/** 两元数字函数（算术类）  */
 function binary(name: string, doc: string, fn: (a: number, b: number) => number | null): ExprFunction {
   return {
     name,
@@ -75,14 +54,6 @@ function binary(name: string, doc: string, fn: (a: number, b: number) => number 
   };
 }
 
-/**
- * 两元**原值**函数（日期类）。
- *
- * 为什么必须与 `binary` 分开：日期在表达式里是**字符串**，套用 `nums`（只收数字）
- * 会让它们**永远**算不出来 —— 而表现是"这个派生值一直是空的"，和"还没填"长得一模一样。
- * 这一条是本项目实测踩到的：`weeksBetween` 最初走了 `nums`，孕周与年龄两个控件全部恒为 null，
- * 而"产物能通过校验"这一点完全看不出来（空值本身是合法的 field 值）。值域必须显式处理，不能靠隐式转换。
- */
 function binaryRaw(name: string, doc: string, fn: (a: ExprValue, b: ExprValue) => number | null): ExprFunction {
   return {
     name,
@@ -98,15 +69,6 @@ function binaryRaw(name: string, doc: string, fn: (a: ExprValue, b: ExprValue) =
   };
 }
 
-/* ------------------------------- 函数表 ------------------------------- */
-
-/**
- * 封闭函数表。新增函数必须同时：① 在这里登记；② 补用例。
- *
- * 刻意**不给**这些函数：`if`/`case`（会变成一门语言）、字符串拼接（不是计量）、
- * 任何带医学判断的成品（如 `egfrCkdEpi`）—— 后者看着省事，实际把"用哪条公式、
- * 哪一版"埋进代码里，而临床要的恰恰是"公式写在模板上、看得见、可替换"。
- */
 export const EXPR_FUNCTIONS: Record<string, ExprFunction> = {
   add: {
     name: 'add',
@@ -190,10 +152,8 @@ export const EXPR_FUNCTIONS: Record<string, ExprFunction> = {
   }),
 };
 
-/* ------------------------------- 求值 ------------------------------- */
-
 export interface EvalScope {
-  /** 同模板内**填写项**槽位 key → 值（未填为 null） */
+  /** 同模板内填写项槽位 key → 值（未填为 null）  */
   slots: Record<string, ExprValue | null>;
   /** 上下文（患者/就诊/时间） */
   context: TemplateContext;
@@ -208,11 +168,11 @@ function evaluateArgs(args: ExprNode[], scope: EvalScope, depth: number): Array<
 }
 
 /**
- * 求值。任何一处算不出来（缺输入、类型不符、除零、日期非法）**整体返回 `null`**。
+ * 求值。任何一处算不出来（缺输入、类型不符、除零、日期非法）整体返回 `null`。
  *
  * 这条"一处算不出就整体算不出"是刻意的：表达式是复合量（BMI = 体重 ÷ 身高²），
  * 缺任何一项都不存在"部分正确"的答案。返回半成品会被误读成完整结果。
- */
+  */
 export function evaluate(expr: ExprNode, scope: EvalScope, depth = 0): ExprValue | null {
   if (depth > MAX_EXPR_DEPTH) return null;
   if (expr.kind === 'num') return Number.isFinite(expr.value) ? expr.value : null;
@@ -231,8 +191,6 @@ export function evaluate(expr: ExprNode, scope: EvalScope, depth = 0): ExprValue
   return fn.apply(args);
 }
 
-/* ---------------------------- 依赖与描述 ---------------------------- */
-
 /** 收集引用（用于回答"这个派生值依赖哪些填写项"，以及装载期校验引用是否真实存在） */
 export function collectExpressionRefs(expr: ExprNode): { slots: string[]; context: string[] } {
   const slots = new Set<string>();
@@ -246,19 +204,11 @@ export function collectExpressionRefs(expr: ExprNode): { slots: string[]; contex
   return { slots: [...slots].sort(), context: [...context].sort() };
 }
 
-/**
- * 公式的人类可读形式（写进节点的派生依据）。
- *
- * 为什么要这一手：派生值最怕的是"结果在、公式不见了" —— 事后没人说得清这个 22.5
- * 是怎么来的。把公式连同"用了哪些填写项"一起写进证据链，才能复核。
- */
 export function describeExpression(expr: ExprNode): string {
   if (expr.kind === 'num') return String(expr.value);
   if (expr.kind === 'slot' || expr.kind === 'ctx') return expr.key;
   return `${expr.name}(${expr.args.map(describeExpression).join(', ')})`;
 }
-
-/* ------------------------------ 校验 ------------------------------ */
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -267,9 +217,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * 结构校验：返回问题清单（空数组 = 合法）。
  *
- * 返回清单而不是抛错，是因为装载期要把**同一份包里的多处错误一次报全** ——
+ * 返回清单而不是抛错，是因为装载期要把同一份包里的多处错误一次报全 ——
  * 报一条改一条的体验会让写模板的人放弃。
- */
+  */
 export function validateExpression(expr: unknown, path: string, depth = 0): string[] {
   if (depth > MAX_EXPR_DEPTH) return [`${path}: 表达式嵌套超过 ${MAX_EXPR_DEPTH} 层`];
   if (!isPlainObject(expr)) return [`${path}: 表达式必须是对象`];

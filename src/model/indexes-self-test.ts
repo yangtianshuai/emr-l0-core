@@ -1,12 +1,4 @@
-/**
- * T02 验收自测：节点索引层。
- *
- *   node src/model/indexes-self-test.ts
- *
- * 核心命题：**增量维护必须与全量重建完全等价**。
- * 索引层的缺陷很少立刻暴露，往往在长时间编辑后才表现为"树错乱"，因此这里用
- * 确定性随机操作序列 + 结构指纹比对，把等价性变成每次运行都检查的硬约束。
- */
+// T02 验收自测：节点索引层。
 
 import { DocumentIndex } from './indexes.ts';
 import { validateDocument, errorsOf } from './validate.ts';
@@ -17,8 +9,6 @@ import type { DocNode, NodeId } from './types.ts';
 const suite = new TestSuite('T02 节点索引层自测', ['说明：结构指纹（fingerprint）覆盖父子关系、同级顺序、标签归属与关键内容标记。']);
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
-
-/* ------------------------- 朴素参考实现（对照组） ------------------------- */
 
 function naiveChildren(nodes: Record<NodeId, DocNode>, id: NodeId): NodeId[] {
   return Object.values(nodes)
@@ -62,8 +52,6 @@ function naiveTag(nodes: Record<NodeId, DocNode>, system: string, code: string):
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
-
-/* --------------------------------- 用例 --------------------------------- */
 
 async function main(): Promise<void> {
   const synthetic = buildSyntheticDoc({ sections: 4, paragraphsPerSection: 3, fieldsPerParagraph: 1, withTables: true });

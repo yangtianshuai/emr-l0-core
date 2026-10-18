@@ -1,18 +1,4 @@
-/**
- * T25 验收自测：OFD / OFD-H 导入。
- *
- *   node src/import/import-self-test.ts
- *
- * 覆盖四层：
- *   A 容器层：ZIP 读取（含 deflate 第三方产物）、CRC 篡改检出、非 ZIP 输入
- *   B 语法层：极简 XML 解析（属性/自闭合/实体/注释/CDATA、按本地名匹配、非法输入的报错）
- *   C **闭环层（头号用例）**：导出 → 导入 → 与源文档逐项比对（文本字符数、数据元召回、
- *     机读 sourceHash），并与**独立探针**的结论交叉验证；再做"导入草稿 → 再导出 → 再导入"的两代往返
- *   D 诚实边界：路径化陷阱、无机读块、已签章源文件的导入件不继承签名
- *
- * 为什么闭环是第一优先：**连自己导出的文件都还原不回来，别家文件更不可能**。
- * 这条用例跑绿，才谈得上"导入别家 OFD-H / PDF / 扫描件"。
- */
+// T25 验收自测：OFD / OFD-H 导入。
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -83,12 +69,8 @@ function runProbe(file: string, expectFile?: string): { report: Record<string, u
   return { report, exit: result.status ?? 2 };
 }
 
-/* --------------------------------- 用例 --------------------------------- */
-
 async function main(): Promise<void> {
   ensureArtifacts();
-
-  /* ========================= A 容器层（ZIP） ========================= */
 
   await test('A1 读取自家产物：条目齐全、CRC 全部通过、能按路径取文本', async () => {
     const session = await signedSession();
@@ -152,8 +134,6 @@ async function main(): Promise<void> {
     assert(imported.textChars > 0, `应能抽出文本，实际 ${imported.textChars}`);
   });
 
-  /* ========================= B 语法层（XML） ========================= */
-
   await test('B1 解析属性/自闭合/实体/注释/CDATA，并按本地名匹配前缀', async () => {
     const xml = parseXml(`<?xml version="1.0"?>
       <!-- 注释应被忽略 -->
@@ -182,8 +162,6 @@ async function main(): Promise<void> {
     }
     assert(/不匹配/.test(message), `标签不匹配应报错，实际：${message || '未报错'}`);
   });
-
-  /* ==================== C 闭环层（导出 → 导入） ==================== */
 
   await test('C1 闭环：导入自家 OFD-H，数据元召回 100%、文本一致、sourceHash 对得上', async () => {
     const session = await signedSession();
@@ -255,17 +233,13 @@ async function main(): Promise<void> {
     assert(imported.decorationsStripped > 0, `应识别出装饰层内容，实际 ${imported.decorationsStripped}`);
     assertEqual(imported.decorations.length, imported.decorationsStripped, '剥离条数与保留条数应一致');
 
-    /* ① 页码不得混进正文：正文里出现"共 N 页"即说明分离失败 */
     assert(!imported.texts.some((text) => /共 \d+ 页/.test(text)), '页码不得混进正文行');
-    /* ② 也不能丢：装饰内容必须能在 decorations 里找到（否则"分离"变成了"删除"） */
     assert(
       imported.decorations.some((line) => /第 1 页 共 \d+ 页/.test(line.text)),
       `装饰层应保留页码原文，实际：${imported.decorations.map((line) => line.text).join(' | ')}`,
     );
-    /* ③ 必须留痕说明：否则使用方会以为页码丢了，或以为正文本来就这样 */
     assert(imported.warnings.some((text) => text.includes('已剥离')), '分出装饰层必须给出警告');
 
-    /* ④ 正文口径不受影响：闭环校验仍应完全一致 */
     const report = verifyAgainstSource(imported, session.document);
     assertEqual(report.textMatches, true, '分离装饰层后正文文本仍应与源一致');
     assertEqual(report.completeness, 1, '分离装饰层不应影响数据元召回');
@@ -387,25 +361,21 @@ async function main(): Promise<void> {
       }
     };
 
-    /* ① 一条都没确认 → 不得签章 */
     const untouched = WriteSession.open(structuredClone(doc));
     assertEqual(await codeOfAsync(() => untouched.sign({}, HUMAN)), 'E_IMPORTED_UNCONFIRMED', '未确认的导入内容必须拦住签章');
 
-    /* ② 只确认正文、字段仍待确认 → 仍不得签章（证明是"逐项"，不是"确认任意一条就放行"） */
     const partial = WriteSession.open(structuredClone(doc));
     for (const node of Object.values(partial.document.nodes) as DocNode[]) {
       if (node.type === 'text') partial.confirmNode({ nodeId: node.id }, HUMAN);
     }
     assertEqual(await codeOfAsync(() => partial.sign({}, HUMAN)), 'E_IMPORTED_UNCONFIRMED', '只确认正文、字段未确认时仍不得签章');
 
-    /* ③ 正文与字段全部确认 → 放行（结构节点不需要确认，否则导入件永远签不了） */
     for (const node of Object.values(partial.document.nodes) as DocNode[]) {
       if (node.type === 'field') partial.confirmNode({ nodeId: node.id }, HUMAN);
     }
     assertEqual(await codeOfAsync(() => partial.sign({}, HUMAN)), 'OK', '内容节点全部确认后应可签章');
     assertEqual(partial.document.status, 'signed', '状态应为已签章');
 
-    /* ④ 双实现一致：JS 参考实现必须给出同一判定（不允许单边实现新门控） */
     const jsModule = (await import('../../tools/model-check/lib/doc-store.mjs')) as {
       createStore: (doc: unknown, options?: unknown) => { sign: (params: unknown, actor: unknown) => unknown };
     };
@@ -416,8 +386,6 @@ async function main(): Promise<void> {
       'JS 参考实现必须与 TS 实现判定一致',
     );
   });
-
-  /* ======================= D 诚实边界（负例） ======================= */
 
   await test('D1 路径化 OFD：抽不到文本，且必须明确警告"可视化陷阱"', async () => {
     const file = join(SAMPLES, 'path-only.ofd');

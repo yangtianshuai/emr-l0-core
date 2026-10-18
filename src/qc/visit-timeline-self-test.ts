@@ -1,18 +1,4 @@
-/**
- * 就诊时间轴自测（TL1~TL8）。
- *
- *   node src/qc/visit-timeline-self-test.ts
- *
- * ## 这一族最容易出错的地方（各有用例钉住）
- *
- *   TL2 **轴与谓词必须等价**：时间轴不是第二套判定。同一批数据下，
- *       规则命中 ⇔ 轴上出现超限段，而且两处的依据文字**逐字相同**（措辞只该有一处）；
- *   TL3 **已出院**：右端取出院时刻，末段不该被算成缺漏（与 V3 同一条纪律）；
- *   TL5 **画不出来 ≠ 线是连的**：时间坏掉 / 缺入院时间一律进 `unevaluated`；
- *   TL7 **对照不了 ≠ 已写入**：缺采样时间或后面没有文书时进 `skipped`，不并进"写进去了"。
- *
- * 全部离线：规则来自样例包（与医院自备包走同一条编译路径），趋势对照用合成文书。
- */
+// 就诊时间轴自测（TL1~TL8）。
 
 import { fileURLToPath } from 'node:url';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -58,8 +44,6 @@ const visitDoc = (
   title: docTypeCode === PROGRESS ? '病程记录' : '入院记录',
   ...extra,
 });
-
-/* --------------------------- 合成文书（趋势对照用） --------------------------- */
 
 interface FieldSpec {
   id: string;
@@ -115,8 +99,6 @@ function docWith(docId: string, text: string, fields: FieldSpec[]): DocumentMode
 const WBC_TAG = { system: 'WS445', code: 'DE04.30.001', display: '白细胞计数' };
 const RANGE = { low: 4, high: 10 };
 
-/* --------------------------------- 辅助 --------------------------------- */
-
 function ruleOf(ruleId: string): VisitTimelineRuleRef {
   const found = RULES.find((ref) => ref.rule.id === ruleId);
   assert(!!found, `前置：样例时限包里应有 ${ruleId}`);
@@ -153,7 +135,6 @@ function timelineOf(visitDocs: VisitTimelineDocInput[], extra: Partial<Parameter
 }
 
 async function main(): Promise<void> {
-  /* ------------------------------- 前置 ------------------------------- */
 
   await test('TL0 前置：跨文书规则从包里被挑出来（且只挑这两种判定方式）', () => {
     assertEqual(
@@ -165,8 +146,6 @@ async function main(): Promise<void> {
     assertEqual(ruleOf('R-TIME-03').hours, 24, '间隔上限要从包内容里读出来，不能在代码里写死 24');
     assertEqual(ruleOf('R-TIME-04').kind, 'visit-doc-required', 'R-TIME-04 是应有而缺类');
   });
-
-  /* --------------------------------- 轴 --------------------------------- */
 
   await test('TL1 轴按**成文时刻**升序；时间坏的排最后但不丢；当前文书标出来', () => {
     const timeline = timelineOf([
@@ -187,8 +166,6 @@ async function main(): Promise<void> {
       `有文书时间坏掉时必须说出来，实际：${JSON.stringify(timeline.notes)}`,
     );
   });
-
-  /* ------------------------------ 间隔缺口 ------------------------------ */
 
   await test('TL2 轴与谓词**等价**：命中 ⇔ 出现超限段，且依据文字逐字相同', () => {
     /* 判定时刻取入院后 40 小时：让"相邻两份之间"成为最宽的一段（否则末尾那段会盖过它） */
@@ -251,8 +228,6 @@ async function main(): Promise<void> {
     assertEqual(gap?.detail, verdict.kind === 'hit' ? verdict.detail : '', '依据同样要逐字相同');
   });
 
-  /* ------------------------------- 判不了 ------------------------------- */
-
   await test('TL5 画不出来必须说出来：时间坏掉 / 缺入院时间都进 `unevaluated`', () => {
     const broken = timelineOf([
       visitDoc('prog1', PROGRESS, ADMITTED),
@@ -274,8 +249,6 @@ async function main(): Promise<void> {
       `缺入院时间时"应有而缺"判不了，要如实上报，实际：${JSON.stringify(noAdmission.unevaluated)}`,
     );
   });
-
-  /* ------------------------------ 趋势对照 ------------------------------ */
 
   await test('TL6 趋势对照：后续文书**再次记录同一编码**或正文提到名称，都算"写进去了"', () => {
     const timeline = timelineOf([

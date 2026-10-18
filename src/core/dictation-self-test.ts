@@ -1,17 +1,4 @@
-/**
- * 语音转写接入自测（T31）。
- *
- *   node src/core/dictation-self-test.ts
- *
- * 本套锁死六件事：
- *   D1 转写**只生成建议**：不落笔、不改 rev、不留痕；
- *   D2 必须可追溯：ASR 模型、转写标识、时间区间、独立来源类别；
- *   D3 **置信度上限** —— 听写再"肯定"也不能在关键内容上落笔，
- *      且"改后采纳"**不是**绕过阈值的后门（这条最容易在改代码时被顺手放开）；
- *   D4 规范化：空段丢弃、乱序重排，且都**如实回报**；
- *   D5 语音没有特权通道（AI 直写仍被拒、空转写不得静默成功）；
- *   D6 与建议分组打通：整组采纳仍逐条过门控，落笔后仍需人工确认。
- */
+// 语音转写接入自测（T31）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession, type Actor } from './session.ts';
@@ -179,8 +166,6 @@ async function main(): Promise<void> {
     const input = demoTranscript('audio-group', '2026-10-08T10:00:00Z');
     const single = ids.textIds[0] as NodeId;
 
-    /* ① 多段落同一节点：不报错（单段场景本来就合法），但必须警告 ——
-       因为"采纳"是替换而非追加，三段落一个节点最后只剩一段，前两段会被白白覆盖 */
     const together = session.dictate({ ...input, targetNodeId: single }, AI);
     assert(
       together.warnings.some((text) => text.includes('互相覆盖')),
@@ -189,10 +174,6 @@ async function main(): Promise<void> {
     const group = session.listSuggestionGroups().find((item) => item.groupId === together.groupId);
     assertEqual(group?.traceId, 'dictation:audio-group', 'traceId 应指向这次转写任务（把"一次录音"与"一批建议"对应起来）');
 
-    /* ② 逐段指定节点：各段到达自己的节点。
-       这里换一个**新会话**：① 已把整段转写落到 `single`，而下面第 1 段的落点与文本和它完全相同，
-       于是那条会被**幂等复用**（同节点 + 同文本 + 仍待处理，见 `SuggestionBook.add`）——
-       幂等是另一条性质，混进来只会让本用例的失败原因含混。 */
     const spreadRun = open();
     const targets = spreadRun.ids.textIds.slice(0, 3).map((id) => id as NodeId);
     const spread = spreadRun.session.dictate({ ...input, targetNodeIds: targets, transcriptionId: 'audio-spread' }, AI);
@@ -207,7 +188,6 @@ async function main(): Promise<void> {
       'E_SUGGESTION_SCOPE_REQUIRED',
       '逐段落位的节点数必须与有效段数一致',
     );
-    /* 两种落位方式必须二选一 */
     assertEqual(
       codeOf(() => session.dictate({ ...input, targetNodeId: single, targetNodeIds: targets, transcriptionId: 'audio-both' }, AI)),
       'E_SUGGESTION_SCOPE_REQUIRED',

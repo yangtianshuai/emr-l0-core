@@ -1,30 +1,13 @@
-/**
- * T27 · WS/T 500（电子病历共享文档）XML 导出（零依赖）。
- *
- * 与 `src/import/wst500-import.ts` 严格互为逆映射，目标是**双向交换**：
- *   本系统文档 → 共享文档 XML → 区域平台/HIS → 再导回时结构与内容一致。
- * 因此本模块的验收标准不是"生成了 XML"，而是**导出 → 导入 → 内容逐项一致**（见自测 D 组）。
- *
- * 三条纪律（与导入侧对应）：
- *   1) **不编造标准值**：标签体系的 OID 只能来自"映射表"（内置表已标注需院方字典核对，
- *      可注入覆盖）；没有 sectionCode 的章节**不写 code 元素**，而不是随手糊一个；
- *   2) **不泄露明文身份**：患者姓名只写掩码（模型里本来就只有 nameMasked），
- *      机构/作者名按原值，但绝不从别处"补全"姓名；
- *   3) **AI 参与度必须随文档走**：origin='ai' 的数据元带上 `author` + 置信度，
- *      否则"这段是谁写的"在跨系统交换后就断了（导入侧会把它读回来）。
- *
- * ⚠️ 诚实边界：这是**按 WS/T 500 结构的最小可用映射**，不是合规实现，
- *    也不构成对标准的符合性声明；模板差异（章节 code、标签字典）必须由院方核对。
- */
+// T27 · WS/T 500（电子病历共享文档）XML 导出（零依赖）。
 
 import type { DataElementTag, DocNode, DocumentModel, FieldNode, NodeId, SectionNode } from '../model/types.ts';
 
 export interface Wst500ExportOptions {
   /**
    * 标签体系 → codeSystem(OID) 映射。
-   * 默认表里的 OID 需要**按院方字典核对**后再用于生产（尤其是 2.16.156.10011 根下
+   * 默认表里的 OID 需要按院方字典核对后再用于生产（尤其是 2.16.156.10011 根下
    * 具体后缀与本地字典的对应关系）；这里只保证"不编造、可覆盖"。
-   */
+    */
   tagSystemOids?: Record<string, string>;
   /** 文档类型 codeSystem（默认 urn:l0:docType：明确表示"这不是标准里的文书类型编码"） */
   docTypeCodeSystem?: string;
@@ -39,9 +22,9 @@ export interface Wst500ExportResult {
 /**
  * 默认标签体系 OID 表。
  * - `2.16.840.1.113883.6.x` 是 HL7 注册的 OID（ICD/LOINC 等），可直接使用；
- * - `2.16.156.10011` 是中国卫生信息标准根 OID，根可用但**具体后缀必须院方核对**；
+ * - `2.16.156.10011` 是中国卫生信息标准根 OID，根可用但具体后缀必须院方核对；
  * - `urn:l0:*` 是本系统自用命名空间，明确表示"未映射到标准"。
- */
+  */
 const DEFAULT_TAG_SYSTEM_OIDS: Record<string, string> = {
   WST500: '2.16.156.10011.2.1.1.4',
   WS445: '2.16.156.10011.2.1.1.5',
@@ -64,11 +47,11 @@ function esc(text: string): string {
 }
 
 /**
- * ISO 时间 → CDA 时间。**保持原精度**：
+ * ISO 时间 → CDA 时间。保持原精度：
  *   '2026-10-08T10:30:00' → '20261008103000'；'1990-03-12' → '19900312'。
  * 不要给日期补 `000000`：CDA 允许两种精度，但补齐之后回导会变成
  * `1990-03-12T00:00:00`，与源值不再相等 —— 往返保真优先于"格式整齐"（实测踩到）。
- */
+  */
 function toCdaTime(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   const digits = iso.replace(/\D/g, '');
@@ -101,8 +84,6 @@ function isSection(node: DocNode): node is SectionNode {
   return node.type === 'section';
 }
 
-/* ------------------------------- 主流程 ------------------------------- */
-
 export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions = {}): Wst500ExportResult {
   const warnings: string[] = [];
   const tagOids = { ...DEFAULT_TAG_SYSTEM_OIDS, ...(options.tagSystemOids ?? {}) };
@@ -110,18 +91,9 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
 
   const stats = { sections: 0, paragraphs: 0, fields: 0, textChars: 0, aiFields: 0 };
   const usedSystems = new Set<string>();
-  /** 没导出的表格（连带格子里的结构化数据）：最后要**逐条说明**，不做静默丢弃 */
+  /** 没导出的表格（连带格子里的结构化数据）：最后要逐条说明，不做静默丢弃  */
   const skippedTables: string[] = [];
 
-  /**
-   * 取数据元的 codeSystem：
-   *   **优先用"从上一份共享文档带回来的原始 OID"**（导入时以证据形式记在 provenance 里），
-   *   其次才查映射表。
-   * 为什么必须先看原始 OID：`tag.system` 是受限枚举（WST500/ICD10/LOINC/local…），
-   * 而源文件用的是具体 OID。若导入后再导出时只按枚举重新映射，
-   * `2.16.840.1.113883.6.1`（LOINC）会被改写成 `urn:l0:tag:local` ——
-   * **标签体系在往返中丢失**，对方系统就再也认不出这是 LOINC（实测踩到）。
-   */
   const codeSystemOf = (field: FieldNode): string => {
     const original = field.provenance?.evidence
       ?.map((item) => item.ref ?? '')
@@ -144,9 +116,9 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
         continue;
       }
       if (child.type === 'table') {
-        /* 表格在这套映射里**没有对应结构**（WS/T 500 的 section/entry 中不含表格容器）。
-           跳过可以，但必须**说出来**：静默丢掉一张生命体征单，对方拿到的是"少了一半"的病历，
-           而导出的人只会以为一切正常 —— 警告里要带上在哪儿丢的。 */
+        /* 表格在这套映射里没有对应结构（WS/T 500 的 section/entry 中不含表格容器）。
+           跳过可以，但必须说出来：静默丢掉一张生命体征单，对方拿到的是"少了一半"的病历，
+           而导出的人只会以为一切正常 —— 警告里要带上在哪儿丢的。  */
         skippedTables.push(`${section.title ?? section.sectionCode ?? section.id}（${child.colCount ?? '?'} 列）`);
         continue;
       }
@@ -184,11 +156,6 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
         lines.push(`${indent}  <value xsi:type="ST">${esc(valueText)}</value>`);
       }
     }
-    /* AI 参与度随文档走：跨系统交换后仍能回答"这段是谁写的、置信度多少"。
-       两种情形都要写：
-       ① 本系统里由 AI 生成（origin='ai'）；
-       ② **从外部系统带回来的 AI 来源**（origin='imported'，但 derivedFrom 里记着模型）——
-          少了 ②，共享文档经过一次交换再导出时 AI 来源就断了（实测踩到：第二轮 author 消失）。 */
     const provenance = field.provenance;
     const aiModelId = provenance?.origin === 'ai' ? (provenance.modelId ?? 'unknown') : provenance?.derivedFrom?.modelId;
     if (aiModelId) {

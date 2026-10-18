@@ -1,25 +1,4 @@
-/**
- * 跨文书时限（频次 / 应有）自测（V1~V8）。
- *
- *   node src/qc/visit-limit-self-test.ts
- *
- * ## 这一族与"单文书时限"差在哪
- *
- * 单文书时限（`document-time-limit`）看的是"**这一份**文书与入院时刻的关系"；
- * 这一族看的是"**同一次就诊里多份文书**之间的关系"（间隔、应有而缺）。
- * 它在工程上**没有新引擎**：跨文书的事实只是**更多上下文**（`ctx.visitDocs`）——
- * 一份文书自己看不到别的文书，所以那份清单只能由调用方给。
- *
- * ## 三条最容易出错的地方（各有用例钉住）
- *
- *   V3 **已出院的就诊，右端取出院时刻**：拿"现在"当右端会把"出院后一直没写病程记录"
- *      算成缺漏 —— 那是最容易被当成系统坏了的那类假阳性；
- *   V5 **时间坏掉的文书不能静默跳过**：跳过等于把"这段时间没有文书"当成事实；
- *   V7 **"一份都没有"不归间隔规则管**：那是"应有该文书"那条的职责，
- *      两条规则都报会让同一件事提示两遍，而重复提示会被直接略过。
- *
- * 全部离线：跨文书判定同样不需要模型与网络，只需要一份就诊内的文书清单。
- */
+// 跨文书时限（频次 / 应有）自测（V1~V8）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +9,7 @@ import { readSamplePack, SAMPLE_PACK_FILES } from '../knowledge/sample-packs.ts'
 import type { QcRulePack } from './types.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-/** 规则来自**样例包**（`samples/packs/qc.timelimit.builtin.json`），不再有代码里的内置包 */
+/** 规则来自样例包（`samples/packs/qc.timelimit.builtin.json`），不再有代码里的内置包  */
 const TIME_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.timeRules) as QcRulePack;
 
 const suite = new TestSuite('跨文书时限自测', [
@@ -56,7 +35,7 @@ const ctx = (visitDocs: Array<{ docId: string; docTypeCode: string; createdAt: s
   ...extra,
 });
 
-/** 样例时限包里的规则（走的是与医院自备包**完全相同**的路径） */
+/** 样例时限包里的规则（走的是与医院自备包完全相同的路径）  */
 const rules = TIME_PACK.items.map((item) => compileRuleDescriptor(TIME_PACK.packId, item));
 
 function outcomeOf(id: string, view: QcNodeView, context: QcContext) {
@@ -92,9 +71,9 @@ const ADMISSION = 'WST500.1';
 
 async function main(): Promise<void> {
   await test('V1 间隔超限命中：相邻两份病程记录之间超过 24 小时，依据写明"哪两份、多长"', () => {
-    /* 判定时刻取**入院后 40 小时**（而不是默认的"现在"）：这条要验的是"相邻两份之间"，
+    /* 判定时刻取入院后 40 小时（而不是默认的"现在"）：这条要验的是"相邻两份之间"，
        若判定时刻远在最后一份之后，末尾那一段会大过相邻间隔，报出来的就不是这条了。
-       实测踩到：夹具没造干净时，V1 报的是 125 小时（末尾那段）。 */
+       实测踩到：夹具没造干净时，V1 报的是 125 小时（末尾那段）。  */
     const outcome = outcomeOf(
       'R-TIME-03',
       docView(),
@@ -121,7 +100,7 @@ async function main(): Promise<void> {
     const outcome = outcomeOf('R-TIME-03', docView(), ctx([doc('d1', PROGRESS, ADMITTED), doc('d2', PROGRESS, hoursAfter(ADMITTED, 6))], { dischargedAt }));
     assertEqual(outcome.kind, 'none', '出院之后的间隔不该算成缺漏（这是最容易被当成系统坏了的假阳性）');
 
-    /* 而出院**之前**确实断了 30 小时 → 该报，且右端说明是出院时刻 */
+    /* 而出院之前确实断了 30 小时 → 该报，且右端说明是出院时刻  */
     const bad = outcomeOf('R-TIME-03', docView(), ctx([doc('d1', PROGRESS, ADMITTED), doc('d2', PROGRESS, hoursAfter(ADMITTED, 30))], { dischargedAt: hoursAfter(ADMITTED, 40) }));
     assertEqual(bad.kind, 'hit', '出院前的真实断档仍应报');
   });
@@ -146,7 +125,6 @@ async function main(): Promise<void> {
     assert(detail.includes(ADMISSION), '依据里要写出是哪一类文书');
     assert(detail.includes('a1'), `依据里要写出"其实有一份、但晚了"，实际：${detail}`);
 
-    /* 期限内有一份 → 不报 */
     assertEqual(outcomeOf('R-TIME-04', docView(), ctx([doc('a1', ADMISSION, hoursAfter(ADMITTED, 5))])).kind, 'none', '期限内有一份就不报');
 
     /* 期限还没到（现在是入院后 10 小时）→ 不报：还没到点就说"没有"是催命，不是质控 */

@@ -1,14 +1,5 @@
-/**
- * T18d 验收自测：接收方公钥目录。
- *
- *   node src/core/recipient-keys-self-test.ts
- *
- * 重点在三条纪律（每条都对应一类真实事故）：
- *   A **点在曲线上**：不在曲线上的公钥会让加密"成功"却没人解得开 → 必须在导入处挡住；
- *   B 目录操作：指纹去重、条目篡改可检出、导出/导入往返；
- *   C 持久化与"只存公钥"：文件不存在=空目录（正常）、结构损坏=报错（不静默）、
- *     落盘 JSON 里不得出现任何私钥相关键。
- */
+// T18d 验收自测：接收方公钥目录。
+// 落盘 JSON 里不得出现任何私钥相关键。
 
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -54,7 +45,6 @@ function expectError(run: () => unknown, keyword: string): string {
 }
 
 async function main(): Promise<void> {
-  /* ========================= A 解析与导入 ========================= */
 
   await test('A1 PEM 导入：接受带头尾与换行的文本，指纹为 SM3(SPKI)', () => {
     const pem = exportRecipientPublicKey(spkiOf(pairA.publicKey), 'pem');
@@ -110,8 +100,6 @@ async function main(): Promise<void> {
     assertEqual(result.ok, false, '压缩点标记不应被接受（本实现只接受未压缩点）');
   });
 
-  /* ============================ B 目录操作 ============================ */
-
   await test('B1 加入目录：keyId/指纹/label 正确；同一把钥匙重复导入被拒（指纹去重）', () => {
     const added = addRecipientKey(EMPTY_KEY_STORE, { label: '张医生', text: spkiOf(pairA.publicKey), now: NOW });
     assertEqual(added.ok, true, `应加入成功：${added.ok ? '' : added.reason}`);
@@ -163,8 +151,6 @@ async function main(): Promise<void> {
       if (back.ok) assertEqual(back.fingerprint, added.key.fingerprint, `${format} 往返后指纹应不变`);
     }
   });
-
-  /* ======================= C 持久化与"只存公钥" ======================= */
 
   const storePath = fileURLToPath(new URL('../../artifacts/recipient-keys-test.json', import.meta.url));
 

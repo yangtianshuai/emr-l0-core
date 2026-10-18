@@ -1,17 +1,4 @@
-/**
- * AI 模型接入自测（P1~P5）。
- *
- * 说明：本套件**全部是纯函数**，不连任何模型服务、不需要文档 —— 这本身就是设计要达成的性质：
- * "模型接入"里最容易出错的三件事（配置校验、产出校验、请求/响应/错误处理）都必须能在离线被验证。
- * 让自测去连一台真服务，等于让自测**偶尔失败**，而那种失败最终会被所有人忽略。
- *
- * 重点锁死的四条：
- *   P1 配置 **fail-closed**：选了真模型却没给地址 → 抛错，绝不静默退回离线模板；
- *   P3 产出校验：`NaN` / 越界 `confidence` / 幻觉 `nodeId` 必须在**进入建议集之前**被拦下
- *      （`NaN < threshold` 恒为 false，放过去就是绕过置信度门控）；
- *   P5 错误信息**不得携带响应体**（错误响应常回显请求内容，抄进日志等于把病历又存了一份）；
- *   P5 超时**不依赖传输层自觉响应 abort**（不理会 signal 的实现会让请求永远挂着）。
- */
+// AI 模型接入自测（P1~P5）。
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -54,7 +41,6 @@ const fsx = (await import('node:fs')) as unknown as {
 };
 const TEMP = process.env.TEMP ?? process.env.TMP ?? '.';
 
-/** 一个最小的脱敏上下文包（真实场景由 buildAiContext 产出） */
 function context(): AiContextPackage {
   return {
     docId: 'doc-1',
@@ -122,16 +108,16 @@ function fakeTransport(response: { status: number; body: string }): { transport:
 async function main(): Promise<void> {
   await test('P1 配置 fail-closed：**选了真模型却没给地址必须抛错**，非法数值不取默认', () => {
     assertEqual(DEFAULT_AI_MODEL_CONFIG.format, 'offline', '默认离线（一个都没配就不外呼，病历内容也不出这台机器）');
-    /* 校验口径**只有一处**（`validateModelConfigInput`）：界面保存与库读取共用它，
+    /* 校验口径只有一处（`validateModelConfigInput`）：界面保存与库读取共用它，
        所以这一组覆盖的是两条路径共通的规则，而不是某一条路径的私规 ——
-       两条路径若各有一套口径，就会出现"界面能存进去、读的时候却拒绝"的配置。 */
+       两条路径若各有一套口径，就会出现"界面能存进去、读的时候却拒绝"的配置。  */
     assertEqual(
       codeOf(() => validateModelConfigInput({ format: 'openai-compatible', model: 'qwen-med-7b' })),
       'E_AI_CONFIG_NO_ENDPOINT',
       '选了 openai-compatible 却没给地址，**必须抛错** —— 静默退回离线模板会让"已接入真模型"变成假话',
     );
-    /* **模型名不能省**：它是写进留痕的 modelId，
-       省掉它留痕就答不出"这条内容是哪个模型写的"，而那正是审计要看的东西 */
+    /* 模型名不能省：它是写进留痕的 modelId，
+       省掉它留痕就答不出"这条内容是哪个模型写的"，而那正是审计要看的东西  */
     assertEqual(
       codeOf(() => validateModelConfigInput({ format: 'openai-compatible', endpoint: 'http://x/v1' })),
       'E_AI_CONFIG_INVALID',
@@ -162,9 +148,6 @@ async function main(): Promise<void> {
       '在线应直接用模型名（这才答得出"哪条内容是哪个模型写的"）',
     );
 
-    /* 打印的配置里**没有密钥这一格**：密钥不在配置对象里（它在库里单独一行），
-       所以"打印会不会漏出密钥"这个问题在类型层面就不存在（见 `model-config.ts` 约束 2）。
-       "密钥是否就位"由 `describeModelConfig` 报（它读得到那一行有没有）。 */
     const shown = redactConfig({ format: 'openai-compatible', model: 'm', endpoint: 'http://x/v1', timeoutMs: 1, maxItems: 1 });
     assertEqual('apiKey' in shown, false, '打印配置不得含密钥字段');
     assertEqual('apiKeyEnv' in shown, false, '也不再有"密钥变量名"这一格（本轮取消了环境变量这一档）');
@@ -245,7 +228,7 @@ async function main(): Promise<void> {
 
   await test('P5 HTTP 适配器（假模型）：请求构造、围栏容错、**错误不携带响应体**、超时不靠传输层配合', async () => {
     /* 配置对象直接构造（它现在只从库里来，构造形状就是库里那一行的形状）；
-       密钥**不在它里面** —— 它经 `createHttpAdapter` 的 `apiKey` 参数单独递进去，见下面那一处。 */
+       密钥不在它里面 —— 它经 `createHttpAdapter` 的 `apiKey` 参数单独递进去，见下面那一处。  */
     const config: AiModelConfig = {
       format: 'openai-compatible',
       endpoint: 'http://127.0.0.1:11434/v1/',
@@ -272,10 +255,10 @@ async function main(): Promise<void> {
     assertEqual(String(ok.seen[0]?.body).includes('n_2'), true, '请求体应列出允许的 nodeId');
     assertEqual(String(ok.seen[0]?.body).includes('secret'), false, '**请求体里不得出现密钥**（它只该在请求头）');
 
-    /* 真服务（OpenAI 兼容）回的**不是模型输出，而是信封**：模型正文在
-       `choices[0].message.content` 这个**字符串**里。少了拆信封这一步，
+    /* 真服务（OpenAI 兼容）回的不是模型输出，而是信封：模型正文在
+       `choices[0].message.content` 这个字符串里。少了拆信封这一步，
        配置全对也只会报"没有 suggestions 字段" —— 而错误信息按纪律不带响应体，
-       现场几乎无从推断。假模型直接回模型输出，恰好把这一层遮住。 */
+       现场几乎无从推断。假模型直接回模型输出，恰好把这一层遮住。  */
     const enveloped = fakeTransport({
       status: 200,
       body: JSON.stringify({
@@ -352,7 +335,7 @@ async function main(): Promise<void> {
       '模型越界到背景节点 → 在适配器内部就被拦下，不会进入建议集',
     );
 
-    /* 一个**不理会 abort** 的传输层：若超时只靠 signal，这个请求会永远挂着 */
+    /* 一个不理会 abort 的传输层：若超时只靠 signal，这个请求会永远挂着  */
     const never: ModelTransport = () => new Promise(() => {});
     const timeoutConfig = { ...config, timeoutMs: 60 };
     const started = Date.now();
@@ -377,9 +360,6 @@ async function main(): Promise<void> {
       assertEqual(initial.source, 'default', '没配过应是"默认"来源（界面要能显示它，否则"改了没生效"无从判断）');
 
       saveModelConfig(kv, { ...base, apiKey: 'secret-key-1' }, 'admin@test', { at: AT });
-      /* 密钥必须**密封落库**：直接看库里那两行，不听服务端自报。
-         注意口径的变化：从"非敏感部分明文"改成**一律密封** ——
-         同一张表里有的加密有的明文，后来的人只看代码分不出哪行是明文（见 `storage/config-kv.ts`）。 */
       const keyBlob = sealedBlobOf(fixture, MODEL_KEY_KEY);
       assert(keyBlob !== null && keyBlob.length > 0, '密钥那一行应当存在');
       assertEqual(keyBlob?.includes('secret-key-1'), false, '密钥不得明文落库');
@@ -402,8 +382,8 @@ async function main(): Promise<void> {
       assertEqual(loadModelConfig(kv).apiKey, 'secret-key-1', '**没传 apiKey 时不得动密钥**（否则改地址会顺手清掉密钥，现场表现是"模型突然 401"）');
       saveModelConfig(kv, { ...base, model: 'qwen-med-8b', apiKey: null }, 'admin@test', { at: AT });
       assertEqual(loadModelConfig(kv).apiKeyPresent, false, '显式 null 应清除密钥');
-      /* 清除必须是**真删那一行**：留着一份"没人读的密文"，等于"我清掉了"是句假话。
-         这里曾经写成"把文件写空"（注释说真删、实现留了个 0 字节空壳），所以这条要钉住。 */
+      /* 清除必须是真删那一行：留着一份"没人读的密文"，等于"我清掉了"是句假话。
+         这里曾经写成"把文件写空"（注释说真删、实现留了个 0 字节空壳），所以这条要钉住。  */
       assertEqual(sealedBlobOf(fixture, MODEL_KEY_KEY), null, '清除密钥必须是真删行（不留空壳）');
 
       /* 非法配置必须拒绝（与环境变量那条路径同一口径） */
@@ -414,15 +394,15 @@ async function main(): Promise<void> {
       );
       assertEqual(codeOf(() => saveModelConfig(kv, { ...base, maxItems: 0 }, 'admin@test')), 'E_AI_CONFIG_INVALID', '非法条数拒绝');
 
-      /* **配置只有一个来源（库）**：这里不再有"环境变量把界面配置压住"这一档。
-         钉住它是因为那条现场最难查：改了界面、环境里还留着一份旧的，看起来像"没保存成功"。 */
+      /* 配置只有一个来源（库）：这里不再有"环境变量把界面配置压住"这一档。
+         钉住它是因为那条现场最难查：改了界面、环境里还留着一份旧的，看起来像"没保存成功"。  */
       const again = loadModelConfig(kv);
       assertEqual(again.source, 'store', '库里有配置时来源就是 store（不再有 env 这一档）');
       assertEqual(again.config.model, 'qwen-med-8b', '生效的应是库里那一份');
 
-      /* **解不开 ≠ 没配过**：口令换过（或那一行被改过）时必须报错。
+      /* 解不开 ≠ 没配过：口令换过（或那一行被改过）时必须报错。
          若静默当作"没配过"，现场会表现成"我配的模型悄悄变回离线模板" ——
-         与"没配过"完全同形，而两件事的处置完全不同。 */
+         与"没配过"完全同形，而两件事的处置完全不同。  */
       writeCorruptRow(fixture, MODEL_CONFIG_KEY);
       assertEqual(codeOf(() => loadModelConfig(kv)), 'E_AI_CONFIG_INVALID', '配置读不出来时不得当作"没配过"');
       writeCorruptRow(fixture, MODEL_KEY_KEY);

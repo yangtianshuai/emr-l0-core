@@ -1,16 +1,4 @@
-/**
- * T18 验收自测：真实国密签章（SM2-SM3）与验签。
- *
- *   node src/core/signature-self-test.ts
- *
- * 覆盖三层：
- *   A 签名容器：SignedInfo 规范化、签名/验签、**逐类篡改的检出与定位**
- *   B 文档级签章：session 产出真实签名材料、独立验签、内容/元数据被改都能检出
- *   C 容器级签名（OFD 导出）：对真实文件字节签名、第三方可复算、缺后端时必须拒绝导出
- *
- * 这一套的核心不是"签名能验通"（那只证明自洽），而是**篡改必须被检出、且要能说清改了哪个文件**：
- * 验签的价值在于"发现被改过"，只报一句"验签失败"，运维与审计都无从下手。
- */
+// T18 验收自测：真实国密签章（SM2-SM3）与验签。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { DEMO_SIGNING_SEED, WriteSession, type Actor } from './session.ts';
@@ -95,7 +83,6 @@ function docTargets(doc: DocumentModel): SignatureTarget[] {
 }
 
 async function main(): Promise<void> {
-  /* ========================= A 签名容器 ========================= */
 
   await test('A1 SignedInfo 规范化：字段顺序固定、reference 排序无关（协议字节不能随实现漂移）', async () => {
     const full = { ...meta(), algorithm: SIGNATURE_ALGORITHM, provider: 'software' };
@@ -178,8 +165,6 @@ async function main(): Promise<void> {
     assertEqual(bytes[0], 0x30, 'DER 签名应以 SEQUENCE(0x30) 开头');
     assert(bytes.length > 60, 'DER 签名长度应合理（r/s 各约 32 字节 + 头）');
   });
-
-  /* ========================= B 文档级签章 ========================= */
 
   await test('B1 签章产出完整签名材料：算法 / 后端 / 指纹 / 摘要 / 签名值 / 覆盖清单', async () => {
     const session = await signedSession();
@@ -271,8 +256,6 @@ async function main(): Promise<void> {
     assert(DEMO_SIGNING_SEED.length > 0, '演示密钥种子常量应存在（文档已声明其为演示用）');
   });
 
-  /* ========================= C 容器级签名 ========================= */
-
   await test('C1 Signatures.xml 往返：写进去的能读回来，读回的 block 仍可验签', async () => {
     const block = await signTargets(targets(), meta(), signer);
     const xml = signaturesXml(block);
@@ -293,9 +276,9 @@ async function main(): Promise<void> {
     assert(!!pkg.signature, '已签章文档导出后应带容器级签名');
     const result = verifyOfdEntries(pkg.entries);
     assertEqual(result?.ok, true, `容器级验签应通过，实际：${result?.reasons.join('；')}`);
-    /* 期望里**必须有** `Doc_0/Res/DocumentRes.xml`：资源清单与图片字节是**导出过程生成**的，
+    /* 期望里必须有 `Doc_0/Res/DocumentRes.xml`：资源清单与图片字节是导出过程生成的，
        文档签章那一刻它们还不存在，不可能写进 `covers` —— 所以导出层补签它们（见 ofd.ts）。
-       漏掉它的后果很实在：把 ResourceID 改成指向另一张图，签名照样验得过。 */
+       漏掉它的后果很实在：把 ResourceID 改成指向另一张图，签名照样验得过。  */
     assertEqual(
       pkg.signature!.references.map((reference) => reference.path),
       ['Doc_0/Document.xml', 'Doc_0/MachineReadable.xml', 'Doc_0/Pages/Page_0/Content.xml', 'Doc_0/Res/DocumentRes.xml'],
@@ -319,7 +302,7 @@ async function main(): Promise<void> {
     let message = '';
     try {
       /* 模拟"某个调用点忘了传 signer"：直接走导出层。
-         **必须 await** —— 导出已是异步的，不 await 就抓不到它的拒绝（那样这条用例会假装通过） */
+         必须 await —— 导出已是异步的，不 await 就抓不到它的拒绝（那样这条用例会假装通过）  */
       await buildOfdPackage(session.document, PLAN);
     } catch (err) {
       message = (err as Error).message;

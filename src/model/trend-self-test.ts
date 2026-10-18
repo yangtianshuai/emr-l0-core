@@ -1,14 +1,4 @@
-/**
- * 趋势派生视图自测。
- *
- *   node src/model/trend-self-test.ts
- *
- * 住院病历的核心是"看演变"，所以趋势的关键性质是：
- *   ① 按**采样时间**排序（不是报告时间）；
- *   ② 异常值必须标出来（医生真正要看的是它，不是那串数字）；
- *   ③ 缺时间、单位不一致、无法聚合 —— 一律**如实上报**，不硬凑、
- *      也不丢数据（"看起来更全、实际更脏"是最坏的结果）。
- */
+// 趋势派生视图自测。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { buildTrend, buildTrends } from './trend.ts';

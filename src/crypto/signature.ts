@@ -1,19 +1,6 @@
-/**
- * T18 签名容器：SignedInfo 构造、签名与**独立验签**。
- *
- * 设计要点（都是为了"第三方不看我们代码也能验"）：
- *   1) **SignedInfo 是规范化文本**：行式、固定字段顺序、reference 按路径排序 ——
- *      人类可读、可手工复算，任何字段变化都会改变摘要；
- *   2) **摘要用 SM3**：每个被覆盖文件各算一份，签名不直接签"文件拼接"，而是签"摘要清单"，
- *      这样能精确定位"哪个文件被改了"，而不是只报"验签失败"；
- *   3) **公钥随签名走**（SPKI base64）：验签只需要文件本身 + 算法（SM2-SM3），
- *      不需要接触签名方的任何代码或数据库；
- *   4) **签名覆盖范围显式列出**，并明确不含 status / revisions / signatureRefs ——
- *      否则"签章动作本身"（改状态、追加留痕）会把签名弄失效（自引用问题）。
- *
- * ⚠️ 与算法层同样的边界：本容器用于原型与演示；生产须换成经认证的密码模块，
- *    并且私钥必须由设备保管（本仓库的演示私钥可由种子推导，**绝不可用于生产**）。
- */
+// T18 签名容器：SignedInfo 构造、签名与独立验签。
+// 与算法层同样的边界：本容器用于原型与演示；生产须换成经认证的密码模块，
+// 并且私钥必须由设备保管（本仓库的演示私钥可由种子推导，绝不可用于生产）。
 
 import type { DocumentModel } from '../model/types.ts';
 import { SIGNATURE_ALGORITHM, softwareVerifier, type Signer, type Verifier } from './provider.ts';
@@ -65,9 +52,9 @@ export function fromBase64(text: string): Uint8Array {
 
 /**
  * 规范化 SignedInfo。
- * **字段顺序、分隔符、排序规则都是协议的一部分**：改动其中任何一项，
+ * 字段顺序、分隔符、排序规则都是协议的一部分：改动其中任何一项，
  * 都会让"旧签名验不过、而双方都觉得自己没改"——所以有专门用例锁死这个字节序列。
- */
+  */
 export function canonicalSignedInfo(meta: SignatureMeta, references: ReferenceEntry[], publicKeyFingerprintHex: string): Uint8Array {
   const sorted = [...references].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const lines = [
@@ -89,11 +76,11 @@ export function canonicalSignedInfo(meta: SignatureMeta, references: ReferenceEn
 /**
  * 对一组文件签名（文件内容先各自 SM3，再签摘要清单）。
  *
- * ⚠️ **异步**：签名后端可能是网络服务或密码设备（`Signer.sign` 允许返回 Promise）。
- * 这里是内核里**唯一** await 签名值的地方 —— 其余调用方只需把 async 沿调用链传出去。
+ *  异步：签名后端可能是网络服务或密码设备（`Signer.sign` 允许返回 Promise）。
+ * 这里是内核里唯一 await 签名值的地方 —— 其余调用方只需把 async 沿调用链传出去。
  * 先算 references 与 SignedInfo（同步、纯函数），再 await 签名值：这样"待签什么"与"谁来签"
  * 两件事保持分离，第三方也能用 `canonicalSignedInfo()` 独立复算。
- */
+  */
 /** 摘要清单：按路径排序后各自 SM3（排序保证"文件顺序无关"，改顺序不会改签名） */
 function referencesOf(targets: SignatureTarget[]): ReferenceEntry[] {
   return [...targets]
@@ -101,15 +88,6 @@ function referencesOf(targets: SignatureTarget[]): ReferenceEntry[] {
     .map((target) => ({ path: target.path, digest: sm3Hex(target.bytes) }));
 }
 
-/**
- * **只算 SignedInfo 摘要，不签名**。
- *
- * 用途：签名值可能与"提交"分离 —— 签名后端是网络服务 / 密码设备时，必须先 `await` 拿到签名值，
- * 再进入同步的提交路径。那时提交时就要能回答"现在这份内容，与刚才送去签的是不是同一份"，
- * 比对的就是这个摘要（见 `WriteSession.sign()` 的复算校验）。
- *
- * 它与 `signTargets()` **共用同一段规范化逻辑**（`referencesOf`），因此两者永不漂移。
- */
 export function signedInfoDigestOf(
   targets: SignatureTarget[],
   meta: Omit<SignatureMeta, 'algorithm' | 'provider'>,
@@ -130,7 +108,6 @@ export async function signTargets(
   const info = canonicalSignedInfo(fullMeta, references, signer.fingerprint);
   const signature = await signer.sign(info);
 
-
   return {
     meta: fullMeta,
     publicKeyBase64: toBase64(signer.publicKeyDer),
@@ -149,7 +126,7 @@ export interface VerifySignatureResult {
   details: { algorithm: string; provider: string; publicKeyFingerprint: string; referenceCount: number };
 }
 
-/** 按算法标识选择验签器：**验签只依赖算法与公钥，与签名方用什么后端无关** */
+/** 按算法标识选择验签器：验签只依赖算法与公钥，与签名方用什么后端无关  */
 export function verifierFor(algorithm: string, publicKey: Sm2Point): Verifier | null {
   if (algorithm === SIGNATURE_ALGORITHM) return softwareVerifier(publicKey);
   return null;
@@ -160,9 +137,9 @@ export function verifierFor(algorithm: string, publicKey: Sm2Point): Verifier | 
  *
  * `requireAllCovered`（默认 true）：是否要求"传入的文件必须全部被签名覆盖"。
  *   - 文档级验签（内存文档）用 true：多出的内容必须报出来；
- *   - **容器级验签（OFD 容器）必须用 false**：容器里天然有大量未被签名覆盖的文件
+ *   - 容器级验签（OFD 容器）必须用 false：容器里天然有大量未被签名覆盖的文件
  *     （OFD.xml、DocumentRes.xml…），要求全覆盖会把正常文件判成失败。
- */
+  */
 export function verifyTargets(
   block: SignatureBlock,
   targets: SignatureTarget[],
@@ -177,7 +154,6 @@ export function verifyTargets(
     referenceCount: block.references.length,
   };
 
-  /* ① 文件摘要：逐个比对，明确指出被改动的文件 */
   const byPath = new Map(targets.map((target) => [target.path, target.bytes]));
   for (const reference of block.references) {
     const bytes = byPath.get(reference.path);
@@ -195,11 +171,9 @@ export function verifyTargets(
     }
   }
 
-  /* ② SignedInfo 摘要：元数据或摘要清单被改动都能检出 */
   const info = canonicalSignedInfo(block.meta, block.references, block.publicKeyFingerprint);
   if (sm3Hex(info) !== block.signedInfoDigest) reasons.push('SignedInfo 已被改动（元数据或摘要清单不一致）');
 
-  /* ③ 公钥自洽：指纹必须与公钥匹配，否则"换了把钥匙"也能假装通过 */
   let publicKey: Sm2Point;
   try {
     publicKey = publicKeyFromSpki(fromBase64(block.publicKeyBase64));
@@ -209,7 +183,6 @@ export function verifyTargets(
   }
   if (publicKeyFingerprint(publicKey) !== block.publicKeyFingerprint) reasons.push('公钥与其指纹不一致');
 
-  /* ④ 验签 */
   const verifier = verifierFor(block.meta.algorithm, publicKey);
   if (!verifier) {
     reasons.push(`不支持的签名算法：${block.meta.algorithm}（本版本仅支持 ${SIGNATURE_ALGORITHM}）`);
@@ -222,7 +195,7 @@ export function verifyTargets(
 
 /* ------------------------- 文档级目标（内存态签章用） ------------------------- */
 
-/** 文档快照：**只包含"内容"，不含签章动作自身会改动的字段**（status/revisions/signatureRefs/updatedAt） */
+/** 文档快照：只包含"内容"，不含签章动作自身会改动的字段（status/revisions/signatureRefs/updatedAt）  */
 export function documentSnapshot(doc: DocumentModel): Uint8Array {
   const patient = doc.patient;
   const encounter = doc.encounter;

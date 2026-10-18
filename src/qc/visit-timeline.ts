@@ -1,37 +1,4 @@
-/**
- * 就诊时间轴 —— 把**一次就诊的全部文书**摊在一条轴上。
- *
- * ## 为什么要有它
- *
- * 跨文书质控（`visit-doc-interval` / `visit-doc-required`）今天只能以**单条注解**的形式出现：
- * "两份病程记录之间超过 24 小时"落在当前文书的根节点上，与"这一章有个空占位符"长得一模一样。
- * 于是质控的实际形态仍是"逐条找错"，而不是"看整条线缺了什么" ——
- * 而缺口是**线**上的事，一条挂在节点上的提示表达不了它。
- *
- * 本模块把那些结论**放回线上**：文书按成文时刻排开，同类型文书之间画出间隔段
- * （超过时限的那一段就是缺口），并顺带对照"变化有没有写进后面的文书"。
- *
- * ## 三条纪律（与 `predicates.ts` 同源，不另立一份判定）
- *
- * 1) **判定只有一处**：缺口"报不报"由**已编译的跨文书规则**（`QcRule.check`）决定 ——
- *    与 `/api/qc-form-check` 跑的是同一批规则、同一个上下文，所以措辞逐字一致。
- *    本模块只补一件事：把结论**定位到轴上**（哪两份之间、多少小时）。定位走
- *    `visitTimelineOf`（与谓词共用同一个"哪几份、什么时候"），因此不存在第二份口径；
- *    "轴上有缺口 ⇔ 谓词命中"由 `visit-timeline-self-test.ts` 钉住。
- * 2) **不猜**：拿不到就诊文书清单 / 时间解析不出来 / 期限未到，一律走 `unevaluated`。
- *    "画不出来"绝不能被显示成"这条线是连的"。
- * 3) **只是提示**：`severity` 只影响呈现（与旁挂注解同一约定），不参与任何门控。
- *
- * ## 趋势对照的边界（这一节请与 `model/consistency.ts` 的文件头一起读）
- *
- * "变化是否已写入病程记录"有两种做法：
- *   · **语义判定**（"这段话在讲那个指标"）需要模型，而它的误报率在没有评测集的前提下
- *     无法声称 —— `consistency.ts` 已经因为同一个理由拒绝过一次，这里不翻案；
- *   · 本模块走**编码级 + 子串**：变化点之后只要有文书**再次记录了同一编码的数据元**，
- *     或正文里出现了该数据元的名称，就算"写进去了"。
- *     它覆盖不了全部情形（医生可能写"白细胞偏高"而不填字段），所以每条都写明依据，
- *     且**措辞是提示不是结论**；判不了的（缺采样时间 / 后面没有文书）如实进 `skipped`。
- */
+// 就诊时间轴 —— 把一次就诊的全部文书摊在一条轴上。
 
 import type { AnnotationSeverity } from '../core/annotations.ts';
 import type { DocumentModel, NodeId } from '../model/types.ts';
@@ -46,14 +13,12 @@ export type CrossDocRuleKind = 'visit-doc-interval' | 'visit-doc-required';
 
 export const CROSS_DOC_RULE_KINDS: readonly CrossDocRuleKind[] = ['visit-doc-interval', 'visit-doc-required'];
 
-/* ------------------------------ 规则引用 ------------------------------ */
-
 /**
  * 一条跨文书规则在轴上的用法。
  *
- * `rule` 保持**已编译**的形态（不是原始 JSON）：报不报由它判，措辞也从它来 ——
+ * `rule` 保持已编译的形态（不是原始 JSON）：报不报由它判，措辞也从它来 ——
  * 时间轴与质控注解因此说的是同一句话，而不是"两处各写一遍、慢慢不一致"。
- */
+  */
 export interface VisitTimelineRuleRef {
   rule: QcRule;
   kind: CrossDocRuleKind;
@@ -63,15 +28,6 @@ export interface VisitTimelineRuleRef {
   hours: number;
 }
 
-/**
- * 从已装载的规则包里挑出**跨文书**规则（与 `rulesFromRegistry` 同一段迭代口径）。
- *
- * 为什么在这里重新迭代一遍、而不是从 `rulesFromRegistry` 的结果里筛：
- * 编译后的 `QcRule` 只带 `id / title / severity / check`，**判定方式与参数不在上面**
- * （那是包内容，不是引擎的接口）。要按"哪一类判定方式、盯哪一类文书、时限多少"来用它们，
- * 就必须回到条目那一层读 `predicate`。读写两处都走 `ruleItemsOf` 且都跳过 `enabled === false`，
- * 因此不会出现"质控跑了这条、时间轴没跑"。
- */
 export function crossDocRulesOf(registry: PackRegistry): VisitTimelineRuleRef[] {
   const out: VisitTimelineRuleRef[] = [];
   const summaries = [...registry.list('rule')].sort((left, right) => left.packId.localeCompare(right.packId));
@@ -88,7 +44,7 @@ export function crossDocRulesOf(registry: PackRegistry): VisitTimelineRuleRef[] 
       const docTypeCode = typeof source.docTypeCode === 'string' ? source.docTypeCode : '';
       const hours = kind === 'visit-doc-interval' ? source.maxGapHours : source.withinHours;
       /* 参数在装包那一刻已被 `normalizeParams` 校验过；这里再判一次形状，是为了让
-         "包被手改过"这件事表现为**这条规则不进轴**，而不是 NaN 小时的缺口 */
+         "包被手改过"这件事表现为这条规则不进轴，而不是 NaN 小时的缺口  */
       if (docTypeCode === '' || typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0) continue;
       out.push({
         rule: compileRuleDescriptor(pack.packId, descriptor),
@@ -101,14 +57,11 @@ export function crossDocRulesOf(registry: PackRegistry): VisitTimelineRuleRef[] 
   return out;
 }
 
-/* ------------------------------- 输入 ------------------------------- */
-
 export interface VisitTimelineDocInput {
   docId: string;
   title?: string;
   docTypeCode: string;
   docTypeDisplay?: string;
-  /** `document.createdAt`：**成文时刻**，不是"最后一次被改"的时刻（见 `QcVisitDoc`） */
   createdAt: string;
   status?: string;
   /** 当前正在看的那一份（轴上要标出来） */
@@ -126,11 +79,9 @@ export interface VisitTimelineInput {
   admittedAt?: string;
   dischargedAt?: string;
   visitType?: string;
-  /** "病程记录"的类型码：趋势对照只认**它**（`WST500.3`），别处写的东西不算进过病程 */
+  /** "病程记录"的类型码：趋势对照只认它（`WST500.3`），别处写的东西不算进过病程  */
   progressDocTypeCode?: string;
 }
-
-/* ------------------------------- 输出 ------------------------------- */
 
 export interface VisitTimelineAxisDoc {
   docId: string;
@@ -140,7 +91,7 @@ export interface VisitTimelineAxisDoc {
   createdAt: string;
   status: string | null;
   isCurrent: boolean;
-  /** 成文时刻能否解析。解析不出来的仍**留在轴上**（不静默丢掉），但不参与间隔判定 */
+  /** 成文时刻能否解析。解析不出来的仍留在轴上（不静默丢掉），但不参与间隔判定  */
   timed: boolean;
   /** 该文书的正文是否在手上（不在手上时，趋势对照看不到它） */
   hasBody: boolean;
@@ -165,7 +116,7 @@ export interface VisitTimelineGap {
   severity: AnnotationSeverity;
   kind: CrossDocRuleKind;
   docTypeCode: string;
-  /** 与质控注解**逐字相同**的依据（同一条规则、同一个上下文算出来的） */
+  /** 与质控注解逐字相同的依据（同一条规则、同一个上下文算出来的）  */
   detail: string;
   suggestion: string;
   /** 轴上的定位：最宽的那一段（间隔类）或期限（应有而缺类，此时段为 null） */
@@ -194,7 +145,7 @@ export interface VisitTimelineTrend {
   /** 参与对照的后续文书（病程记录） */
   progressDocIds: string[];
   changes: VisitTimelineChange[];
-  /** 没对照成的：**如实报出**，不能当成"写进去了" */
+  /** 没对照成的：如实报出，不能当成"写进去了"  */
   skipped: Array<{ reason: string; count: number }>;
 }
 
@@ -214,8 +165,6 @@ export interface VisitTimeline {
   /** 需要人知道的前提（共几份文书、有没有规则在跑、有没有时间坏掉的文书） */
   notes: string[];
 }
-
-/* ------------------------------ 小工具 ------------------------------ */
 
 const HOUR_MS = 3_600_000;
 
@@ -240,15 +189,13 @@ function textOf(doc: DocumentModel): string {
   return parts.join('\n');
 }
 
-/* ------------------------------- 轴 ------------------------------- */
-
 /**
  * 从规则里挑出"每种文书类型按哪条时限标"。
  *
  * 同一类型被多条间隔规则盯上时（例如全院 24 小时 + 产科 12 小时），轴上只画一条线：
- * 取**最严的那条**（小时数最小）。不这么做的话同一段会被画两遍，而两条线在界面上
+ * 取最严的那条（小时数最小）。不这么做的话同一段会被画两遍，而两条线在界面上
  * 无法分辨，医生会以为"系统算错了"。规则各自仍会照常出注解 —— 这里只决定画哪条。
- */
+  */
 function intervalsByType(rules: readonly VisitTimelineRuleRef[]): Map<string, VisitTimelineRuleRef> {
   const out = new Map<string, VisitTimelineRuleRef>();
   for (const ref of rules) {
@@ -311,8 +258,6 @@ function widestOf(segments: readonly VisitTimelineSegment[], docTypeCode: string
 function toQcVisitDoc(doc: VisitTimelineDocInput): QcVisitDoc {
   return { docId: doc.docId, docTypeCode: doc.docTypeCode, createdAt: doc.createdAt, ...(doc.title ? { title: doc.title } : {}) };
 }
-
-/* ---------------------------- 趋势对照 ---------------------------- */
 
 interface TrendCheckInput {
   docs: readonly VisitTimelineDocInput[];
@@ -383,8 +328,6 @@ function compareTrends(input: TrendCheckInput): VisitTimelineChange[] {
   return out;
 }
 
-/* ------------------------------ 主函数 ------------------------------ */
-
 export function buildVisitTimeline(input: VisitTimelineInput): VisitTimeline {
   const notes: string[] = [];
   const unevaluated: Array<{ ruleId: string; title: string; reason: string }> = [];
@@ -437,7 +380,7 @@ export function buildVisitTimeline(input: VisitTimelineInput): VisitTimeline {
     }
   }
 
-  /* 缺口：判定交给**已编译的规则**（与质控注解同一句话），定位交给轴上的段 */
+  /* 缺口：判定交给已编译的规则（与质控注解同一句话），定位交给轴上的段  */
   const gaps: VisitTimelineGap[] = [];
   const visitDocs = input.visitDocs.map(toQcVisitDoc);
   for (const ref of input.rules) {

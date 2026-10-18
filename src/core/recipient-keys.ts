@@ -1,24 +1,5 @@
-/**
- * T18d 接收方公钥目录：谁持有私钥、公钥长什么样、怎么交换。
- *
- * 为什么需要：加密交付解决了"密钥给谁"，但在此之前的形态是 **`demoKeyPair(seed)` 由公开种子派生** ——
- * 那是纯演示（私钥可被任何人推导）。真实场景需要：**接收方自己生成密钥对，把公钥交给发送方**，
- * 私钥永不离开密码设备。本模块只做"公钥目录"这一半，因为另一半（保管私钥）根本不该由本系统承担。
- *
- * 三条纪律（都对应一类具体事故）：
- *   1) **导入必须验证点确实在 SM2 曲线上**：如果放进一个不在曲线上的点，SM2 加密**照样会成功**
- *      （它只需要点运算），产出的密文却**没有任何私钥能解开** —— 这是最坏的静默失败。
- *      验证的代价是一次模运算，省它的代价是一份解不开的归档件。
- *   2) **只存公钥**：结构与落盘内容里都没有私钥字段（有用例断言导出的 JSON 里不出现私钥相关键）。
- *   3) **指纹去重 + 完整保留**：同一把钥匙不允许在目录里出现两次（否则"选哪一行"会随列表顺序变化），
- *      指纹一律完整存储与展示（截断过的指纹核对不了"是不是同一把"）。
- *
- * ⚠️ 诚实边界：
- *   - 本目录是**本系统的本地目录**，不提供公钥的**身份真实性**：目录里的"张医生"只是标签，
- *     无法证明公钥真的属于张医生。真实部署需要证书体系（CA/卫健委信任根）或线下指纹核对；
- *   - 公钥被替换的表现是"加密给攻击者"，本模块**无法检测**；
- *   - 目录落盘为明文 JSON（公钥本就可公开），但**删除条目不影响已发出的密文**。
- */
+// T18d 接收方公钥目录：谁持有私钥、公钥长什么样、怎么交换。
+// 那是纯演示（私钥可被任何人推导）。真实场景需要：接收方自己生成密钥对，把公钥交给发送方，
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -33,9 +14,9 @@ import {
 
 export interface RecipientKey {
   keyId: string;
-  /** 人类可读的标签（"张医生"/"会诊终端A"）——**只是标签**，不构成身份证明 */
+  /** 人类可读的标签（"张医生"/"会诊终端A"）——只是标签，不构成身份证明  */
   label: string;
-  /** SM2 公钥 SPKI（DER）的 base64；**私钥永不入库** */
+  /** SM2 公钥 SPKI（DER）的 base64；私钥永不入库  */
   spkiBase64: string;
   /** SM3(SPKI) 指纹（完整值，不截断） */
   fingerprint: string;
@@ -62,15 +43,13 @@ export type ParseResult =
   | { ok: true; publicKey: Sm2Point; spkiBase64: string; fingerprint: string }
   | { ok: false; code: RecipientKeyErrorCode; reason: string };
 
-/* ------------------------------- 导入与导出 ------------------------------- */
-
 const PEM_BEGIN = '-----BEGIN PUBLIC KEY-----';
 const PEM_END = '-----END PUBLIC KEY-----';
 
 /**
  * 解析一段公钥文本：接受 PEM（含头尾与换行）、纯 base64、以及带空格/换行的 base64。
- * 解析成功后**必须**通过"点在曲线上"的校验才算数。
- */
+ * 解析成功后必须通过"点在曲线上"的校验才算数。
+  */
 export function parseRecipientPublicKey(text: string): ParseResult {
   const trimmed = (text ?? '').trim();
   if (trimmed === '') return { ok: false, code: 'E_KEY_TEXT_EMPTY', reason: '公钥文本为空' };
@@ -112,8 +91,8 @@ export function parseRecipientPublicKey(text: string): ParseResult {
     };
   }
   const publicKey = parsedSpki.publicKey;
-  /* 这里再确认一次"点在曲线上"不是多余：解析层已经保证，但加密交付是**不可逆**的动作，
-     宁可多花一次模运算，也不要拿一把来历不明的钥匙去加密。 */
+  /* 这里再确认一次"点在曲线上"不是多余：解析层已经保证，但加密交付是不可逆的动作，
+     宁可多花一次模运算，也不要拿一把来历不明的钥匙去加密。  */
   if (!isOnCurve(publicKey)) {
     return { ok: false, code: 'E_KEY_NOT_ON_CURVE', reason: '公钥点不在 SM2 曲线上，拒绝导入' };
   }
@@ -138,8 +117,6 @@ export function publicKeyOf(key: RecipientKey): Sm2Point {
   }
   return parsed;
 }
-
-/* --------------------------------- 目录操作 --------------------------------- */
 
 export const EMPTY_KEY_STORE: RecipientKeyStore = { version: 1, keys: [] };
 
@@ -187,17 +164,15 @@ export function findRecipientKey(store: RecipientKeyStore, keyId: string): Recip
   return store.keys.find((key) => key.keyId === keyId);
 }
 
-/* --------------------------------- 持久化 --------------------------------- */
-
-/** 目录落盘为明文 JSON：里面**只有公钥**（公钥本就可公开），私钥从不进入本文件 */
+/** 目录落盘为明文 JSON：里面只有公钥（公钥本就可公开），私钥从不进入本文件  */
 export function saveRecipientKeys(path: string, store: RecipientKeyStore): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
 }
 
 export function loadRecipientKeys(path: string): RecipientKeyStore {
-  /* 文件不存在是**正常状态**（首次使用）；其余错误必须显式抛出 ——
-     静默返回空目录会让"我导入的接收方不见了"变成无从排查的问题。 */
+  /* 文件不存在是正常状态（首次使用）；其余错误必须显式抛出 ——
+     静默返回空目录会让"我导入的接收方不见了"变成无从排查的问题。  */
   if (!existsSync(path)) return EMPTY_KEY_STORE;
   const text = readFileSync(path, 'utf8');
   let parsed: RecipientKeyStore;

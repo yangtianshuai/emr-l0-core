@@ -1,16 +1,4 @@
-/**
- * 算子插件自测（P1~P9）。
- *
- *   node src/qc/plugin-self-test.ts
- *
- * 覆盖三件事：
- *   P1~P4 **验签与验文件**：没签名 / 签名不符 / 文件被改 / 密钥不对，一律不 import；
- *   P5~P7 **装载与一致性**：算子进内核、规则能用它；清单与模块不一致要拒；重名要拒；
- *   P8~P9 **失败可见**：没有密钥 / 目录里没有插件 —— 如实上报，不静默跳过。
- *
- * 为什么要用真文件、真 import：这套机制的全部价值就是"签名覆盖清单、清单覆盖文件"。
- * 用假的 importer 替掉文件系统，验的就不是同一件事了。
- */
+// 算子插件自测（P1~P9）。
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -117,7 +105,6 @@ function codeOf(fn: () => unknown): string {
 
 async function main(): Promise<void> {
   try {
-    /* ============================ P1~P4 验签与验文件 ============================ */
 
     await test('P1 没签名一律不装：包可以不带签名，插件不行', () => {
       mkdirSync(PLUGIN_DIR, { recursive: true });
@@ -194,8 +181,6 @@ async function main(): Promise<void> {
       rmSync(PLUGIN_DIR, { recursive: true, force: true });
     });
 
-    /* ============================ P5~P7 装载与一致性 ============================ */
-
     await test('P5 装上一个签名插件：算子进内核、规则能用它、命中依据来自插件', async () => {
       writePlugin();
       assert(!extendedOperatorNames().includes('demo-length-over'), '装之前不该有这个算子');
@@ -241,8 +226,6 @@ async function main(): Promise<void> {
       const condition = normalizeCondition({ kind: 'atom', field: 'text', op: 'demo-unknown-op', value: 3 });
       assertEqual(condition, null, '包只能引用既有算子：未知算子名连树都不合法');
     });
-
-    /* ============================ P8~P9 失败可见 ============================ */
 
     await test('P8 目录里没有插件 = 这台机器没装插件（不是错误）', async () => {
       const emptyRoot = mkdtempSync(join(tmpdir(), 'qc-plugin-empty-'));

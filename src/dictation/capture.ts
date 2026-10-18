@@ -1,58 +1,9 @@
-/**
- * 语音采集层（C1）：把"麦克风 → 一段段音频 → 带段号与时间区间的转写文本"收成三件**可离线验证**的纯逻辑。
- *
- * ## 它补的是 ASR 不给的那三样东西
- *
- * 院内 ASR 接口（`POST /api/audio/inference-realtime` + 轮询 `GET .../{task_id}`）在 `done` 时
- * **只回一个字符串**：没有时间戳、没有分段、没有置信度、没有模型信息。而 `dictate` 要的是
- * `{ index, startSec, endSec, text, confidence }`。逐项对账（`docs/L2-语音采集设计.md` 第一、三节）：
- *
- * | 要的 | 谁补 | 怎么补 |
- * |---|---|---|
- * | `index` / `startSec` / `endSec` | **本模块（唯一来源）** | 一次分片 = 一段 = 一次任务；时间以录音开始为 0 点累计 |
- * | `text` | ASR | `result` 原样（**空串是合法结果**，表示这段没听到内容，但要如实回报） |
- * | `confidence` | 本模块 | 接口不回 → 填 `confidenceCeiling`（<0.90），**不得自称 1.0 也不得留空** |
- * | `asrModelId` | 部署声明 | 接口不回模型信息，只能由部署方声明，且**必须带版本/日期** |
- * | `transcriptionId` | 采集会话 ID | **不用 `task_id`**：一次会话有 N 个任务，用它会把"一次录音"拆成 N 次 |
- *
- * ## 三条不可让步的规则
- *
- * 1) **采集层在内核之外**：它只产出 `TranscriptSegment[]`，`WriteSession.dictate` 一行都不改。
- *    整个模块可以换掉或拿掉，门控与留痕不受任何影响；
- * 2) **未知按最保守处理**：ASR 不回置信度，就填上限（恒 < 关键内容 0.90）——
- *    于是关键内容上照样必须"改后采纳"。**绝不因为"识别看起来成功了"就放宽**；
- * 3) **fail-closed**：端点未配置 → 采集入口不可用；该接口**没有失败态**（只有
- *    `pending/processing/done`），所以轮询必须有上限，超时即判该段失败。
- *    **绝不静默退回"模拟一段录音转写"** —— 那会让"已接入真实采集"变成一句假话。
- *
- * ## 为什么 transport 与临时文件存储都可注入
- *
- * 与 `src/dictation/external-placement.ts`、`src/ai/http-adapter.ts` 同一条理由：
- * 上传怎么构造、轮询怎么收口、失败怎么汇总，这三件最容易出错的事**必须能离线被测**。
- * 让自测去连真实 ASR、去开真实麦克风，等于让自测**偶尔失败**，而那种失败最终会被所有人忽略。
- *
- * ## 本文不做的事
- *
- * 不开麦克风（那是 C3 浏览器侧）、不写 HTTP 路由与配置文件（那是 C2）、不做流式实时上屏
- * （该接口是"整段文件 → 文本"，做流式等于换服务）、不做说话人分离、不默认留存音频。
- */
+// 语音采集层（C1）：把"麦克风 → 一段段音频 → 带段号与时间区间的转写文本"收成三件可离线验证的纯逻辑。
 
 import type { ISODateTime } from '../model/types.ts';
 import type { DictationInput, TranscriptSegment } from '../core/dictation.ts';
 import { KEY_CONTENT_THRESHOLD } from './placement.ts';
 
-/* ============================== 底座与厂商 ============================== */
-
-/**
- * 错误、音频规格、传输、以及**厂商协议实现**都在下面两个模块里。这里**原样 re-export**：
- *
- * - `capture-transport.ts`：错误码 / `CaptureError` / `CAPTURE_AUDIO` / 传输形状与默认实现；
- * - `asr-adapters.ts`：三家协议（`intranet-task` / `baidu-rest` / `aliyun-nls`）、厂商声明表、公有云守卫。
- *
- * 为什么要拆（以及为什么 re-export 而不是让调用方改导入路径）见那两个文件头。
- * 一句话：厂商实现要用错误类型与音频规格常量，而 `CaptureError` 是**类**——
- * 留在本文件里就成了真正的循环依赖，不是"类型能被擦掉"那种假循环。
- */
 import {
   CAPTURE_AUDIO,
   CaptureError,
@@ -179,52 +130,44 @@ export function parseCaptureWav(bytes: Uint8Array): {
   };
 }
 
-/* ============================== 配置 ============================== */
-
 export interface AsrConfig {
-  /**
-   * 厂商 / 协议（见 `asr-adapters.ts` 的 `ASR_VENDORS`）。
-   *
-   * **默认值是院内服务**，这一条是刻意的：默认值决定"忘了配"会怎样，
-   * 而"忘了配"绝不能等于"音频发去公网"。
-   */
   kind: AsrKind;
-  /** ASR 服务地址；**空 = 未配置** → 采集入口不可用（fail-closed） */
+  /** ASR 服务地址；空 = 未配置 → 采集入口不可用（fail-closed）  */
   endpoint: string;
   /**
-   * 阿里云的 AppKey。它**不是密钥**（是"门牌号"），所以落在配置行里而不是密钥槽 ——
+   * 阿里云的 AppKey。它不是密钥（是"门牌号"），所以落在配置行里而不是密钥槽 ——
    * 混进密钥槽会让界面显示"密钥已就位"而实际一包也发不出去。
-   */
+    */
   appKey: string;
-  /** 上传超时（内网 15s 够；**外网/公有云必须上调** —— 百度那一次往返要 2~3s，公网抖动更要余量） */
+  /** 上传超时（内网 15s 够；外网/公有云必须上调 —— 百度那一次往返要 2~3s，公网抖动更要余量）  */
   submitTimeoutMs: number;
   /**
-   * 轮询间隔。**只对院内那台有意义**（`intranet-task` 是"提交 + 轮询"），
+   * 轮询间隔。只对院内那台有意义（`intranet-task` 是"提交 + 轮询"），
    * 两家公有云都是一次性请求 —— 这个值在它们身上不参与任何事，但界面上仍然要显示，
    * 因为"换回院内服务"时它就是主参数（藏起来会让人以为它消失了）。
-   */
+    */
   pollIntervalMs: number;
-  /** 单段总预算：**院内那台接口没有失败态，只能靠它收口**；公有云拿它当兜底 —— 哪一家都不允许"无限等" */
+  /** 单段总预算：院内那台接口没有失败态，只能靠它收口；公有云拿它当兜底 —— 哪一家都不允许"无限等"  */
   pollTimeoutMs: number;
-  /** 部署方声明的模型标识（三家都不返回模型信息），**必须带版本/日期** */
+  /** 部署方声明的模型标识（三家都不返回模型信息），必须带版本/日期  */
   modelId: string;
   /**
    * 显式确认"这份音频会发往院外"。
    *
-   * 只有公有云 `kind` 需要它，且**必须为 true 才允许采集**（{@link assertPublicCloudAcknowledged}）。
+   * 只有公有云 `kind` 需要它，且必须为 true 才允许采集（{@link assertPublicCloudAcknowledged}）。
    * 它不能被"一个更聪明的默认值"替代：语音里必然含患者信息，
-   * 把音频发到院外公网这件事**只能由人显式的一次动作**来承担。
-   */
+   * 把音频发到院外公网这件事只能由人显式的一次动作来承担。
+    */
   acknowledgePublicCloud: boolean;
-  /* 这里曾有 `apiKeyEnv`（token 所在的**变量名**）。本轮取消：
+  /* 这里曾有 `apiKeyEnv`（token 所在的变量名）。本轮取消：
      需要存储的东西一律入库 —— 密钥值单独一行加密落在 `config.capture.apiKey`，
      由 `capture-store.ts` 解出来直接交给 `createAsrClient` 的 `apiKey`，
-     本结构里因此**没有**任何与凭据**值**有关的字段（它会被写进配置行、会被打印）。
-     `appKey` 能落在配置行里，正是因为它是门牌号而不是凭证。 */
+     本结构里因此没有任何与凭据值有关的字段（它会被写进配置行、会被打印）。
+     `appKey` 能落在配置行里，正是因为它是门牌号而不是凭证。  */
 }
 
 export interface SegmentConfig {
-  /** 静音判停：一句话说完就发。**主路径** */
+  /** 静音判停：一句话说完就发。主路径  */
   silenceMs: number;
   /** 最长时长：长时间不静音（环境噪声、连续口述）不能把一段无限拖大 */
   maxSeconds: number;
@@ -235,15 +178,14 @@ export interface SegmentConfig {
 export interface CaptureConfig {
   asr: AsrConfig;
   segment: SegmentConfig;
-  /** 是否留存音频；**默认 false**（录音必然含患者信息，进 PHI 扫描范围是另一整套工作） */
+  /** 是否留存音频；默认 false（录音必然含患者信息，进 PHI 扫描范围是另一整套工作）  */
   retainAudio: boolean;
-  /** 未提供置信度时的填充值；**必须 < 关键内容阈值 0.90** */
+  /** 未提供置信度时的填充值；必须 < 关键内容阈值 0.90  */
   confidenceCeiling: number;
 }
 
 export const DEFAULT_CAPTURE_CONFIG: CaptureConfig = {
   asr: {
-    /* 默认院内服务：见 `AsrConfig.kind` 那段 —— 默认值决定"忘了配"会怎样 */
     kind: 'intranet-task',
     endpoint: '',
     appKey: '',
@@ -274,12 +216,12 @@ function requirePositive(name: string, value: unknown, fallback: number, integer
 }
 
 /**
- * 配置的**补丁形状**：允许逐组给部分字段（界面按组保存、环境变量只给一两项），
- * 未给出的项才取默认 —— **给出了但不合法的一律报错**，不做"帮你改成默认值"。
+ * 配置的补丁形状：允许逐组给部分字段（界面按组保存、环境变量只给一两项），
+ * 未给出的项才取默认 —— 给出了但不合法的一律报错，不做"帮你改成默认值"。
  *
- * 刻意不叫 `CaptureConfigInput`：那是**存储层**（`capture-store.ts`）用的、给界面提交的
- * **扁平**形状。两个不同形状的同名类型放在两个模块里，是排查时最费时间的坑之一。
- */
+ * 刻意不叫 `CaptureConfigInput`：那是存储层（`capture-store.ts`）用的、给界面提交的
+ * 扁平形状。两个不同形状的同名类型放在两个模块里，是排查时最费时间的坑之一。
+  */
 export interface CaptureConfigPatch {
   asr?: Partial<AsrConfig>;
   segment?: Partial<SegmentConfig>;
@@ -288,19 +230,19 @@ export interface CaptureConfigPatch {
 }
 
 /**
- * 校验配置。**非法值一律报错，不静默取默认** ——
+ * 校验配置。非法值一律报错，不静默取默认 ——
  * "帮你改成默认值"会让运维以为自己配的东西生效了（同 `placement.ts` / `ai/model-config.ts` 同一个病根）。
  *
- * `endpoint` / `modelId` 允许为空：那是**尚未配置**这一合法状态（界面据此显示"未配置语音识别服务"，
+ * `endpoint` / `modelId` 允许为空：那是尚未配置这一合法状态（界面据此显示"未配置语音识别服务"，
  * 并由 {@link createAsrClient} 在真要转写时 fail-closed）。
- */
+  */
 export function validateCaptureConfig(input: CaptureConfigPatch = {}): CaptureConfig {
   const asrInput = input.asr ?? {};
   const segmentInput = input.segment ?? {};
 
-  /* `kind` 从**外部输入**来（库里的那一行、旧配置文件导入、HTTP body），
+  /* `kind` 从外部输入来（库里的那一行、旧配置文件导入、HTTP body），
      所以即使类型上写着 `AsrKind` 也要在运行时核一遍 —— 库里存着上一版没有的名字时，
-     静默取默认会让"我配的那家"悄悄变成院内服务（方向反了：那是**音频发去哪**的变更）。 */
+     静默取默认会让"我配的那家"悄悄变成院内服务（方向反了：那是音频发去哪的变更）。  */
   const kindRaw: unknown = (asrInput as { kind?: unknown }).kind;
   if (kindRaw !== undefined && !isAsrKind(kindRaw)) {
     throw new CaptureError(
@@ -321,8 +263,8 @@ export function validateCaptureConfig(input: CaptureConfigPatch = {}): CaptureCo
     throw new CaptureError('E_CAPTURE_CONFIG_INVALID', `asr.acknowledgePublicCloud 必须是布尔值，实际 ${typeof ackRaw}`);
   }
   const acknowledgePublicCloud = ackRaw === true;
-  /* 公有云守卫在**校验层**也拦一次（不只在转写时拦）：保存时就拒绝，
-     才不会出现"库里存着一条配了公有云却没确认的配置"，让人以为它配好了。 */
+  /* 公有云守卫在校验层也拦一次（不只在转写时拦）：保存时就拒绝，
+     才不会出现"库里存着一条配了公有云却没确认的配置"，让人以为它配好了。  */
   assertPublicCloudAcknowledged(vendorOf(kind), acknowledgePublicCloud);
 
   const endpointRaw = asrInput.endpoint ?? '';
@@ -420,19 +362,18 @@ export function validateCaptureConfig(input: CaptureConfigPatch = {}): CaptureCo
 export type SegmentEndReason = 'silence' | 'maxSeconds' | 'pause' | 'manual-stop';
 
 export interface ChunkPlan {
-  /** 段号，从 1 起、与时间同序（**这里不做重排**：重排是 `normalizeSegments` 的职责，两处都排会让"乱序段数如实上报"这个数失去意义） */
+  /** 段号，从 1 起、与时间同序（这里不做重排：重排是 `normalizeSegments` 的职责，两处都排会让"乱序段数如实上报"这个数失去意义）  */
   index: number;
   startSec: number;
   endSec: number;
   seconds: number;
-  /** 为何在此定稿 —— 界面与排障要能回答"为什么切在这" */
   reason: SegmentEndReason;
 }
 
 /**
- * 采集事件流。三件事都由**采集端**给出，而不是在事后补：
+ * 采集事件流。三件事都由采集端给出，而不是在事后补：
  * 帧（含人声判定）、暂停、停止。
- */
+  */
 export type CaptureInput =
   | {
       kind: 'frame';
@@ -440,38 +381,19 @@ export type CaptureInput =
       endSec: number;
       voiced: boolean;
     }
-  /** 暂停：定稿当前分片。**暂停期不存在音频，故允许出现真实间隙**（S2 约束的是连续录音内的相邻分片） */
+  /** 暂停：定稿当前分片。暂停期不存在音频，故允许出现真实间隙（S2 约束的是连续录音内的相邻分片）  */
   | { kind: 'pause'; atSec: number }
-  /** 手动停止 / 录音结束：定稿当前分片（S1：时间轴**不重置**起点） */
+  /** 手动停止 / 录音结束：定稿当前分片（S1：时间轴不重置起点）  */
   | { kind: 'stop'; atSec: number };
 
 export interface PlanResult {
   chunks: ChunkPlan[];
-  /** 短于 `minSeconds` 被丢弃的片数 —— **如实上报，不静默**（否则"我说的话被吞了"无从解释） */
+  /** 短于 `minSeconds` 被丢弃的片数 —— 如实上报，不静默（否则"我说的话被吞了"无从解释）  */
   droppedShort: number;
 }
 
-/**
- * 分片器（**流式**）：`planChunks()` 与真实采集共用这一份实现。
- *
- * 为什么必须有流式入口：真实采集是"边说边切"—— 静音判停是主路径，一句话说完就该发出去，
- * 而不是录完十分钟再一次性切。批处理入口 `planChunks()` 只是它的一个用法（喂完再取结果）；
- * 若各写一套，两者迟早会在边界条件上长出两套行为，而**分片规则同时决定建议条数与时间区间**，
- * 两套行为意味着"同一段录音在演示里切得对、在真机上切得不对"。
- *
- * 四条语义（`docs/L2-语音采集设计.md` 第四节，逐条不可让步）：
- *   - **S1** 时间区间以录音开始为 0 点累计，暂停恢复不重置起点（一旦重置，"何时说的"全错，
- *     而它是留痕里**唯一不可事后补**的字段）；
- *   - **S2** 相邻分片首尾相接、不重叠不留缝（`end_i === start_{i+1}`）：有缝意味着"那段时间
- *     说的话不属于任何段"且看不出来；重叠则同一句话进两条建议，医生会以为 ASR 重复了；
- *   - **S3** 段号从 1 起、与时间同序，**这里不做重排**；
- *   - **S4** 短于 `minSeconds` 的片按误触丢弃，但**必须计数**。
- *
- * 分片边界取"定稿时刻"而不是"最后一个有人声的帧"：那样留下的静音会不属于任何一段，
- * 正好违反 S2。代价是分片窗口可能带上一点首尾静音 —— 这是刻意的取舍（第九节诚实边界）。
- */
 export interface ChunkPlanner {
-  /** 送入一个事件；返回**本次定稿**的分片（0 个或多个） */
+  /** 送入一个事件；返回本次定稿的分片（0 个或多个）  */
   feed(event: CaptureInput): ChunkPlan[];
   /** 当前是否有尚未定稿的分片（界面"正在录的这一段"用它） */
   readonly open: boolean;
@@ -564,11 +486,11 @@ export function createChunkPlanner(config: SegmentConfig): ChunkPlanner {
 const TIMELINE_EPS = 1e-9;
 
 /**
- * 一帧音频。时间由**采集源**给出（S1：暂停恢复不重置起点）。
+ * 一帧音频。时间由采集源给出（S1：暂停恢复不重置起点）。
  *
  * 定义在这一层而不是采集源那一层：它是"帧 → 段"流水线上的通行形状 ——
  * 服务端编排（`runDictationCapture`）、本地客户端桥（`capture-bridge`）、自测都用它。
- */
+  */
 export interface CaptureFrame {
   startSec: number;
   endSec: number;
@@ -594,10 +516,10 @@ export interface ChunkAssembler {
 /**
  * 把帧流拼成段（含该段的 WAV）。
  *
- * **只有这一处**：服务端的演示采集与本地客户端都用它。若各写一遍，
+ * 只有这一处：服务端的演示采集与本地客户端都用它。若各写一遍，
  * "每段上传的音频只含该段区间内的帧"这条（`AU23` 守着的）就守不住了 ——
  * 多带一帧就是把上一段的话又送了一次。
- */
+  */
 export function createChunkAssembler(config: SegmentConfig): ChunkAssembler {
   const planner = createChunkPlanner(config);
   const frames: CaptureFrame[] = [];
@@ -644,31 +566,28 @@ export function planChunks(events: CaptureInput[], config: SegmentConfig): PlanR
   return { chunks, droppedShort: planner.droppedShort };
 }
 
-/* ============================== ASR 调用（上传 + 轮询） ============================== */
-
 export interface AsrDeps {
   transport?: CaptureTransport;
-  /** 睡眠（轮询间隔）；自测注入假实现，不真的等。**云厂商用不到它**（没有轮询） */
+  /** 睡眠（轮询间隔）；自测注入假实现，不真的等。云厂商用不到它（没有轮询）  */
   sleep?: (ms: number) => Promise<void>;
   /** 时钟；自测注入假时钟，好让"超时"与"token 到期"都可复现 */
   now?: () => number;
   /**
-   * 主凭据**直接给出**（由调用方从库里的 `config.capture.apiKey` 解出来）：
+   * 主凭据直接给出（由调用方从库里的 `config.capture.apiKey` 解出来）：
    * 院内服务的 Bearer token / 百度 AK / 阿里云 NLS token。
    * 它不落在 `AsrConfig` 里，也不进日志：只在协议实现里用一次。
-   */
+    */
   apiKey?: string;
-  /** 次凭据（只有百度用得着：Secret Key）。落库位置与主凭据分开，理由见 `capture-store.ts` */
   apiSecret?: string;
 }
 
 export interface AsrClient {
   /**
-   * 提交一段音频并等出文本；空串是**合法**结果（这段没听到内容）。
+   * 提交一段音频并等出文本；空串是合法结果（这段没听到内容）。
    *
-   * 入参只要"段号 + 音频 + 会话"，**不要整个 `ChunkPlan`**：服务端转发（C2）只需要段号来命名文件，
+   * 入参只要"段号 + 音频 + 会话"，不要整个 `ChunkPlan`：服务端转发（C2）只需要段号来命名文件，
    * 时间区间是采集端的事，服务端手里根本没有它 —— 要它就得编一个出来，那是在伪造证据。
-   */
+    */
   transcribe(request: { index: number; audio: Uint8Array; sessionId: string }): Promise<{ text: string; taskId: string }>;
 }
 
@@ -676,16 +595,6 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => set
 
 /** `parseJsonObject` 也已下沉到 `capture-transport.ts`（三家协议都要用它解析响应） */
 
-/**
- * 生成 ASR 客户端：**fail-closed、超时收口、重试纪律只在这一处**，厂商差异全部交给
- * `asr-adapters.ts` 的协议实现。
- *
- * 这个接口上最需要点出来的一件事（对院内那台成立）：**状态集合只有 `pending / processing / done`，
- * 没有失败态。** 于是"识别失败"和"服务没处理完"长得一模一样（都是一直 `processing`），
- * 所以 `pollTimeoutMs` 不是"给一个准确的超时"，而是**给一个终止条件** ——
- * 没有它，一次服务端卡死会让界面永远停在"转写中"，而医生会一直等一个永远不会来的结果。
- * 云厂商是一次性请求（没有轮询），但同一份预算照样兜底：**哪一家都不允许"无限等"**。
- */
 export function createAsrClient(config: AsrConfig, deps: AsrDeps = {}): AsrClient {
   const transport = deps.transport ?? defaultTransport;
   const sleep = deps.sleep ?? defaultSleep;
@@ -713,9 +622,9 @@ export function createAsrClient(config: AsrConfig, deps: AsrDeps = {}): AsrClien
           '未配置语音识别服务（asr.endpoint / asr.modelId 至少一项为空）：采集入口不可用，且不会退回"模拟一段录音转写"',
         );
       }
-      /* 顺序要紧：**先判"能不能发"，再判"允不允许发"，最后判"发得出去吗"** ——
+      /* 顺序要紧：先判"能不能发"，再判"允不允许发"，最后判"发得出去吗" ——
          三件事的处置完全不同（去填地址 / 去勾确认 / 去补凭据）。若顺序反过来，
-         "还没填地址"会被报成"没确认公有云"，把人引到一个已经填好的格子上。 */
+         "还没填地址"会被报成"没确认公有云"，把人引到一个已经填好的格子上。  */
       assertPublicCloudAcknowledged(spec, config.acknowledgePublicCloud);
       const missing = missingCredentials(spec, credentials, config.appKey);
       if (missing.length > 0) {
@@ -744,9 +653,6 @@ export function createAsrClient(config: AsrConfig, deps: AsrDeps = {}): AsrClien
   };
 }
 
-
-/* ============================== 组装 ============================== */
-
 export interface CaptureChunk {
   index: number;
   startSec: number;
@@ -764,11 +670,11 @@ export interface CaptureFailure {
 }
 
 export interface CaptureResult {
-  /** 采集会话 ID —— 一次"说一段" = 一个会话；**不是 `task_id`**（一次会话有 N 个任务） */
+  /** 采集会话 ID —— 一次"说一段" = 一个会话；不是 `task_id`（一次会话有 N 个任务）  */
   sessionId: string;
   asrModelId: string;
   chunks: CaptureChunk[];
-  /** 失败的分片**如实回报**，绝不当成"什么都没说" */
+  /** 失败的分片如实回报，绝不当成"什么都没说"  */
   failures: CaptureFailure[];
   /** `result` 为空串而被丢弃的段数（合法结果，但要如实回报） */
   emptyDropped: number;
@@ -799,17 +705,6 @@ export interface CaptureSessionRequest {
   onChunk?: (outcome: ChunkOutcome) => void;
 }
 
-/**
- * 走完一次采集：分片 → 逐段转写 → 组装。
- *
- * 逐段**串行**提交（并发留给 C2 的服务端决定）：串行让失败归属与时间区间都只有一种解释，
- * 而"多段并行"在这里换来的那点延迟收益，远不及一次难复现的错位代价。
- *
- * 两条纪律：
- *   - **某段失败不阻塞其余段**，但失败段数必须如实回报；
- *   - **音频清理走 finally**：成功、失败、以及非预期的程序错误三条路径都删得掉 ——
- *     "不留存"如果只在成功路径成立，那就不是"不留存"。
- */
 export async function captureSession(
   request: CaptureSessionRequest,
   config: CaptureConfig,
@@ -886,14 +781,14 @@ export async function captureSession(
 }
 
 /**
- * 采集结果 → `dictate` 的入参。**中间不加新结构**，两处"人为决定"都已论证过：
+ * 采集结果 → `dictate` 的入参。中间不加新结构，两处"人为决定"都已论证过：
  *   - `transcriptionId = sessionId` → `evidence.ref` 形如 `session#3@9.1-12.4s`，
  *     可回到音频（若留存）或至少定位到"第几段第几秒"（不留存时）；
  *   - `confidence = confidenceCeiling`（未知）→ 恒 < 0.90，关键内容上照样必须"改后采纳"。
  *
- * 失败段**不进入** `segments`：`dictate` 不认识"失败"这个概念，硬塞一条空文本只会
+ * 失败段不进入 `segments`：`dictate` 不认识"失败"这个概念，硬塞一条空文本只会
  * 变成"这条建议本来就是空的"。失败由调用方在外部处置（界面提示 + 审计）。
- */
+  */
 export function toDictationInput(result: CaptureResult, at: ISODateTime, options: { confidenceCeiling: number }): DictationInput {
   return {
     transcriptionId: result.sessionId,
@@ -909,12 +804,10 @@ export function toDictationInput(result: CaptureResult, at: ISODateTime, options
   };
 }
 
-/* ============================== 提交（采集端 → 服务端） ============================== */
-
 /**
- * 采集端提交上来的一个转写段。**形状即 `CaptureChunk`，但它是外部输入** ——
+ * 采集端提交上来的一个转写段。形状即 `CaptureChunk`，但它是外部输入 ——
  * 服务端只校验，不代编：段号与时间区间是采集端的产物，补一个出来就是伪造证据。
- */
+  */
 export interface SubmittedSegment {
   index: number;
   text: string;
@@ -922,21 +815,6 @@ export interface SubmittedSegment {
   endSec: number;
 }
 
-/**
- * 校验采集端提交的转写段，并**统一填上置信度上限**。
- *
- * 逐条理由：
- *   - **不接受 `confidence`**：置信度是产出方的判断，让它由请求指定，等于把"这条内容有多可信"
- *     交给不产出内容的一方 —— 那正是既有纪律（"门控档位不由调用方决定"）要挡住的那类口子。
- *     而且这份 ASR **根本不回置信度**，所以"未知 → 按上限处理"是唯一自洽的填法。
- *     **出现该字段一律报错，而不是忽略**：静默忽略会让调用方以为它生效了。
- *   - **段号唯一**：同一个段号出现两次 = 一次录音被拆成两条，时间区间还重叠 ——
- *     医生会以为 ASR 重复了某句，而留痕里的 `#3` 指向哪一条也说不清。
- *   - **区间必须正长度**：`endSec > startSec`。零长度的时间区间是一条无法核对的证据。
- *   - **不要求段号与时间同序**：乱序由 `normalizeSegments` 统一处理并**如实回报**（S3）。
- *     在这里顺手排序，会让"乱序段数"这个数失去意义。
- *   - **空文本段允许**：空串是合法结果（这段没听到内容），由内核丢弃并计入上报。
- */
 export function validateSubmittedSegments(raw: unknown, options: { confidenceCeiling: number }): TranscriptSegment[] {
   if (!Array.isArray(raw)) {
     throw new CaptureError('E_CAPTURE_BAD_SEGMENTS', `转写段必须是数组，实际 ${typeof raw}`);

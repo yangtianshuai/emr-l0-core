@@ -1,28 +1,11 @@
-/**
- * 工作数据仓储：患者 / 就诊 / 文书（含留痕）/ 旁挂数据 / 小体量数据集。
- *
- * ## 这一层存在的意义
- *
- * 它是**唯一**写 SQL 的地方（除了 `sqlite.ts` 的元数据表）。上层只面对"存一份文书"
- * "读一次就诊的全部文书"这样的说法，不必知道表名、列名与 JSON 之间的映射 ——
- * 于是换成 PostgreSQL 时，改的是这一层与 `schema.ts`，而不是散落各处的调用点。
- *
- * ## 三条约束
- *
- * 1) **一份文书 + 它的留痕在一个事务里写**。分开写会出现"文书写进去了、新的那条留痕没有"
- *    这种谁也没设计过的状态，而它会以"审计少了一条"的形式安静地活着。
- * 2) **读不出来就是读不出来**：解密失败、摘要不符一律返回错误码，绝不返回"空文书" ——
- *    把"解不开"当成"没有"，是最容易把数据丢失伪装成正常的方式。
- * 3) **结构先于内容**：正文行必须先有对应的文书元数据（外键会拒）。这不是限制，
- *    而是把"孤儿正文"这类问题挡在写入那一刻。
- */
+// 工作数据仓储：患者 / 就诊 / 文书（含留痕）/ 旁挂数据 / 小体量数据集。
 
 import type { DocumentModel } from '../model/types.ts';
 import { inTransaction, countOf, type OpenDatabaseResult, type SqliteDatabase } from './sqlite.ts';
 import { sealFor, sealValue, unsealValue, type SealedContent, type SealOptions } from './sealed.ts';
 import { DOCUMENT_FORMAT, SIDECARS_FORMAT, KV_FORMAT } from './formats.ts';
 
-/** 一份文书在库里的**可查询**元数据（不含内容） */
+/** 一份文书在库里的可查询元数据（不含内容）  */
 export interface DocumentMeta {
   docId: string;
   patientId: string;
@@ -67,9 +50,9 @@ export interface WorkspaceStructure {
 
 /**
  * 落盘冲突：盘上那一版不是我认的那一版。
- * 与文件时代的 `SnapshotConflictError` **同一个错误码**（`E_CONCURRENT_MODIFICATION`）——
+ * 与文件时代的 `SnapshotConflictError` 同一个错误码（`E_CONCURRENT_MODIFICATION`）——
  * 上层的处置没变（重新载入 / 拒绝覆盖），变的只是拦点从"文件比较"挪到了"数据库条件写入"。
- */
+  */
 export class StorageConflictError extends Error {
   readonly code = 'E_CONCURRENT_MODIFICATION';
 
@@ -77,9 +60,9 @@ export class StorageConflictError extends Error {
 
   readonly expected: string | null;
 
-  /* ⚠️ 不用**构造函数参数属性**（`constructor(readonly docId: string)`）：
+  /*  不用构造函数参数属性（`constructor(readonly docId: string)`）：
      本仓库的 .ts 是按 Node 的 strip-only 模式直接运行的，那种写法会在运行时报
-     `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`（实测踩到：服务无法启动，而 tsc 全绿）。 */
+     `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`（实测踩到：服务无法启动，而 tsc 全绿）。  */
   constructor(docId: string, expected: string | null, reason: string) {
     super(`旁挂数据落盘冲突（${docId}）：${reason}。本次未写入 —— 请重新载入后再改。`);
     this.name = 'StorageConflictError';
@@ -113,7 +96,6 @@ export class WorkStore {
 
   private readonly options: WorkStoreOptions;
 
-  /* 同上：显式字段赋值，不用参数属性（本仓库按 strip-only 运行 .ts） */
   constructor(db: SqliteDatabase, passphrase: string, options: WorkStoreOptions = {}) {
     if (!passphrase) throw new Error('工作数据仓储必须有口令：不做"没口令就存明文"的兜底（同 core/store.ts）');
     this.db = db;
@@ -135,14 +117,14 @@ export class WorkStore {
   /* ------------------------------ 结构（患者/就诊/文书元数据） ------------------------------ */
 
   /**
-   * 全量写结构。**幂等**：同一份结构写两遍结果一致（让"启动时对齐一次"这类调用不必判断差异）。
+   * 全量写结构。幂等：同一份结构写两遍结果一致（让"启动时对齐一次"这类调用不必判断差异）。
    * 只增不删 —— 删除走显式动作（`clearWorkData`），不在这里顺手做，
    * 否则一次"少传了一个患者"的调用就会静默删掉他的全部就诊。
-   */
+    */
   saveStructure(structure: WorkspaceStructure): void {
-    /* 形状守卫：调用方传错形状（例如把 patients **数组**直接传进来）在这里就该报出来。
+    /* 形状守卫：调用方传错形状（例如把 patients 数组直接传进来）在这里就该报出来。
        实测踩到：`saveStructure(workspace.patients as unknown as WorkspaceStructure)` 一路编译通过，
-       运行到 forEach 才崩 —— 强制转换把类型检查骗过去了，而错误留到了最深的地方。 */
+       运行到 forEach 才崩 —— 强制转换把类型检查骗过去了，而错误留到了最深的地方。  */
     if (!structure || !Array.isArray(structure.patients)) {
       throw new Error('saveStructure 需要 { patients: [...] } 形状：调用方传进来的不是这个形状（见本处注释）');
     }
@@ -170,7 +152,7 @@ export class WorkStore {
 
       /* 占位正文：结构先行时还没有内容。用一段"空文书"的密封载荷占位，
          随后 `saveDocument` 会用真正的正文覆盖它 —— 于是"结构先于内容"这条约束
-         不靠"调用顺序正确"来保证，而是**根本不允许出现没有正文的行**。 */
+         不靠"调用顺序正确"来保证，而是根本不允许出现没有正文的行。  */
       const placeholder = sealFor(DOCUMENT_FORMAT, null, this.passphrase, this.sealOptions());
 
       structure.patients.forEach((patient, patientIndex) => {
@@ -254,14 +236,12 @@ export class WorkStore {
     };
   }
 
-  /* --------------------------------- 文书正文 --------------------------------- */
-
   /**
-   * 写一份文书（正文 + 留痕，**同一个事务**）。
+   * 写一份文书（正文 + 留痕，同一个事务）。
    *
-   * `meta` 只在**新建**时有意义（文书类型标题/分类/顺序）—— 已在库里的行不因为这次写而改这些，
+   * `meta` 只在新建时有意义（文书类型标题/分类/顺序）—— 已在库里的行不因为这次写而改这些，
    * 免得一次正文保存顺手把标题改空。
-   */
+    */
   saveDocument(doc: DocumentModel, meta: { title?: string; kind?: string; sort?: number } = {}): void {
     const sealed = sealFor(DOCUMENT_FORMAT, doc, this.passphrase, this.sealOptions());
     inTransaction(this.db, () => {
@@ -304,9 +284,9 @@ export class WorkStore {
           this.now(),
         );
 
-      /* 留痕：**替换**而不是追加。撤销会让 rev 变化，逐条追加会留下"已经不存在的那条"；
+      /* 留痕：替换而不是追加。撤销会让 rev 变化，逐条追加会留下"已经不存在的那条"；
          整批重建的代价是可忽略的（一份文书的留痕是几十到几千条），换来的是"库里的留痕
-         与文书里的留痕永远一致"。 */
+         与文书里的留痕永远一致"。  */
       this.db.prepare('delete from document_revisions where doc_id = ?').run(doc.docId);
       const stmt = this.db.prepare(
         'insert into document_revisions (doc_id, rev, at, actor_id, op, target_id) values (?, ?, ?, ?, ?, ?)',
@@ -317,17 +297,6 @@ export class WorkStore {
     });
   }
 
-  /**
-   * 真删一份文书（正文 + 留痕 + 旁挂数据），返回是否删到了那一行。
-   *
-   * 为什么不靠"传一份少了它的结构给 `saveStructure`"：那个口子明确**只增不删**
-   * （见 `saveStructure` 的注释），删除必须是一个显式的决定 —— 否则一次漏传就会
-   * 静默带走一份病历。这里也只删指定这一份，同一患者的其它文书一个字不动。
-   *
-   * **状态判定不在这里**："只有草稿能删"是业务流程（见 `demo-server` 的
-   * `/api/delete-document`）。仓储层若自己判，第二个调用方就绕过去了。
-   * 阅读授权表没有外键（它绑定的是内容指纹，不是这一行），由调用方一并清理。
-   */
   deleteDocument(docId: string): boolean {
     return inTransaction(this.db, () => {
       /* 顺序与 `clearWorkData()` 一致：先子表、后主表。外键已开（cascade），
@@ -359,8 +328,8 @@ export class WorkStore {
   private decodeDocument(row: SealedRow): { ok: true; found: true; doc: DocumentModel } | { ok: false; code: string; message: string } {
     const unsealed = unsealValue<DocumentModel | null>(this.toSealed(row), this.passphrase);
     if (!unsealed.ok) return { ok: false, code: unsealed.code, message: unsealed.message };
-    /* 占位行（只有结构、还没有正文）：**如实报"没有"**，而不是返回一个空文书 ——
-       空文书会被上层当成"一份没有内容的病历"照常打开。 */
+    /* 占位行（只有结构、还没有正文）：如实报"没有"，而不是返回一个空文书 ——
+       空文书会被上层当成"一份没有内容的病历"照常打开。  */
     if (unsealed.data === null) return { ok: false, code: 'E_STORAGE_DOC_EMPTY', message: `文书 ${String((row as unknown as { doc_id?: string }).doc_id)} 只有结构没有正文` };
     return { ok: true, found: true, doc: unsealed.data };
   }
@@ -392,20 +361,6 @@ export class WorkStore {
     }));
   }
 
-  /* --------------------------------- 旁挂数据 --------------------------------- */
-
-  /**
-   * 写旁挂数据。
-   *
-   * `expectDigest` 是**落盘前置条件**（与文件时代的 CAS 同一用意，但这里是真的原子）：
-   *   - 省略：无条件写；
-   *   - `null`：要求**此前没有**这份旁挂数据（首次落盘，只允许一个赢家）；
-   *   - 一个摘要：要求盘上**正好是这一版**。
-   * 不满足 → 抛 `StorageConflictError`，一个字节都不写。
-   *
-   * 为什么搬到数据库之后反而更强：文件时代是"读摘要 → 比较 → 写"，中间有窗口；
-   * 这里是**一条带条件的写入语句**，比较与写在同一个语句里完成 —— 真正的原子 ✓。
-   */
   saveSidecars<T>(docId: string, value: T, options: { expectDigest?: string | null } = {}): { digest: string } {
     const sealed = sealFor(SIDECARS_FORMAT, value, this.passphrase, this.sealOptions());
     const now = this.now();
@@ -450,8 +405,6 @@ export class WorkStore {
     return { ok: true, found: true, data: unsealed.data, digest: row.payload_digest };
   }
 
-  /* --------------------------- 小体量整体式数据集 --------------------------- */
-
   putSealed<T>(key: string, value: T): void {
     const sealed = sealFor(KV_FORMAT, value, this.passphrase, this.sealOptions());
     this.db
@@ -473,13 +426,13 @@ export class WorkStore {
   }
 
   /**
-   * 只问"库里有没有这一行"，**不解内容**。
+   * 只问"库里有没有这一行"，不解内容。
    *
-   * 与 `getSealed` 的差别是实质性的：**一次性导入必须靠它**。
+   * 与 `getSealed` 的差别是实质性的：一次性导入必须靠它。
    * 若拿 `getSealed` 判"有没有"，一行解不开的旧数据（口令换过 / 被人改过）
-   * 会被当成"没有"，于是旧文件"顺手"把它覆盖掉 —— 那等于**用一份文件覆盖掉唯一的一份数据**，
+   * 会被当成"没有"，于是旧文件"顺手"把它覆盖掉 —— 那等于用一份文件覆盖掉唯一的一份数据，
    * 而现场只会看到"配置变了"。宁可挡住不导，也不能悄悄覆盖。
-   */
+    */
   hasSealed(key: string): boolean {
     return countOf(this.db, 'select count(*) as n from sealed_kv where key = ?', key) > 0;
   }
@@ -489,12 +442,10 @@ export class WorkStore {
     return Number(this.db.prepare('delete from sealed_kv where key = ?').run(key).changes) > 0;
   }
 
-  /* ---------------------------------- 维护 ---------------------------------- */
-
   /**
-   * 清空**工作数据**（不碰患者主索引之外的任何东西；`schema_migrations` 与账本保留）。
+   * 清空工作数据（不碰患者主索引之外的任何东西；`schema_migrations` 与账本保留）。
    * 「重置工作区」用它 —— 重置必须真的把库清掉，否则下一次读回来就是"重置是假的"。
-   */
+    */
   clearWorkData(): void {
     inTransaction(this.db, () => {
       /* 顺序按外键依赖：留痕 → 旁挂 → 文书 → 就诊 → 患者 */
@@ -503,11 +454,11 @@ export class WorkStore {
       this.db.exec('delete from documents');
       this.db.exec('delete from visits');
       this.db.exec('delete from patients');
-      /* 授权登记也算**工作数据**：它绑定的是某一份文档的**内容指纹**，
+      /* 授权登记也算工作数据：它绑定的是某一份文档的内容指纹，
          重置之后文档被重建，旧授权只会得到 `E_DOCUMENT_CHANGED` ——
          留着它们不是"保留配置"，而是留一堆必然失败的凭据（同 `demo-server` 里重置那一段的说明）。
          注意它与 `admin_users` / `admin_audit` / `knowledge_packs` / `recipient_keys` 的区别：
-         那几张是"这台机器怎么配、谁在用它"，重置工作区不该动。 */
+         那几张是"这台机器怎么配、谁在用它"，重置工作区不该动。  */
       this.db.exec('delete from reading_grants');
     });
   }

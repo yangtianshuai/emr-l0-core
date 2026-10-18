@@ -1,22 +1,4 @@
-/**
- * 远程签名后端（`backend: 'http'`）：把"待签数据"交给医院的签名服务，拿回签名值。
- *
- * ## 为什么 transport 可注入
- *
- * 与 `src/ai/http-adapter.ts` 同一条理由：自测用一台**假签名服务**（返回固定响应的函数），
- * 于是"请求怎么拼、响应怎么取、错误怎么处理"这三件最容易出错的事**可以离线被测**。
- * 让自测去连真服务，等于让自测偶尔失败，而那种失败最终会被所有人忽略。
- *
- * ## 错误信息里为什么**不带响应体**
- *
- * 签名服务的错误响应经常回显请求内容。虽然本流程发给它的是 SignedInfo（只有文件名与摘要），
- * 但把它抄进日志仍然是把"病历文件名 + 摘要"又存了一份。所以只报状态码。
- *
- * ## fail-closed
- *
- * 超时 / 非 2xx / JSON 非法 / 缺签名值 → **一律抛错**。绝不"没拿到就当作签好了"，
- * 也绝不回退软件签名 —— 那会让"已接入签名服务"变成一句假话。
- */
+// 远程签名后端（`backend: 'http'`）：把"待签数据"交给医院的签名服务，拿回签名值。
 
 import { publicKeyFingerprint, publicKeyFromSpki, type Sm2Point } from '../crypto/sm2.ts';
 import { fromHex, sm3Hex, toHex, utf8 } from '../crypto/sm3.ts';
@@ -33,7 +15,7 @@ export interface SignTransportRequest {
 
 export interface SignTransportResponse {
   status: number;
-  /** 响应体文本；**只在内存里用于解析**，不写日志、不进留痕、不放进错误信息 */
+  /** 响应体文本；只在内存里用于解析，不写日志、不进留痕、不放进错误信息  */
   body: string;
 }
 
@@ -62,7 +44,7 @@ export class RemoteSignError extends Error {
   }
 }
 
-/** 测试签名用的固定文本：**与病历无关**，纯粹验证"服务能签、我们能验" */
+/** 测试签名用的固定文本：与病历无关，纯粹验证"服务能签、我们能验"  */
 export const TEST_SIGN_MESSAGE = 'l0-sign-backend-probe/v1';
 
 const defaultTransport: SignTransport = async (request) => {
@@ -94,12 +76,6 @@ export function readJsonPath(root: unknown, path: string): unknown {
   return cursor;
 }
 
-/**
- * 按路径写入请求体：`data.content` → `{ data: { content: … } }`。
- *
- * 为什么必须支持点路径：真实签名服务的请求体几乎都是**嵌套**的，
- * 把字段名当扁平键发过去，对方只会回一句"参数缺失"，而排查方向会先怀疑编码、算法，绕一大圈。
- */
 export function writeJsonPath(target: Record<string, unknown>, path: string, value: unknown): void {
   const tokens = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter((token) => token !== '');
   if (tokens.length === 0) throw new RemoteSignError('E_SIGN_BAD_ENCODING', '请求字段路径为空');
@@ -154,7 +130,7 @@ function extractJson(text: string): unknown {
 
 export interface RemoteSignResult {
   signature: Uint8Array;
-  /** 服务返回的公钥（SPKI base64），**没有则为 undefined**（此时用配置里预置的那把） */
+  /** 服务返回的公钥（SPKI base64），没有则为 undefined（此时用配置里预置的那把）  */
   publicKeyBase64?: string;
   certificates?: string[];
   algorithm: string;
@@ -172,8 +148,8 @@ export function createHttpSigner(
   options: { transport?: SignTransport; fetchImpl?: typeof fetch; apiKey?: string } = {},
 ): HttpSigner {
   const transport = options.transport ?? (options.fetchImpl ? undefined : defaultTransport);
-  /* 密钥**只从参数来**（由调用方从库里解出后递进来），不存进配置对象，也不进日志。
-     不再从环境变量取：环境变量会顺着 docker inspect / 崩溃转储 / 子进程漏出去，且备份数据库带不走它。 */
+  /* 密钥只从参数来（由调用方从库里解出后递进来），不存进配置对象，也不进日志。
+     不再从环境变量取：环境变量会顺着 docker inspect / 崩溃转储 / 子进程漏出去，且备份数据库带不走它。  */
   const apiKey = options.apiKey?.trim() || undefined;
 
   return {
@@ -187,8 +163,8 @@ export function createHttpSigner(
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (config.auth && apiKey) headers[config.auth.headerName] = `${config.auth.scheme ?? ''}${apiKey}`;
 
-      /* 字段名支持**点路径**（`data.content` → 嵌套对象）：真实签名服务的请求体几乎都是嵌套的，
-         按扁平键名发过去，对方只会回一句"参数缺失"。 */
+      /* 字段名支持点路径（`data.content` → 嵌套对象）：真实签名服务的请求体几乎都是嵌套的，
+         按扁平键名发过去，对方只会回一句"参数缺失"。  */
       const payload: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(config.request.extra ?? {})) writeJsonPath(payload, key, value);
       writeJsonPath(payload, config.request.toSignField, encodeBytes(toSign, config.request.toSignEncoding));
@@ -279,20 +255,6 @@ export function createHttpSigner(
   };
 }
 
-/**
- * 由配置构造**内核可用的签名器**（`Signer`）—— 这一步才让"接了签名服务"变成真的。
- *
- * ## 三条约束（都不是可选项）
- *
- * 1) **必须预置公钥**（`publicKeyBase64`）：内核要在**拿到签名之前**构造 SignedInfo，
- *    而 SignedInfo 里含公钥指纹。没有预置公钥就没有指纹，也就无从构造 ——
- *    这不是我们的偏好，是"待签内容是什么"决定的。
- * 2) 服务若回了公钥，必须与预置公钥**指纹一致**：不一致说明"服务换了把钥匙（或连错了环境）"，
- *    此时签名值与身份对不上，必须拒绝而不是照收。
- * 3) 期望指纹若已配置，与预置公钥核对一次：配置自相矛盾要在**构造时**就报，而不是签完才发现。
- *
- * 未配置 → 抛 `E_SIGN_NOT_CONFIGURED`。**绝不回退软件签名**（那会让"已接入签名服务"变成假话）。
- */
 export function createRemoteSigner(
   config: SignBackendConfig,
   options: { transport?: SignTransport; fetchImpl?: typeof fetch; apiKey?: string } = {},
@@ -360,7 +322,7 @@ export interface TestSignReport {
   actualFingerprint: string | null;
   /** 配置里固定的期望指纹 */
   expectedFingerprint: string | null;
-  /** null = 尚未固定指纹（首次登记时允许，但**正式签章前必须固定**） */
+  /** null = 尚未固定指纹（首次登记时允许，但正式签章前必须固定）  */
   fingerprintMatches: boolean | null;
   /** 自验结论：用拿到的公钥验这条签名。null = 没有公钥，无法自验 */
   selfVerified: boolean | null;
@@ -369,13 +331,13 @@ export interface TestSignReport {
 }
 
 /**
- * 测试签名：签一段**与病历无关**的文本，并尽量做完这几件事 ——
+ * 测试签名：签一段与病历无关的文本，并尽量做完这几件事 ——
  *   - 服务能不能签（连通性与字段映射对不对）
  *   - 拿回来的公钥指纹是多少（供管理员固定下来）
- *   - **用自己的验签器验一遍**：证明"这把钥确实能验这条签名"
+ *   - 用自己的验签器验一遍：证明"这把钥确实能验这条签名"
  *
  * 最后一条最重要：只报"服务返回 200"没有任何意义 —— 那证明不了签名值可用。
- */
+  */
 export async function testSign(
   config: SignBackendConfig,
   options: { transport?: SignTransport; fetchImpl?: typeof fetch; apiKey?: string } = {},

@@ -1,20 +1,5 @@
-/**
- * 沉默的可解释性自测（S1~S12）。
- *
- * 说明：本套件**全是纯函数**，不连任何模型服务、不需要文档 —— 与"AI 模型接入自测"同一姿态：
- * 这类校验一旦要靠真服务才能跑，就会变成"偶尔失败"，而偶尔失败的用例最终会被所有人忽略。
- *
- * 三件事必须锁死：
- *
- *   1) **产出方的自述也要过校验**（S2~S5、S10）：跳过声明与 HTTP 响应体同级。
- *      采信它，等于让"沉默"可以被伪造 —— 幻觉 nodeId 可以让一个根本没处理的范围
- *      看起来"处理过并说明过"，"说没写又写了"可以让自相矛盾从眼皮底下溜过。
- *   2) **产出方没说、内核必须补记**（S6、S7）：这正是这个功能存在的理由。
- *      少了它，报告只承载"产出方愿意交代的部分"，而沉默之所以是问题，
- *      恰恰因为**没交代的那部分**才是医生会误读的。
- *   3) **"全部产出"要说得出**（S8）：沉默报告不能只在有问题时出现 ——
- *      那样"没显示"就同时意味着"没问题"与"没跑过"，又是同一种含混。
- */
+// 沉默的可解释性自测（S1~S12）。
+
 import { DEFAULT_AI_MODEL_CONFIG } from './model-config.ts';
 import { createOfflineAdapter } from './offline-adapter.ts';
 import type { AiContextAudit, AiContextDrop, AiContextItem, AiContextPackage } from '../core/ai-context.ts';
@@ -42,7 +27,6 @@ function targetItem(nodeId: string, text: string): AiContextItem {
   return { nodeId, type: 'text', text, origin: 'human', role: 'target' };
 }
 
-/** 一个最小的脱敏上下文包（真实场景由 `buildAiContext` 产出） */
 function context(items: AiContextItem[] = [], overrides: Partial<AiContextAudit> = {}): AiContextPackage {
   return {
     docId: 'doc-1',
@@ -69,11 +53,11 @@ function request(allowedNodeIds: string[], maxItems = 5): AiSuggestRequest {
 }
 
 /**
- * 请求点了名、但**上下文里看不见**的目标（真实场景：空段被跳过、超预算被裁掉、节点已删除）。
+ * 请求点了名、但上下文里看不见的目标（真实场景：空段被跳过、超预算被裁掉、节点已删除）。
  *
- * 这几种沉默与"产出方没写"不是一回事：模型**从来不知道**有过这一段，
+ * 这几种沉默与"产出方没写"不是一回事：模型从来不知道有过这一段，
  * 所以它不可能自述 —— 只有内核能说。
- */
+  */
 function requestWithDrops(input: {
   allowedNodeIds: string[];
   requestedNodeIds: string[];
@@ -100,7 +84,6 @@ function draft(nodeId: string, text = '建议内容'): AiSuggestionDraft {
 const rejectCodes = (report: ReturnType<typeof resolveSilenceReport>): string[] => report.rejected.map((item) => item.code);
 
 async function main(): Promise<void> {
-  /* ------------------------- 自述被采纳 ------------------------- */
 
   await test('S1 合法自述进入报告：来源标"产出方"，理由去空白', () => {
     const report = resolveSilenceReport({
@@ -117,8 +100,6 @@ async function main(): Promise<void> {
     assertEqual(report.skipped[0]?.source, 'adapter', '来源应标为产出方');
     assertEqual(report.rejected.length, 0, '没有需要丢弃的');
   });
-
-  /* ------------------------- 自述要过校验 ------------------------- */
 
   await test('S2 幻觉 nodeId 的自述被拒：不在本次范围里，说了也不算', () => {
     const report = resolveSilenceReport({
@@ -171,8 +152,6 @@ async function main(): Promise<void> {
     });
     assertEqual(rejectCodes(tooLong).includes('E_AI_SILENCE_BAD_REASON'), true, '超长理由应被拒');
   });
-
-  /* ------------------------- 内核补记 ------------------------- */
 
   await test('S6 产出方没说的目标由内核补记：沉默不会因为没人解释就消失', () => {
     /* 范围 3 个、产出 1 条、自述 1 条 → 剩下那 1 个没有任何说法，必须被点名 */
@@ -242,8 +221,6 @@ async function main(): Promise<void> {
     assertEqual(mixedShapes.skipped.find((item) => item.nodeId === 'n_2')?.reason, '乙', '保留第一条');
   });
 
-  /* ------------------------- 真实产出方 ------------------------- */
-
   await test('S11 离线适配器：空段跳过并说明理由，而不是产出一句模板废话', async () => {
     const adapter = createOfflineAdapter(DEFAULT_AI_MODEL_CONFIG);
     const req: AiSuggestRequest = {
@@ -283,8 +260,6 @@ async function main(): Promise<void> {
     );
     assertEqual(new Set(kernelLabels).size, kernelLabels.length, '内核各档的人话名不得重复');
   });
-
-  /* ------------------------- 上下文侧的沉默 ------------------------- */
 
   await test('S13 被上下文裁掉的目标也要报：模型自己都不知道有过这一段', () => {
     const report = resolveSilenceReport({

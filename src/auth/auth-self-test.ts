@@ -1,14 +1,4 @@
-/**
- * 身份 / 权限 / 会话 / 限流 自测（A~C 共 24 条）。
- *
- *   node src/auth/auth-self-test.ts
- *
- * 三块都是**纯逻辑**（时钟注入），所以这里不需要起 HTTP 服务：
- * "无会话写入被拒"这类端到端断言在 `test:ui` 的 B37（strict 模式）里打真实服务验证，
- * 本套件负责把判定规则本身钉死 —— 包括最容易实现错的两处：
- *   - **被拒的那次不进入窗口**（否则"一直打"会把恢复时刻越推越远，等于自我延长封禁）；
- *   - **权限表漏项 = 拒绝**（fail-closed），而不是"谁都能做"。
- */
+// 身份 / 权限 / 会话 / 限流 自测（A~C 共 24 条）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
@@ -40,7 +30,6 @@ function principal(role: Role, actorId = 'A-1', tenant = 'default'): Principal {
 }
 
 async function main(): Promise<void> {
-  /* ------------------------------ A 权限表 ------------------------------ */
 
   await test('A1 允许方向：管理员改配置、医生写病历、质控员开关规则包', () => {
     assertEqual(authorize(principal('admin'), 'config.write').ok, true, '管理员应能改能力配置');
@@ -93,13 +82,11 @@ async function main(): Promise<void> {
     assertEqual(can('clinician', 'model.test'), false, '医生不得外呼测试模型');
     assertEqual(can('qc', 'doc.sign'), false, '质控员不得签章');
     assertEqual(can('qc', 'reading.grant'), false, '质控员不得签发阅读授权（放行的是患者数据）');
-    /* 每个动作至少有一个角色能做：否则它是一条**永远拒绝**的死规则，多半是漏了授权 */
+    /* 每个动作至少有一个角色能做：否则它是一条永远拒绝的死规则，多半是漏了授权  */
     for (const action of ALL_ACTIONS) {
       assert(rolesFor(action).length >= 1, `动作 ${action} 没有任何角色可做（疑似漏授权）`);
     }
   });
-
-  /* ------------------------------ B 会话 ------------------------------ */
 
   await test('B1 签发与认领：身份字段完整带回', () => {
     const store = new SessionStore({ ttlMs: 60_000 });
@@ -236,8 +223,6 @@ async function main(): Promise<void> {
       assert(threw, `ttlMs=${String(ttl)} 应被拒绝：一个寿命无效的会话存储等于"永不过期"或"立刻失效"`);
     }
   });
-
-  /* ------------------------------ C 限流 ------------------------------ */
 
   const LOGIN_RULE: RateRule = { limit: 3, windowMs: 60_000, label: '登录尝试' };
 

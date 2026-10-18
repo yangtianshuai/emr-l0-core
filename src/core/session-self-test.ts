@@ -1,13 +1,4 @@
-/**
- * T05/T06/T07 验收自测：写路径、patch 策略与留痕。
- *
- *   node src/core/session-self-test.ts
- *
- * 三条硬约束（每次写入都会被检查）：
- *   1) applyPatch(写入前文档, revision.patch) === 写入后文档   —— 留痕必须能精确重放
- *   2) 写入后文档仍然通过 validateDocument                     —— 写路径绝不产出非法文档
- *   3) DocumentIndex.verifyAgainst(节点表) 一致                —— 索引绝不漂移
- */
+// T05/T06/T07 验收自测：写路径、patch 策略与留痕。
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -42,8 +33,6 @@ function open(overrides: Partial<Parameters<typeof WriteSession.open>[1]> = {}):
   const { doc, ids } = fixture();
   return { session: WriteSession.open(doc, overrides), ids };
 }
-
-/* ------------------------- 随机操作脚本（可复现） ------------------------- */
 
 function applyRandomOp(session: WriteSession, rng: () => number, step: number): void {
   const nodes = Object.values(session.document.nodes);
@@ -101,10 +90,10 @@ interface StepReport {
 
 /**
  * 顶层字段差异（排除 nodes）。
- * 约定：留痕的 patch 只描述**节点级变更**；文档级字段（updatedAt、revisions、machineReadable）
+ * 约定：留痕的 patch 只描述节点级变更；文档级字段（updatedAt、revisions、machineReadable）
  * 由留痕条目自身或派生物承载，否则 patch 会自引用 revisions 数组。
- * machineReadable 属于**派生物**（T04/T16）：它随节点内容变化而变化，不可能也不应该由 patch 还原。
- */
+ * machineReadable 属于派生物（T04/T16）：它随节点内容变化而变化，不可能也不应该由 patch 还原。
+  */
 function topLevelDiffKeys(rebuilt: DocumentModel, after: DocumentModel): string[] {
   const keys = new Set([...Object.keys(rebuilt), ...Object.keys(after)]);
   const diffs: string[] = [];
@@ -145,8 +134,6 @@ function runScript(session: WriteSession, seed: number, steps: number): StepRepo
   }
   return reports;
 }
-
-/* --------------------------------- 用例 --------------------------------- */
 
 async function main(): Promise<void> {
   await test('打开会话：合法文档可进入写路径', () => {
@@ -249,10 +236,10 @@ async function main(): Promise<void> {
   /**
    * 必备章节（`SectionNode.required`）：由模板的章节属性在开文书那一刻抄进节点。
    *
-   * 这一条守的是**职责**而不是内容：`keyContent` 判"这一块内容敢不敢删"，
+   * 这一条守的是职责而不是内容：`keyContent` 判"这一块内容敢不敢删"，
    * `required` 判"这一章在不在"。两者必须各自独立 —— 合成一道门之后，
    * 界面只能说"这一块删不掉"，而医生说不清到底是"不能删内容"还是"不能删这一章"。
-   */
+    */
   await test('安全门：必备章节禁删（子树连带也拦），但不禁内容编辑，也不许把标记改掉', () => {
     const { doc, ids } = fixture();
     const outerId = ids.sectionIds[0] as NodeId;
@@ -273,11 +260,11 @@ async function main(): Promise<void> {
     }
     assertEqual(cascade, 'E_REQUIRED_SECTION_PROTECTED', '删外层章节不得连带删掉必备章节');
     /* 报错要说清是哪一章：只说"删不掉"而不给章节名，医生无法判断该找谁改模板 */
-    /* title / required 是**章节**节点才有的字段：DocNode 是联合类型，取之前要落到章节那一支 */
+    /* title / required 是章节节点才有的字段：DocNode 是联合类型，取之前要落到章节那一支  */
     assert(cascadeMessage.includes((doc.nodes[innerId] as unknown as { title?: string })?.title ?? ''), '报错里要点出章节标题');
 
-    /* **必备 ≠ 冻结内容**：这一章的段落照旧可删可改 ——
-       写成"整章锁死"会让人连错字都改不了，而"必备"管的是这一章在不在 */
+    /* 必备 ≠ 冻结内容：这一章的段落照旧可删可改 ——
+       写成"整章锁死"会让人连错字都改不了，而"必备"管的是这一章在不在  */
     const paragraphInInner = session.indexes.childrenOf(innerId).find((id) => session.document.nodes[id]?.type === 'paragraph') as NodeId;
     assert(!!paragraphInInner, '用例前提：必备章节里应有段落');
     session.deleteNode({ nodeId: paragraphInInner, mode: 'subtree' }, HUMAN);
@@ -299,8 +286,6 @@ async function main(): Promise<void> {
     }
     assertEqual(cleared, 'E_REQUIRED_SECTION_PROTECTED', '清空之后仍然删不掉（否则"清空再删"就是绕过禁删的路）');
 
-    /* 标记本身**不允许经 patch 改掉**：否则先把它改成 false、再删掉那一章，
-       留痕里看只有"改过一个布尔值"，那道门就等于形同虚设 */
     let patch = '';
     try {
       session.updateNodeProps({ nodeId: innerId, patch: { required: false } }, HUMAN);
@@ -322,8 +307,8 @@ async function main(): Promise<void> {
     }
     assertEqual(code, 'E_KEY_CONTENT_PROTECTED', '关键内容应禁止删除');
 
-    /* 禁删必须覆盖**整棵被删子树**：段落本身不标 keyContent，它下面的文本节点才标 ——
-       只看目标节点就等于给"删父节点"留了一道绕过禁删的后门（本轮加段落级删除入口时实测发现）。 */
+    /* 禁删必须覆盖整棵被删子树：段落本身不标 keyContent，它下面的文本节点才标 ——
+       只看目标节点就等于给"删父节点"留了一道绕过禁删的后门（本轮加段落级删除入口时实测发现）。  */
     const otherParagraph = ids.paragraphIds[1] as NodeId;
     const textChild = session.indexes
       .childrenOf(otherParagraph)
@@ -362,8 +347,8 @@ async function main(): Promise<void> {
     const runsOf = (): TextRun[] => (session.document.nodes[nodeId] as Extract<DocNode, { type: 'text' }>).runs;
     const textOf = (): string => runsOf().map((run) => run.text).join('');
 
-    /* 手工造"带样式的 run"：**现网还没有任何地方产生 run 级 marks**，
-       所以"整段覆盖"才一直没暴露问题 —— 这条用例要证明区间替换在将来接入富文本时不会踩这个坑。 */
+    /* 手工造"带样式的 run"：现网还没有任何地方产生 run 级 marks，
+       所以"整段覆盖"才一直没暴露问题 —— 这条用例要证明区间替换在将来接入富文本时不会踩这个坑。  */
     session.updateNodeProps(
       {
         nodeId,
@@ -390,7 +375,7 @@ async function main(): Promise<void> {
     assertEqual(lastRevision?.op, 'update', '区间替换的留痕 op 应为 update（规格第二节）');
     assertEqual(lastRevision?.targetId, nodeId, '留痕应指向被改的节点');
 
-    /* 纯插入（start===end）：继承左侧 run 的格式，并与同格式的相邻 run **合并**（不许切碎） */
+    /* 纯插入（start===end）：继承左侧 run 的格式，并与同格式的相邻 run 合并（不许切碎）  */
     session.replaceRange({ nodeId, start: 2, end: 2, payload: { text: '约' } }, HUMAN);
     assertEqual(textOf(), '体温约38.5℃，精神可。', '纯插入应只增加字符');
     assertEqual(runsOf().length, 3, '插入后 run 数不应增加（相邻同格式必须合并，否则每次编辑都留碎片）');
@@ -433,7 +418,6 @@ async function main(): Promise<void> {
       surrogateCode = (err as WriteError).code;
     }
     assertEqual(surrogateCode, 'E_OFFSET_RANGE', '偏移落在代理对中间必须被拒（劈开的生僻字序列化出去就是乱码）');
-    /* 把整个字一起替换则应成功 */
     session.replaceRange({ nodeId, start: 2, end: 4, payload: { text: '某' } }, HUMAN);
     assertEqual(
       (session.document.nodes[nodeId] as Extract<DocNode, { type: 'text' }>).runs.map((run) => run.text).join(''),
@@ -474,10 +458,8 @@ async function main(): Promise<void> {
     const signedFingerprint = session.signatureInfo()?.publicKeyFingerprint ?? '';
     assertEqual(signedFingerprint.length, 64, '应拿到签章指纹');
 
-    /* ① 签章后改不了；错误信息要把"先解锁"这条路指出来 */
     assertEqual(codeOf(() => session.insertText({ nodeId: textId, text: 'X' }, HUMAN)), 'E_SIGNED_IMMUTABLE', '签章后写入应被拒');
 
-    /* ② 解锁：理由必填、原签名不删、状态回 draft、自己是一条留痕 */
     assertEqual(codeOf(() => session.unlock({ reason: '   ' }, HUMAN)), 'E_UNLOCK_REASON_REQUIRED', '不给理由的解锁等于静默作废一次签章，必须拒');
     const unlocked = session.unlock({ reason: '入院记录漏了既往用药' }, HUMAN);
     assertEqual(session.document.status, 'draft', '解锁后应回到 draft');
@@ -493,13 +475,11 @@ async function main(): Promise<void> {
     assertEqual(unlocked.revision, unlockRevision?.rev, '解锁返回的 rev 应与留痕一致');
     assertEqual(codeOf(() => session.unlock({ reason: '再解一次' }, HUMAN)), 'E_UNLOCK_NOT_ALLOWED', '未签章状态无需解锁，应明确拒绝而不是静默成功');
 
-    /* ③ 解锁后可改；改完验签必然失败，但留痕能说明"为什么失败" */
     const before = textOf();
     session.replaceRange({ nodeId: textId, start: 0, end: 0, payload: { text: '【补】' } }, HUMAN);
     assertEqual(textOf(), `【补】${before}`, '解锁后应能改内容');
     assertEqual(session.verifySignature().ok, false, '改过内容后验签必须失败（签名覆盖的就是内容）');
 
-    /* ④ 撤销：以新 rev 回滚，不篡改历史 */
     const revBeforeUndo = session.docRev;
     session.undoLast(HUMAN);
     assertEqual(textOf(), before, '撤销应恢复成改动前的内容');
@@ -509,8 +489,8 @@ async function main(): Promise<void> {
     assertEqual(revertRevision?.revert?.revertedRev, revBeforeUndo, '撤销留痕要指回被撤销的那条');
     assertEqual(session.auditLog().length, revertRevision?.rev ?? 0, '被撤销的那条留痕仍在（历史不许被删）');
 
-    /* ⑤ 撤销**不留历史快照**：只能撤最近一次，且签章之后槽位必须清空 ——
-       否则"撤销"会变成绕过签章去改内容的旁路 */
+    /* ⑤ 撤销不留历史快照：只能撤最近一次，且签章之后槽位必须清空 ——
+       否则"撤销"会变成绕过签章去改内容的旁路  */
     assertEqual(session.undoTarget()?.rev, revBeforeUndo + 1, '刚撤销完，槽位应指向这次撤销本身（再点即重做）');
 
     /* ⑤ 撤销"新建"与"删除"两条路径。

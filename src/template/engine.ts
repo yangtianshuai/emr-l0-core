@@ -1,32 +1,4 @@
-/**
- * 模板实例化引擎（K4）。
- *
- * ## 它做一件事：把"声明"变成"一份**能过校验**的草稿"
- *
- * 产物必须通过 `validateDocument` —— 这不是"顺便满足一下"，而是这一层的**验收标准**。
- * 一份实例化出来就通不过校验的模板，等于让医生从一个坏掉的起点开始写病历。
- *
- * ## 五条纪律
- *
- * 1) **产出的不是"写好的病历"，是"待填的骨架"**。模板只带结构文本与占位提示；
- *    真正的临床内容由医生写或 AI 走建议通道产出（见 `types.ts` 文件头）。
- * 2) **模板不碰文档模型**。槽位只实例化成既有节点类型（section / paragraph / text / field），
- *    因此"必然通过校验"是可验证的性质，而不是承诺。
- * 3) **算不出来就不给值**。表达式缺输入 → `value: null` + 告警，**绝不用 0 或上一次的值顶上**。
- * 4) **每个节点都带出处**：`evidence = { kind: 'template', ref: '<包>#<模板>@<内容指纹>' }`。
- *    派生值再附一条 `expr:<控件 id>` 与**公式原文** —— 否则事后没人说得清那个 22.5 怎么来的。
- *    尾部是**内容指纹**而不是版本号：包不再有版本（见 `knowledge/pack.ts` 文件头），
- *    而"这份文书出自哪一份模板内容"这个问题必须仍然答得出来 —— 指纹由内容算出，
- *    改了内容必然变；版本号靠人记得改，改漏了就说不出话。
- * 5) **上下文只能引用登记过的路径**（患者/就诊/时间）。未登记的路径在装载期就被拒，
- *    免得模板写了个 `ctx:patient.phone` 而永远取不到值，还要靠"跑一遍看看"才发现。
- *
- * ## 与 QC 的一处刻意联动
- *
- * 模板里的占位提示（如 `待补充`）会被**既有的**形式质控规则 `R-FORM-03` 抓出来 ——
- * 这里没有为模板新增任何质控规则。模板越是"留下没填的地方"，质控就越会提醒，
- * 这条链路是自然接上的，不需要额外机制。
- */
+// 模板实例化引擎（K4）。
 
 import {
   SCHEMA_VERSION,
@@ -60,36 +32,11 @@ export const TEMPLATE_ENGINE_ACTOR = 'template-engine';
 /** 文档类型可用的取值（与 `model/validate.ts` 的白名单一致；两处漂移会让产物校验失败） */
 const DOC_TYPE_SYSTEMS = ['WST500', 'WS445', 'local', 'custom'];
 const FIELD_TYPES: FieldDataType[] = ['text', 'number', 'date', 'code', 'boolean', 'expression'];
-/**
- * 槽位类别白名单：加一类就要同时改**实例化分支、目录投影、编辑抽屉**与**服务端的视图投影**
- * （`SLOT_KINDS` 是那条链的起点）。
- *
- * 少改一处的症状是一致的、也是最难查的那种：**模板存得进去、病历开得出来、只是那一块看不见**
- * —— 没有任何一步会报错。
- */
 const SLOT_KINDS: string[] = ['text', 'paragraph', 'field', 'expression', 'table', 'list', 'control', 'image'];
 /** 参考范围允许的键（与 `model/types.ts` 的 `FieldNode.referenceRange` 同一套；多处漂移会让产物校验失败） */
 const REFERENCE_RANGE_KEYS = ['low', 'high', 'text', 'unit'];
-/**
- * 专科控件的**语义类型**白名单（与 `model/validate.ts` 的 `CONTROL_KIND_VALUES` 一致）。
- *
- * 为什么这里也留一份：这一份是**装载期**用的（包是外部数据，写完就进库，事后没人再看一遍），
- * 那一份是**文档校验期**用的。两处漂移的症状是"装得进去，产出的病历校验不过" ——
- * 所以新增一类控件要同时改这里、`model/types.ts` 的 `ControlKind` 与 `model/validate.ts`。
- */
 const CONTROL_KINDS = ['menstrualHistory', 'odontogram', 'vitalSignsChart', 'scaleScore', 'labTrend', 'custom'];
 
-/**
- * 模板**可以**引用的上下文路径（白名单）—— **带人话名称的那一份**。
- *
- * 为什么是白名单而不是"取不到就算了"：取不到的表现是"派生值一直是空的"，
- * 而它会和"医生还没填"长得一模一样 —— 排查方向直接被带偏。
- * 要新增路径，就改这里并补用例（与 `EvidenceKind` / `CONTROL_KIND_VALUES` 同一纪律）。
- *
- * 为什么带 `label` 与 `group`：这份清单有**三个**使用者 ——
- * 模板编辑器里"从系统带入"的下拉、填写项取值路径的下拉、表达式构造器里 `ctx` 节点的选项。
- * 三处各写一份中文名，迟早对不上（改一处忘一处，界面上出现两个名字指同一个字段）。
- */
 export interface ContextField {
   path: string;
   /** 界面上显示的人话名称 */
@@ -109,8 +56,6 @@ export const CONTEXT_FIELDS: readonly ContextField[] = [
   { path: 'encounter.deptName', label: '就诊科室（名称）', group: '就诊' },
   { path: 'encounter.admittedAt', label: '入院/就诊时间', group: '就诊' },
   { path: 'encounter.dischargedAt', label: '出院时间', group: '就诊' },
-  /* 只有工号，没有"姓名"：本系统的账号里没有姓名字段（见 `auth/user-store.ts` 的 `AdminUser`）。
-     凭空给一个 `doctor.name` 会让人以为"医生姓名会自动填进去"，而它取不到值只会让字段空着。 */
   { path: 'doctor.actorId', label: '开单医生（账号）', group: '医生' },
   { path: 'now', label: '当前时间', group: '时间' },
 ];
@@ -157,8 +102,6 @@ export class TemplateError extends Error {
   }
 }
 
-/* ------------------------------- 校验 ------------------------------- */
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -174,26 +117,10 @@ function describeValue(value: JsonValue): string {
 const TABLE_MAX_COLUMNS = 8;
 const TABLE_MAX_ROWS = 20;
 
-/** 表格列允许的取值类型：**不含 `expression`** —— 派生值要靠槽位名引用具体格子，
- *  而"第 3 行第 2 列"这种位置引用既不稳定（行会增删）也读不懂 */
+/** 表格列允许的取值类型：不含 `expression` —— 派生值要靠槽位名引用具体格子，
+ *  而"第 3 行第 2 列"这种位置引用既不稳定（行会增删）也读不懂  */
 const TABLE_COLUMN_TYPES: FieldDataType[] = FIELD_TYPES.filter((type) => type !== 'expression');
 
-/**
- * 表格槽位的形状校验。
- *
- * 为什么要逐列校验、而不是"有个 columns 数组就行"：
- *   - 列名会写成表头单元格的文本，空列名在界面上就是一个空白格子（看起来像渲染坏了）；
- *   - 列上的 `dataType` 决定格子里的填写项是什么类型，写错了这一列的数会以字符串存进病历，
- *     症状是"趋势画不出来"，而没人会去看模板里那个下拉。
- */
-/**
- * 数据元标签（`tags`）的形状校验：槽位级与**表格列**共用这一份。
- *
- * 为什么必须共用：一条 `system` 拼错、`code` 为空的标签，后果是
- * "模板改得进去、开出来的病历却只显示槽位名"，或者跨文书比对把这个空认成数据元。
- * 两处各写一遍，就会出现"槽位级被拒、列上却收下"的错位 —— 而它决定的是
- * 同一个数据元在不同文书里认不认得出是同一个。
- */
 function validateDataElementTags(raw: unknown, label: string): string[] {
   const issues: string[] = [];
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -248,7 +175,7 @@ function validateTableColumns(columns: unknown, rows: unknown, label: string): s
     if (record.unit !== undefined && (typeof record.unit !== 'string' || record.unit.trim() === '')) {
       issues.push(`${columnLabel}.unit：给了就得是非空字符串（不给就删掉这个键）`);
     }
-    /* 列上的数据元：标签会落到**格子里的填写项**上（机器读的是一格一格的值） */
+    /* 列上的数据元：标签会落到格子里的填写项上（机器读的是一格一格的值）  */
     if (record.tags !== undefined) {
       issues.push(...validateDataElementTags(record.tags, `${columnLabel}.tags`));
     }
@@ -262,16 +189,6 @@ function validateTableColumns(columns: unknown, rows: unknown, label: string): s
 /** 列表最多几项：再长就该是一张表了；上限只是为了让界面与纸面不至于失控 */
 const LIST_MAX_ITEMS = 50;
 
-/**
- * 列表项校验：至少一项；每项是一个对象（`text` 必有，`field` 可选）。
- *
- * 为什么在**装载**时就拒空项：空项在界面上是一行空白（"这一条什么都没写"），
- * 而纸面的 `push` 会直接丢掉空行 —— 于是屏幕上有一条、归档件里没有，
- * 两边都不报错，事后没人说得清是哪一边少写了。
- *
- * 项里的 `field` 与**表格列**同构（`dataType` / `unit` / `tags`），校验也走同一套：
- * 列表不产数据元，产数据元的是这个格子，所以 `tags` 的形状必须一模一样地严。
- */
 function validateListItems(items: unknown, label: string): string[] {
   const issues: string[] = [];
   if (!Array.isArray(items) || items.length === 0) {
@@ -284,8 +201,8 @@ function validateListItems(items: unknown, label: string): string[] {
   items.forEach((item, index) => {
     const itemLabel = `${label}.items[${index}]`;
     if (!isPlainObject(item)) {
-      /* 旧写法（一项一个字符串）在这里**明说形状换了**：
-         报"必须是非空字符串"会让人以为标点写错了，而界面上一保存就会把整条列表改写成新形状。 */
+      /* 旧写法（一项一个字符串）在这里明说形状换了：
+         报"必须是非空字符串"会让人以为标点写错了，而界面上一保存就会把整条列表改写成新形状。  */
       issues.push(`${itemLabel}：必须是对象（text 必有；要格子就再加 field）—— 列表项不再接受"一个字符串"的旧写法`);
       return;
     }
@@ -315,14 +232,6 @@ function validateListItems(items: unknown, label: string): string[] {
   return issues;
 }
 
-/**
- * 模板给的默认值是否与数据类型相符。
- *
- * 为什么按 `dataType` 分而不是"能转就行"：`value` 落进文档后是 `FieldNode.value`，
- * 它是**机器真值**（表达式按它参与计算、趋势按它画点）——
- * `"37.2"` 与 `37.2` 在展示上一模一样，在计算上一个是数字、一个是字符串。
- * 允许"能转就转"等于把一次明确的配置错误推迟成一次算不出来的派生值。
- */
 function matchesFieldType(dataType: FieldDataType, value: JsonValue): boolean {
   if (value === null) return true;
   switch (dataType) {
@@ -338,13 +247,6 @@ function matchesFieldType(dataType: FieldDataType, value: JsonValue): boolean {
   }
 }
 
-/**
- * 参考范围的形状校验。
- *
- * 为什么值得单独一段：它是**判异常的尺子**（`model/trend.ts` 的 `flagOf`）。
- * 上下限写反、或只写单位不写范围，症状都不是报错，而是趋势图上"偏高 / 偏低"整个反过来 ——
- * 而那看起来像是数据错了，没人会去看模板。
- */
 function validateReferenceRange(range: unknown, label: string): string[] {
   const issues: string[] = [];
   if (!isPlainObject(range)) {
@@ -380,20 +282,17 @@ function validateReferenceRange(range: unknown, label: string): string[] {
 }
 
 /**
- * 全包校验：**一次把问题报全**。
+ * 全包校验：一次把问题报全。
  *
  * 报一条改一条会让写模板的人放弃 —— 而模板是给人写的（专科顾问、临床科室），
  * 他们不该为了找全错误来回试十几遍。
- */
+  */
 export function validateTemplatePackItems(pack: TemplatePack): string[] {
   const issues: string[] = [];
   const templates: TemplateDefinition[] = [];
   const fragments: FragmentDefinition[] = [];
   const controls: ControlDefinition[] = [];
   const expressions = new Map<string, ExpressionDefinition>();
-  /* 专科控件定义表：槽位的 `useControl` 要在这里查得到（只允许**同包**引用 ——
-     跨包引用会让"这份文书依赖哪几个包同时在线"变成隐式条件，而"装了哪些包"
-     每台机器都可以不一样，见 `template-pack.ts` 的 `carryControlsInto`）。 */
   const controlDefs = new Map<string, ControlDefinition>();
 
   for (const item of pack.items) {
@@ -431,13 +330,13 @@ export function validateTemplatePackItems(pack: TemplatePack): string[] {
   for (const template of templates) {
     issues.push(...validateTemplateDefinition(template, expressions, controlDefs));
   }
-  /* 片段在**所有条目都扫完之后**才校验：与模板同理，它引用的控件可能排在它后面
-     （顺序不该决定校验结果），而下面传的是整包的控件表 */
+  /* 片段在所有条目都扫完之后才校验：与模板同理，它引用的控件可能排在它后面
+     （顺序不该决定校验结果），而下面传的是整包的控件表  */
   for (const fragment of fragments) {
     issues.push(...validateFragmentDefinition(fragment, expressions, controlDefs));
   }
-  /* 控件同样放在**所有条目都扫完之后**才校验：它的字段可能引用排在它后面的表达式控件，
-     而"条目在数组里的次序"不该决定它能不能装进来 */
+  /* 控件同样放在所有条目都扫完之后才校验：它的字段可能引用排在它后面的表达式控件，
+     而"条目在数组里的次序"不该决定它能不能装进来  */
   for (const control of controls) {
     issues.push(...validateControlDefinition(control, expressions));
   }
@@ -478,19 +377,6 @@ export function validateTemplateDefinition(
   return issues;
 }
 
-/**
- * **章节与槽位**的校验：模板与**片段**共用同一套判据。
- *
- * 为什么必须共用：片段就是"一串章节"，它的正确性判据与模板里那一段**完全相同**。
- * 两处各写一遍的后果不会当场报错，而是漂移 —— 出现"这一段在模板里合法、
- * 存成片段却不合法"（或者反过来），而人只会以为是自己写错了。
- *
- * `expressions === null` 表示**不查表达式引用**（片段的情形）：
- * 片段是**素材**，它引用的控件属于哪一个包，在它被拼进某一份模板、落进某一个包之前没有答案
- * （模板包里 `useExpression` 只允许同包引用，见 `template-pack.ts` 的 `findTemplate`）。
- * 若在这里强查，"从交付方模板里存一段带控件的一章"会直接存不进去 ——
- * 而那一刻真正该报的是"这份文书用不了那个控件"，不是"这个片段不合法"。
- */
 export function validateTemplateSections(
   sections: TemplateSection[],
   expressions: Map<string, ExpressionDefinition> | null,
@@ -500,7 +386,7 @@ export function validateTemplateSections(
   const label = ownerLabel;
   const issues: string[] = [];
 
-  /* 槽位 key 在**整份模板内**唯一：表达式按 key 引用填写项，重名会让引用指到别人身上 */
+  /* 槽位 key 在整份模板内唯一：表达式按 key 引用填写项，重名会让引用指到别人身上  */
   const keys = new Map<string, TemplateSlot>();
   sections.forEach((section, sectionIndex) => {
     const sectionLabel = `${label}.sections[${sectionIndex}]`;
@@ -555,9 +441,9 @@ export function validateTemplateSections(
           );
         }
       }
-      /* 默认值要与**数据类型对得上**：写错类型不会在任何地方报错 —— 它会一路走到
+      /* 默认值要与数据类型对得上：写错类型不会在任何地方报错 —— 它会一路走到
          派生值求值那里，表现成"这个数怎么也算不出来"，而人只会去怀疑公式写错了。
-         复核的代价全落在了真正出错的那一层之外。 */
+         复核的代价全落在了真正出错的那一层之外。  */
       if (slot.slot === 'field' && slot.value !== undefined && !matchesFieldType(slot.dataType, slot.value)) {
         issues.push(
           `${slotLabel}.value：默认值${describeValue(slot.value)}与数据类型 ${String(slot.dataType)} 对不上`
@@ -571,15 +457,15 @@ export function validateTemplateSections(
       }
       if (slot.slot === 'table') {
         issues.push(...validateTableColumns(slot.columns, slot.rows, slotLabel));
-        /* 表格不给关键内容：门控的含义是"未人工确认就签不出去"，而医生端**没有确认一个表格的入口**
+        /* 表格不给关键内容：门控的含义是"未人工确认就签不出去"，而医生端没有确认一个表格的入口
            （确认按钮只在文本与填写项上）。标上它等于造出一份签不出去的病历 ——
-           门控拦得住，人却不知道去哪儿确认。 */
+           门控拦得住，人却不知道去哪儿确认。  */
         if (raw.keyContent !== undefined) {
           issues.push(`${slotLabel}.keyContent：表格不支持关键内容（没有"确认这个表格"这个动作）`);
         }
-        /* 表格**本身**不绑数据元：机器读的是格子里的填写项，标签要配在列上（`columns[].tags`）。
+        /* 表格本身不绑数据元：机器读的是格子里的填写项，标签要配在列上（`columns[].tags`）。
            不收下它 —— 收下之后实例化根本不用这个字段，症状是"模板里配了、机读里一个字都没有"，
-           而校验、界面、纸面全都不报错。 */
+           而校验、界面、纸面全都不报错。  */
         if (raw.tags !== undefined) {
           issues.push(`${slotLabel}.tags：表格本身不绑数据元（机器读的是格子里的填写项）——把标签配在列上（columns[].tags）`);
         }
@@ -597,8 +483,8 @@ export function validateTemplateSections(
         }
       }
       /* 图片槽：不绑数据元、也不标关键内容 —— 两条理由都与表格相同。
-         图不产数据元（机器读的是填写项）；医生端**没有"确认这一张图"的动作**，
-         标上关键内容等于造一份签不出去、也不知道去哪儿确认的病历。 */
+         图不产数据元（机器读的是填写项）；医生端没有"确认这一张图"的动作，
+         标上关键内容等于造一份签不出去、也不知道去哪儿确认的病历。  */
       if (slot.slot === 'image') {
         if (raw.tags !== undefined) {
           issues.push(`${slotLabel}.tags：图片槽不绑数据元（机器读的是填写项，图本身不产数据元）`);
@@ -607,9 +493,9 @@ export function validateTemplateSections(
           issues.push(`${slotLabel}.keyContent：图片槽不支持关键内容（医生端没有"确认这一张图"这个动作）`);
         }
       }
-      /* 控件槽位：要指明用哪一个专科控件，且**不许**绑数据元。
+      /* 控件槽位：要指明用哪一个专科控件，且不许绑数据元。
          控件不是数据元 —— 机器读的是控件里带 `tag` 的字段（`ControlFieldSnapshot.tag`），
-         整体绑一个 tag 只会造出一条值为空、来源不明的数据元。 */
+         整体绑一个 tag 只会造出一条值为空、来源不明的数据元。  */
       if (slot.slot === 'control') {
         if (typeof slot.useControl !== 'string' || slot.useControl.trim() === '') {
           issues.push(`${slotLabel}.useControl：必须是非空字符串（控件槽要说明用哪一个专科控件）`);
@@ -639,9 +525,9 @@ export function validateTemplateSections(
     });
   });
 
-  /* 专科控件槽位：引用的控件必须**在本包里**（同包引用，理由与表达式一字不差）。
-     它排在表达式那段**之前**：下面那条提前返回管的是表达式，
-     顺序一换，"片段编辑时不查引用"就会连控件引用一起放过。 */
+  /* 专科控件槽位：引用的控件必须在本包里（同包引用，理由与表达式一字不差）。
+     它排在表达式那段之前：下面那条提前返回管的是表达式，
+     顺序一换，"片段编辑时不查引用"就会连控件引用一起放过。  */
   if (controls !== null) {
     sections.forEach((section, sectionIndex) => {
       section.slots.forEach((slot, slotIndex) => {
@@ -656,9 +542,9 @@ export function validateTemplateSections(
       });
     });
   }
-  /* 表达式槽位：控件必须存在，且只能引用**本模板内的填写项**（field 槽位）。
-     `expressions === null` = **不查引用**（片段的素材语义，见本函数头的注释）——
-     后面再没有别的判定，因此这里提前返回与"整段跳过"等价。 */
+  /* 表达式槽位：控件必须存在，且只能引用本模板内的填写项（field 槽位）。
+     `expressions === null` = 不查引用（片段的素材语义，见本函数头的注释）——
+     后面再没有别的判定，因此这里提前返回与"整段跳过"等价。  */
   if (expressions === null) return issues;
   sections.forEach((section, sectionIndex) => {
     section.slots.forEach((slot, slotIndex) => {
@@ -678,8 +564,8 @@ export function validateTemplateSections(
           issues.push(`${slotLabel}：控件「${slot.useExpression}」引用了模板里不存在的填写项「${key}」`);
           continue;
         }
-        /* 只允许引用**填写项**：派生值依赖另一个派生值会让"这个数怎么来的"变成一条链，
-           而链上任何一环变了都要重新解释整条链。一级派生是可复核的边界。 */
+        /* 只允许引用填写项：派生值依赖另一个派生值会让"这个数怎么来的"变成一条链，
+           而链上任何一环变了都要重新解释整条链。一级派生是可复核的边界。  */
         if (target.slot !== 'field') {
           issues.push(`${slotLabel}：控件「${slot.useExpression}」引用的「${key}」不是填写项（派生值只能依赖填写项，不能依赖另一个派生值）`);
         }
@@ -695,19 +581,6 @@ export function validateTemplateSections(
   return issues;
 }
 
-/**
- * **片段**的校验（对外导出，供包校验与新建/编辑片段时复用）。
- *
- * 与模板校验的关系：章节与槽位那一段**共用** `validateTemplateSections`
- * （判据必须只有一处，否则"模板里合法、片段里不合法"迟早出现），
- * 片段少的只是模板专有的那几项：`docType`（片段不是"一种文书"，开不出病历）、
- * `status`（没有"已发布"这个概念，见 `types.ts` 的 `FragmentDefinition`）。
- *
- * `expressions` 默认 `null` = 不查表达式引用（片段的素材语义，见 `validateTemplateSections`）；
- * 装包那一刻（`validateTemplatePackItems`）传整包的控件表 —— 那时"这个包里有没有那个控件"
- * 是查得清的，能报就报；报了也只是"这个片段在这个包里引用了不存在的控件"，
- * 而不是"这个片段本身写错了"。
- */
 export function validateFragmentDefinition(
   fragment: FragmentDefinition,
   expressions: Map<string, ExpressionDefinition> | null = null,
@@ -731,27 +604,6 @@ export function validateFragmentDefinition(
   return issues;
 }
 
-/* --------------------------- 专科控件（自定义） --------------------------- */
-
-/**
- * **专科控件定义**的校验（对外导出，供包校验与编辑抽屉复用）。
- *
- * ## 它只查"装进去就再也没机会发现"的那几类
- *
- * 包是外部数据，装完就进库（见 `knowledge/pack.ts` 的三条纪律）。因此这里的每一条都对应一个
- * **事后无法解释的症状**：形状不在闭集里（渲染器不认识它，界面上是一片空白）；
- * 字段没 `key`（payload 存进去没有键）；字段 `key` 重复（两次写同一个格，后者静默覆盖前者）；
- * `dataType === 'expression'` 却没给 `useExpression`（那一格永远算不出来，而它看起来只是"还没填"）；
- * `matrix` 少了行列（渲染成零行零列的表）；`image` 形状的字段不是 `text`
- * （影像格的值是资源地址，配成数值格之后写路径会拒，而医生只看到"填不进去"）。
- *
- * 有一个**必须**在这里发现、放到运行时就不成立的问题：`useExpression` 指向的表达式
- * **在不在同一个包里**。控件与表达式必须同包（跨包引用会让"这份控件的算法"取决于装了哪些包，
- * 而"装了哪些包"每台机器都可以不一样）。
- *
- * `expressions` 默认 `null` = 不查表达式引用：单独编辑一个控件时（还没决定进哪个包）
- * 无从判断；装包那一刻传整包的表 —— 那时查得清，能报就报。
- */
 export function validateControlDefinition(
   control: ControlDefinition,
   expressions: Map<string, ExpressionDefinition> | null = null,
@@ -800,17 +652,15 @@ export function validateControlDefinition(
     if (!FIELD_TYPES.includes(raw.dataType as FieldDataType)) {
       issues.push(`${where}：dataType 取值非法「${String(raw.dataType)}」（允许 ${FIELD_TYPES.join(' / ')}）`);
     } else if (control.shape === 'image' && raw.dataType !== 'text') {
-      /* 影像格的值是一条**资源引用**：它只能是 `text`。配成数值 / 日期 / 布尔，
+      /* 影像格的值是一条资源引用：它只能是 `text`。配成数值 / 日期 / 布尔，
          写路径会当场拒（`matchesControlCellType`），而医生看到的只是"这个格填不进去" ——
-         症状与原因隔着一整条渲染链，所以必须在**装包那一刻**就拦下。 */
+         症状与原因隔着一整条渲染链，所以必须在装包那一刻就拦下。  */
       issues.push(`${where}：影像形状（image）的格子只存资源地址，dataType 只能是 text，现在是 ${String(raw.dataType)}`);
     }
     if (raw.unit !== undefined && (typeof raw.unit !== 'string' || raw.unit.trim() === '')) {
       issues.push(`${where}：unit 若提供必须是非空字符串`);
     }
 
-    /* 「怎么算」一律推给表达式控件（见 `types.ts` 的 `ControlFieldDef`）：
-       这里只核对"引用填了没有、指向的东西在不在包里"，绝不在这里再定义第二套公式口径。 */
     if (raw.dataType === 'expression') {
       if (typeof raw.useExpression !== 'string' || raw.useExpression.trim() === '') {
         issues.push(`${where}：dataType 是 expression 就必须给 useExpression（否则那一格永远算不出来，而它看起来只是"还没填"）`);
@@ -831,8 +681,8 @@ export function validateControlDefinition(
     issues.push(`${label}：标了时间轴（axis: time）的字段有 ${timeAxes} 个，只能有一个 —— 两个时间轴排不出唯一顺序`);
   }
 
-  /* matrix 的行列是**形状的一部分**：`ControlShape` 里说 matrix 就是"行 × 列"的格子表，
-     少了行列渲染出来是一张空表；反过来，别的形状带了行列，界面并不知道拿它做什么。 */
+  /* matrix 的行列是形状的一部分：`ControlShape` 里说 matrix 就是"行 × 列"的格子表，
+     少了行列渲染出来是一张空表；反过来，别的形状带了行列，界面并不知道拿它做什么。  */
   const hasRows = Array.isArray(control.rows) && control.rows.length > 0;
   const hasColumns = Array.isArray(control.columns) && control.columns.length > 0;
   if (control.shape === 'matrix') {
@@ -846,14 +696,12 @@ export function validateControlDefinition(
   return issues;
 }
 
-/* ----------------------------- 实例化 ----------------------------- */
-
 function substituteContext(text: string, context: Record<string, string | number | undefined>, warnings: string[]): string {
   return text.replace(/\{\{\s*([A-Za-z0-9_.]+)\s*\}\}/g, (_match, path: string) => {
     const value = context[path];
     if (value === undefined || value === '') {
-      /* **原样保留 + 告警**，不"猜一个"：把取不到的东西悄悄换成空串，
-         医生看到的就是一句读不通的话，而没人知道那里本来该有内容 */
+      /* 原样保留 + 告警，不"猜一个"：把取不到的东西悄悄换成空串，
+         医生看到的就是一句读不通的话，而没人知道那里本来该有内容  */
       warnings.push(`文本里的 {{${path}}} 取不到值，已原样保留`);
       return `{{${path}}}`;
     }
@@ -861,15 +709,6 @@ function substituteContext(text: string, context: Record<string, string | number
   });
 }
 
-/**
- * 节点出处。
- *
- * `field: slotKey` 不是装饰：**它让派生值可以被重算**（见 `recompute.ts`）。
- * 文档里没有"槽位"这个概念，而表达式是按槽位 key 引用填写项的 ——
- * 把 key 记在证据链上，重算时就能从文档自身还原出"这个 BMI 依赖哪两个格子"，
- * 不必依赖任何进程内状态。用的全是 `EvidenceRef` 既有的允许字段，
- * 因此**不需要改文档模型、不需要改 JSON Schema**（改模型要同步三处定义，是另一个量级的风险）。
- */
 function provenanceOf(
   input: InstantiateInput,
   source: string,
@@ -918,11 +757,6 @@ export interface InstantiateOutput {
   result: InstantiateResult;
 }
 
-/**
- * 实例化。**纯函数**：同输入必得同输出（时间由调用方给，见 `InstantiateInput.at`）。
- *
- * 产出后请立刻跑一遍 `validateDocument` —— 自测与 Demo 都这么做，它是这一层的验收标准。
- */
 export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput): InstantiateOutput {
   const issues = validateTemplatePackItems(pack);
   if (issues.length > 0) {
@@ -952,13 +786,6 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
   /** 填写项的值（表达式按 key 从这里取） */
   const slotValues: Record<string, number | string | null> = {};
 
-  /**
-   * 槽位 key → 给人看的名字。
-   *
-   * 告警要写"还缺**身高、体重**"，而不是"还缺 heightCm、weightKg" ——
-   * 这条告警是**医生看的**，而 slot key 是模板作者的语言。界面把内部标识在临床模式下
-   * 全部收起，告警里却漏出去，等于绕过了那条纪律。
-   */
   const slotLabels: Record<string, string> = {};
   for (const section of template.sections) {
     for (const slot of section.slots) {
@@ -966,7 +793,7 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
     }
   }
 
-  /** 派生值的依赖边：**建完所有槽位后再补**（模板里派生槽位可以写在它的填写项之前） */
+  /** 派生值的依赖边：建完所有槽位后再补（模板里派生槽位可以写在它的填写项之前）  */
   const pendingDependencies: Array<{ fieldId: string; controlId: string; slotKeys: string[] }> = [];
 
   nodes.n_root = {
@@ -991,9 +818,9 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
       title: section.title,
       sectionCode: section.sectionCode,
       /* 章节自身属性抄进节点：`required` 让写路径拒删这一章（`core/session.ts` 的 deleteNode），
-         `keyContent` 让"整章算关键内容"落进签名门控。两者**只在开文书那一刻抄一次** ——
+         `keyContent` 让"整章算关键内容"落进签名门控。两者只在开文书那一刻抄一次 ——
          模板事后改了不会回头改动已经开出的病历（与槽位属性同一族纪律）。
-         不写 `false`：`undefined` 才是"没这一回事"，而 `false` 会在包内容里多出一份指纹差异。 */
+         不写 `false`：`undefined` 才是"没这一回事"，而 `false` 会在包内容里多出一份指纹差异。  */
       ...(section.required ? { required: true } : {}),
       ...(section.keyContent ? { keyContent: true } : {}),
       provenance: provenanceOf(input, source, 'section'),
@@ -1004,13 +831,6 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
     let childSeq = 0;
 
     for (const slot of section.slots) {
-      /* 段落归属：`text` / `paragraph` / `table` / `control` / `image` 槽位必然另起一段；
-         字段/派生值默认并入**前一个** text 段（与 `demo-doc.ts` 的排布一致：
-         体格检查那段文字后面跟着体温/脉搏/血压）。
-         没有前一段时（章节以字段开头）自成一段 —— 否则字段会没有归属的段落。
-         表格 / 控件 / 图为什么也必然另起一段：它们是**块级**内容，跟在一句话后面（同一个段落里）
-         会让"这一段"变成"一句话加一张表（或一张图）"，而段落级操作（上移/下移/删段）
-         随后就会把它当成那句话的一部分搬走。 */
       const startsParagraph = slot.slot === 'text' || slot.slot === 'paragraph'
         || slot.slot === 'table' || slot.slot === 'list' || slot.slot === 'control' || slot.slot === 'image'
         || slot.newParagraph === true || paragraphId === null;
@@ -1031,10 +851,10 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
       const parent = paragraphId as string;
       const order = childSeq * 10;
 
-      /* 结构文本与空段落产出**同一种节点**：一个 text 节点。差别只在"结构文本那一栏有没有字"——
+      /* 结构文本与空段落产出同一种节点：一个 text 节点。差别只在"结构文本那一栏有没有字"——
          段落槽没有 `text` 字段，`raw` 就是 undefined，于是 runs 里是一个空串。
          两处各写一遍的后果是"空段落"与"空的结构文本"在模型里长得不一样，
-         而下游（机读、导出、受控阅读）只有一条路能认。 */
+         而下游（机读、导出、受控阅读）只有一条路能认。  */
       if (slot.slot === 'text' || slot.slot === 'paragraph') {
         const textId = `${parent}_t${childSeq}`;
         const raw = slot.slot === 'text' ? slot.text : undefined;
@@ -1054,8 +874,8 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         continue;
       }
 
-      /* 图片槽：`resRef` 留空 = 待贴的空槽。这里**不校验资源是否存在** ——
-         模板不该知道部署里有没有那个文件；真正要验的是导出那一刻（取不到就报 warning）。 */
+      /* 图片槽：`resRef` 留空 = 待贴的空槽。这里不校验资源是否存在 ——
+         模板不该知道部署里有没有那个文件；真正要验的是导出那一刻（取不到就报 warning）。  */
       if (slot.slot === 'image') {
         const imageId = `${parent}_img${childSeq}`;
         nodes[imageId] = {
@@ -1073,10 +893,6 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         continue;
       }
 
-      /* 列表：一个 `listGroup` + 每项一个 `listItem`，项里的文字挂在 listItem 下。
-         为什么不让"每项一个段落"：段落级操作（上移 / 删段）以"段"为单位搬东西，
-         那样删掉一项会把列表拆成一堆互不相干的段落 —— 而列表的语义正是"这些项属于一组"。
-         `ordered` 只在为真时写：`false` 与"不写"同义，写进去只会多一份指纹差异。 */
       if (slot.slot === 'list') {
         const groupId = `${parent}_lg${childSeq}`;
         nodes[groupId] = {
@@ -1148,11 +964,6 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         }
         const valueText = value === null ? '' : String(value);
         const provenance = provenanceOf(input, source, slot.key);
-        /* **从系统带入的值要在证据链里留下"从哪儿来的"**。
-           只记模板出处的话，界面只能把它显示成"模板带入" —— 而那个名字是错的：
-           模板里写的是"从患者信息取姓名"，填进去的是患者信息本身（不是模板编的内容）。
-           用已登记的 `his` 来源类型：患者与就诊信息本来就来自院内业务系统。
-           取不到值时也记一条（带 empty 说明）：那正是"这一格为什么空着"的答案。 */
         if (slot.from !== undefined) {
           provenance.evidence = [
             ...(provenance.evidence ?? []),
@@ -1177,9 +988,9 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
           ...(slot.tags ? { tags: slot.tags } : {}),
           ...(slot.keyContent ? { keyContent: true } : {}),
           ...(slot.required ? { required: true } : {}),
-          /* 参考范围照抄进节点，且**深拷贝**：它是"这一格多少算正常"的机器口径
+          /* 参考范围照抄进节点，且深拷贝：它是"这一格多少算正常"的机器口径
              （趋势按它标偏高/偏低）。浅拷会让同一份模板开出的多份文书共用同一个对象 ——
-             改一份的参考范围，悄悄改到另一份身上，而那正是模板反复实例化最容易踩的坑。 */
+             改一份的参考范围，悄悄改到另一份身上，而那正是模板反复实例化最容易踩的坑。  */
           ...(slot.referenceRange ? { referenceRange: structuredClone(slot.referenceRange) } : {}),
           provenance,
         };
@@ -1188,11 +999,6 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         continue;
       }
 
-      /* 表格：一行表头 + 若干空数据行。
-         **格子里的填写项也是 field 节点** —— 于是"医生在格子里写字"走的是与正文填写项
-         完全相同的那条写路径（`setFieldValue` + 留痕 + 索引同步 + 乐观锁），
-         不必为表格另造一条写路径，也不必给表格另做一套渲染与保存。
-         这也是"表格"能作为一类槽位存在的全部理由：它不是一个新控件，而是一个**容器**。 */
       if (slot.slot === 'table') {
         const tableId = `${parent}_tb${childSeq}`;
         const rowCount = slot.rows ?? 1;
@@ -1241,8 +1047,8 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         });
 
         /* 数据行：每格一个空填写项。格子的槽位名是 `key.r<行>c<列>`（1 起）——
-           它同时是**证据链里的 `field`**，于是"这个数从哪一格来的"事后查得清，
-           而重算仍只认顶层槽位名（格子不参与派生值：行会增删，位置引用不稳定）。 */
+           它同时是证据链里的 `field`，于是"这个数从哪一格来的"事后查得清，
+           而重算仍只认顶层槽位名（格子不参与派生值：行会增删，位置引用不稳定）。  */
         for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
           const rowId = `${tableId}_r${rowIndex}`;
           nodes[rowId] = {
@@ -1276,8 +1082,8 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
               value: null,
               valueText: '',
               ...(column.unit ? { unit: column.unit } : {}),
-              /* 列上绑的数据元落到**格子**上：机器读的是一格一格的值，
-                 表格只是容器（同一列的多行共用同一条标签，`code` 也一致 —— 这正是跨文书比对要的） */
+              /* 列上绑的数据元落到格子上：机器读的是一格一格的值，
+                 表格只是容器（同一列的多行共用同一条标签，`code` 也一致 —— 这正是跨文书比对要的）  */
               ...(column.tags ? { tags: column.tags } : {}),
               provenance: provenanceOf(input, source, cellKey),
             };
@@ -1287,14 +1093,6 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         continue;
       }
 
-      /* 专科控件：一个控件 = **一个节点**（形状决定医生端把它画成量表 / 趋势 / 网格 / 清单）。
-         三件事在这里定下，此后**不再回查包**：
-           ① 字段快照（`fields`）：谁在里面、各是什么；
-           ② 呈现结构（`shape` / `rows` / `columns` / `layout` / `rowCount`）：渲染器按它分派；
-           ③ payload 的**初值**：只填定义里给了 `defaultValue` 的格，其余留空。
-             空 = 没有这个键（模板不编临床内容，见 `ControlFieldDef.defaultValue`）。
-         控件里若有一格要算，那一格引用的是**表达式控件**，而它到医生点「重算派生值」时才算
-         （`recompute.ts`）—— 模板实例化不跑公式，这条线本版没有变。 */
       if (slot.slot === 'control') {
         const definition = controlById.get(slot.useControl);
         if (!definition) {
@@ -1318,9 +1116,9 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
           shape: definition.shape,
           definitionId: definition.itemId,
           payloadVersion: definition.version ?? 1,
-          /* 字段快照：只抄**声明**那一层。`useExpression`（公式在哪）与 `defaultValue`（初值）
-             是**定义期**语义，不进快照；`axis` 是例外 —— 它回答"这一格在时间轴上、
-             趋势按它排"，渲染时不回查包也要知道，所以一起抄。 */
+          /* 字段快照：只抄声明那一层。`useExpression`（公式在哪）与 `defaultValue`（初值）
+             是定义期语义，不进快照；`axis` 是例外 —— 它回答"这一格在时间轴上、
+             趋势按它排"，渲染时不回查包也要知道，所以一起抄。  */
           fields: (definition.fields ?? []).map((field) => ({
             key: field.key,
             label: field.label,
@@ -1339,8 +1137,6 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
           ...(slot.keyContent ? { keyContent: true } : {}),
           payload,
           provenance: provenanceOf(input, source, slot.key, [
-            /* 控件出处：**哪份定义的哪一版**。历史病历最常被问的一句是"这一格当时照哪份控件开的" ——
-               定义改过字段语义之后，光有 payload 与快照答不出"为什么后来少了一格"。 */
             {
               kind: 'template',
               ref: `control:${pack.packId}/${definition.itemId}@v${definition.version ?? 1}`,
@@ -1353,7 +1149,7 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         continue;
       }
 
-      /* 派生值：算不出来就是 null + 告警，**不编值** */
+      /* 派生值：算不出来就是 null + 告警，不编值  */
       const definition = expressionById.get(slot.useExpression) as ExpressionDefinition;
       const refs = collectExpressionRefs(definition.expression);
       const computed = evaluate(definition.expression, { slots: slotValues, context });
@@ -1361,8 +1157,8 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
       const valueText = computed === null ? '' : String(computed);
       if (computed === null) {
         /* 告警要能指着医生说"去填哪一格" —— 否则它会和"系统坏了"长得一样。
-           文案**只陈述"还缺什么"**，不承诺"填好就自动算"：本版的重算是**显式动作**
-           （正文区「重算派生值」按钮），把它写成自动的，医生一填发现没变就会认为功能坏了。 */
+           文案只陈述"还缺什么"，不承诺"填好就自动算"：本版的重算是显式动作
+           （正文区「重算派生值」按钮），把它写成自动的，医生一填发现没变就会认为功能坏了。  */
         const missingSlots = refs.slots.filter((key) => slotValues[key] === null || slotValues[key] === undefined);
         const missingContext = refs.context.filter((path) => context[path] === undefined || context[path] === '');
         if (missingSlots.length > 0) {
@@ -1386,7 +1182,7 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         ...(slot.tags ? { tags: slot.tags } : {}),
         ...(slot.keyContent ? { keyContent: true } : {}),
         provenance: provenanceOf(input, source, slot.key, [
-          /* 控件出处 + **公式原文**：派生值最怕"结果在、公式不见了" */
+          /* 控件出处 + 公式原文：派生值最怕"结果在、公式不见了"  */
           {
             kind: 'template',
             ref: expressionRefOf(pack.packId, definition.itemId),
@@ -1396,14 +1192,14 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
         ]),
       };
       slotNodeIds[slot.key] = fieldId;
-      /* 依赖边**等到全部槽位建完再补**：模板里派生槽位可以写在它的填写项之前，
+      /* 依赖边等到全部槽位建完再补：模板里派生槽位可以写在它的填写项之前，
          那时 `slotNodeIds` 里还没有那一项 —— 当场建边会漏，而漏了的表现是
-         "这个派生值永远算不出来"（重算找不到输入）。 */
+         "这个派生值永远算不出来"（重算找不到输入）。  */
       pendingDependencies.push({ fieldId, controlId: definition.itemId, slotKeys: refs.slots });
     }
   }
 
-  /* 补依赖边：每条边指向一个具体的填写项节点，重算据此从**文档自身**取输入 */
+  /* 补依赖边：每条边指向一个具体的填写项节点，重算据此从文档自身取输入  */
   for (const pending of pendingDependencies) {
     const node = nodes[pending.fieldId];
     if (!node) continue;
@@ -1411,9 +1207,9 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
       const depNodeId = slotNodeIds[key];
       if (typeof depNodeId !== 'string') continue;
       node.provenance.evidence = node.provenance.evidence ?? [];
-      /* `field` 放的是**槽位名**：它必须挂在这条边上，而不是去读输入节点自己的证据 ——
-         人工写入会**替换** provenance（只保留 AI 的 derivedFrom，不保留 evidence），
-         所以输入节点上的槽位名会在医生一填之后就消失，重算再也找不到它（实测踩到过）。 */
+      /* `field` 放的是槽位名：它必须挂在这条边上，而不是去读输入节点自己的证据 ——
+         人工写入会替换 provenance（只保留 AI 的 derivedFrom，不保留 evidence），
+         所以输入节点上的槽位名会在医生一填之后就消失，重算再也找不到它（实测踩到过）。  */
       node.provenance.evidence.push({
         kind: 'template',
         ref: expressionDepRefOf(pack.packId, pending.controlId),

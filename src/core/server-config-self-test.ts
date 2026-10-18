@@ -1,15 +1,6 @@
-/**
- * 服务端文件配置自测（`core/server-config.ts`）。
- *
- *   node src/core/server-config-self-test.ts
- *
- * 锁死四条：
- *   SC1 文件不在 → **写出模板**（并说明请填 stateKey），口令退回内置演示值且来源如实报出；
- *   SC2 文件在 → 口令 / 盐 / 环境标识 / 装机凭据都按文件来；
- *   SC3 **文件在但读不出来 → 抛错**（不静默退回演示口令：那会让"我配了口令"变成假话，
- *       而且整库密文会一起解不开，两件事的处置完全不同）；
- *   SC4 两个进程同时启动时**不覆盖**别人刚写的文件（`wx`）。
- */
+// 服务端文件配置自测（`core/server-config.ts`）。
+// SC1 文件不在 → 写出模板（并说明请填 stateKey），口令退回内置演示值且来源如实报出；
+// SC2 文件在 → 口令 / 盐 / 环境标识 / 装机凭据都按文件来；
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -51,8 +42,8 @@ async function main(): Promise<void> {
     assert(existsSync(file), '模板必须真的被写下（否则下次启动又要生成一遍，且没人知道该填哪儿）');
     const text = readFileSync(file, 'utf8');
     assert(text.includes('stateKey'), '模板里必须有 stateKey 这一格（它是这把钥匙本身）');
-    /* 模板里**不能写死演示口令的值**：写了之后"来源"只能报 file，
-       而启动日志里那句"口令用的是内置演示值"就永远不会出现（实测踩到） */
+    /* 模板里不能写死演示口令的值：写了之后"来源"只能报 file，
+       而启动日志里那句"口令用的是内置演示值"就永远不会出现（实测踩到）  */
     assertEqual(text.includes(DEMO_STATE_KEY), false, '模板里不得写出口令值（否则来源会被误报成"来自文件"）');
     assertEqual(stateKeyOf(loaded).source, 'demo', '模板里口令留空 → 来源必须报 demo（现场只能从这里看见）');
     assertEqual(stateKeyOf(loaded).key, DEMO_STATE_KEY, '口令应与内置演示值逐字一致（换掉它，已入库的密文就解不开了）');
@@ -92,10 +83,10 @@ async function main(): Promise<void> {
     assertEqual(bootstrap.configured, true, '给了 token 即为"已配置"');
     assertEqual(importsOf(loaded).qcRulesFile, 'D:/legacy/qc-rules.json', '一次性搬运来源应取文件里的值');
 
-    /* **值就等于内置演示口令时，来源仍必须报 demo**（哪怕它是写在文件里的）。
+    /* 值就等于内置演示口令时，来源仍必须报 demo（哪怕它是写在文件里的）。
        判据是"实际生效的口令是不是演示值"，不是"它写在哪儿" ——
-       否则日志里那句"⚠️ 口令用的是内置演示值"会在最关键的一种现场消失
-       （有人把模板里的演示值原样留在了文件里，却以为文件在就等于配好了）。 */
+       否则日志里那句" 口令用的是内置演示值"会在最关键的一种现场消失
+       （有人把模板里的演示值原样留在了文件里，却以为文件在就等于配好了）。  */
     const demoFile = join(ROOT, 'demo-value', 'server-config.json');
     mkdirSync(dirname(demoFile), { recursive: true });
     writeFileSync(demoFile, `${JSON.stringify({ stateKey: DEMO_STATE_KEY })}\n`, 'utf8');

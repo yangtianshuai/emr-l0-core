@@ -1,44 +1,4 @@
-/**
- * 本地采集客户端（C3b③）：在医生这台机器上跑的小进程 —— **采音频、分片，把段交给页面**。
- *
- * ## 它为什么存在
- *
- * `http://10.x` 下浏览器**拿不到麦克风**（不是权限问题，是安全上下文问题，前端无法绕过）。
- * 而**本机进程没有这个限制**。于是把"采 + 分片"搬到这里，页面只做两件事：
- * 把段取过来、上传给同源采集路由（由服务端转发 ASR）。完整形态与理由见
- * `docs/L2-语音采集设计.md` 第九之三节。
- *
- * ```
- *   本进程：麦克风 → 帧 ──► createChunkAssembler（与页面/服务端同一份分片规则）──► 段队列
- *                                                                                  │
- *                    页面 ──GET /next──► 取段 ──GET /audio/{i}──► WAV
- *                         ──POST 同源 /api/dictation/capture/segment──► 服务端转发 ASR
- *                         ──POST /ack {ok}──► 客户端推进队列（成或败都要回来说一声）
- * ```
- *
- * ## 用法
- *
- * ```
- * node src/dictation/local-capture-client.ts --port 8901 --token <一次性令牌> [--page <服务端页面地址>]
- * ```
- *
- * 令牌由运维/装机脚本给出（没给就**拒绝启动**：没有令牌的回环端口等于对全机开放）。
- * 客户端会把"带令牌的页面地址"打印出来 —— 页面就是靠 URL 里的 `captureClient` / `captureToken`
- * 知道"本机有客户端、且我能连上它"的。
- *
- * ## 三条纪律
- *
- * 1) **只绑 `127.0.0.1`**：绑 `0.0.0.0` 等于把"谁能采你的麦克风"交给整个内网；
- * 2) **只认令牌**，且令牌错时回 **401**（页面据此区分"客户端不在"与"令牌不对"——处置完全不同）；
- * 3) **源失败要带回页面**：采集源自己炸了（设备被占用等）也要让页面看到"现场表现 + 怎么办"，
- *    不能表现成"没有段"（那看起来像"医生什么都没说"）。
- *
- * ## 诚实边界
- *
- * **本进程没有真实麦克风实现**：Node 没有 `getUserMedia`，真采要桌面壳的原生能力（属 K10）。
- * 现在这一版用的是**脚本音频源**（`createSampleCaptureSource`），于是"采 → 分片 → 交段 → 上传 →
- * 建议"这条链今天就能被真的跑一遍；真实采集接在 `createClientCaptureSource()` 这**一个函数**里。
- */
+// 本地采集客户端（C3b③）：在医生这台机器上跑的小进程 —— 采音频、分片，把段交给页面。
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -52,8 +12,8 @@ const PREFIX = '/dictation-capture';
  * 演示脚本：两段人声各 2s + 中间 1.2s 静音 → 2 段。
  *
  * 与 demo 服务端那份默认脚本同形：它存在的意义是让"客户端这条链"今天就能跑通与被测，
- * 而不是让演示看起来更花哨（时长 5s 左右，计时是**真的在走**）。
- */
+ * 而不是让演示看起来更花哨（时长 5s 左右，计时是真的在走）。
+  */
 const DEFAULT_TIMELINE: Array<{ seconds: number; voiced: boolean }> = [
   { seconds: 2, voiced: true },
   { seconds: 1.2, voiced: false },
@@ -66,18 +26,11 @@ function argOf(argv: string[], name: string, fallback = ''): string {
   return argv[at + 1] ?? fallback;
 }
 
-/**
- * 采集源：**真实麦克风就接在这里**。
- *
- * 桌面壳（Electron 主进程 / Tauri / 原生）能用系统麦克风拿到 PCM 帧，于是只要在这里
- * 换成一个实现了 `CaptureSource` 的源，**下面整条链一行都不用改**。
- * Node 本身没有麦克风 API —— 这也是为什么"真实采集"这件事属于宿主形态（K10）而不是本进程。
- */
 function createClientCaptureSource(): CaptureSource {
   return createSampleCaptureSource({ timeline: DEFAULT_TIMELINE });
 }
 
-/** 页面转交过来的分片参数：值来自服务端配置，这里**复用同一份校验**（不合法就报错，不取默认） */
+/** 页面转交过来的分片参数：值来自服务端配置，这里复用同一份校验（不合法就报错，不取默认）  */
 function parseSegment(raw: unknown): SegmentConfig {
   const input = (raw ?? {}) as { silenceMs?: unknown; maxSeconds?: unknown; minSeconds?: unknown };
   return validateCaptureConfig({
@@ -156,7 +109,7 @@ export function createLocalClientRuntime(options: { sourceFactory?: () => Captur
             next.feed(frame);
           });
         } catch (err) {
-          /* 源自己的失败：记下来带给页面（**不表现成"没有段"** —— 那看起来像医生什么都没说） */
+          /* 源自己的失败：记下来带给页面（不表现成"没有段" —— 那看起来像医生什么都没说）  */
           problem = {
             code: (err as { code?: string }).code ?? 'E_CAPTURE_SOURCE_UNKNOWN',
             message: (err as Error).message,
@@ -166,8 +119,8 @@ export function createLocalClientRuntime(options: { sourceFactory?: () => Captur
           next.finish(elapsed);
         }
       })().finally(() => {
-        /* **收尾后必须放开**：不放开的话，第二次采集会被判成"已经在采"
-           （实测踩到：医生点第二次开始，界面报"已经在采集了"，而它其实早就停了）。 */
+        /* 收尾后必须放开：不放开的话，第二次采集会被判成"已经在采"
+           （实测踩到：医生点第二次开始，界面报"已经在采集了"，而它其实早就停了）。  */
         collecting = null;
       });
       return { ok: true, sessionId };
@@ -289,13 +242,11 @@ export function createLocalClientServer(options: { token: string; runtime?: Loca
   });
 }
 
-/* ------------------------------ CLI ------------------------------ */
-
 if (process.argv[1]?.includes('local-capture-client')) {
   const port = Number(argOf(process.argv, 'port', '8901'));
   const providedToken = argOf(process.argv, 'token');
   const pageUrl = argOf(process.argv, 'page');
-  /* 令牌**没给就拒绝启动**：没有令牌的回环端口等于对全机开放（第九之三节） */
+  /* 令牌没给就拒绝启动：没有令牌的回环端口等于对全机开放（第九之三节）  */
   const token = providedToken === '' ? randomBytes(16).toString('hex') : providedToken;
   const server = createLocalClientServer({ token, pageUrl });
   server.listen(port, '127.0.0.1', () => {

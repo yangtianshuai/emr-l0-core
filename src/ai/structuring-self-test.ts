@@ -1,18 +1,4 @@
-/**
- * 即时结构化自测（V4）。
- *
- *   node src/ai/structuring-self-test.ts
- *
- * 锁死五件事：
- *   S1 命中词表即给出数据元（含命中词、置信度与理由）；
- *   S2 **未命中即"不打标"**，绝不兜底给默认标签；
- *   S3 三种"没标"必须长得不一样：策略不适用（ordered / external）· 词表为空 · 没命中 ——
- *      每一档都要说得出自己的原因（"不参与"最容易被读成"这段没内容"）；
- *   S4 命中判定与落位**共用同一份实现**（最长匹配优先），不允许两处各写一份；
- *   S5 置信度被上限压制（<0.90），非法词表一律当场拒、且词表可回读。
- *
- * 落位侧的回归由 `npm run test:placement` 守护（本用例改动的是那份匹配器的抽取）。
- */
+// 即时结构化自测（V4）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { matchLongest, validatePlacementConfig, type DictationPlacementConfig } from '../dictation/placement.ts';

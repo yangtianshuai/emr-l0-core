@@ -1,32 +1,6 @@
-/**
- * 跨次就诊对比 —— 同一位患者、两次就诊的两份文书并排看。
- *
- * ## 它回答三个问题（且只回答这三个）
- *
- * 1) **是不是同一个诊断**：按 ICD 诊断编码比，编码级相等才算"同诊断"。
- *    正文里写没写"肺炎"不算 —— 那是语义判断，误报率无法在无评测集的前提下声称
- *    （与 `model/consistency.ts`、`qc/visit-timeline.ts` 拒绝语义判定的理由同一个）。
- * 2) **这次和上次差在哪**：按章节编码（`sectionCode`）对齐，逐段比原文，
- *    给出"新增了哪段 / 上次有哪段这次没了"。**不判断语义是否等价**：
- *    "发热 3 天"改成"反复发热三天"在这里是一次改写，不是"同一句"。
- * 3) **上次的用药/医嘱原文是什么**：只把上次"医嘱 / 用药 / 处理 / 治疗"那一章的**原文**
- *    原样交出来，供人决定要不要沿用。系统不抽取药名、不生成方案 ——
- *    这份模型里没有结构化的用药数据元，任何"提取药物清单"都只能是猜。
- *
- * ## 两条不许越界
- *
- * - **不做语义相似度**：没有评测集就报不出准确率，而错报"这两次一样"比不报更危险。
- * - **不替人写**：本模块只产出"对照结论"，落笔一律走建议通道（见 demo 的 carry-over）。
- *
- * ## 一个已知的不对称
- *
- * 两侧诊断都为空时 `sameDiagnosis` 必须是 `false` 且带原因 ——
- * "都是空"看起来相等，但那说明**没有可比的诊断**，不是"同一个诊断"。
- */
+// 跨次就诊对比 —— 同一位患者、两次就诊的两份文书并排看。
 
 import type { DataElementTag, DocumentModel, NodeId, SectionNode } from '../model/types.ts';
-
-/* ------------------------------ 输入 / 输出 ------------------------------ */
 
 export interface CompareTag {
   system: string;
@@ -77,8 +51,6 @@ export interface VisitCompare {
   /** 这次对比的前提，必须显示给人看（否则"没差异"会被读成"没问题"） */
   notes: string[];
 }
-
-/* ------------------------------- 小工具 ------------------------------- */
 
 const textOfNode = (node: DocumentModel['nodes'][string]): string => {
   if (node.type !== 'text') return '';
@@ -182,12 +154,9 @@ function isMedicationSection(section: SectionNode): boolean {
   return MED_SECTION_TITLE.test(title);
 }
 
-/* ------------------------------- 主函数 ------------------------------- */
-
 export function compareVisits(previous: DocumentModel, current: DocumentModel): VisitCompare {
   const notes: string[] = [];
 
-  /* ① 诊断 */
   const previousDiagnosis = diagnosisOf(previous);
   const currentDiagnosis = diagnosisOf(current);
   const currentKeys = new Set(currentDiagnosis.map(keyOfTag));
@@ -205,7 +174,6 @@ export function compareVisits(previous: DocumentModel, current: DocumentModel): 
     notes.push('两次就诊的诊断编码没有交集：下面的对照仅供参考，不构成"同诊断复诊"。');
   }
 
-  /* ② 章节对齐 */
   const previousSections = sectionsOf(previous);
   const currentSections = sectionsOf(current);
   const previousByKey = new Map<string, { section: SectionNode; paragraphs: string[] }>();
@@ -264,7 +232,6 @@ export function compareVisits(previous: DocumentModel, current: DocumentModel): 
     return leftIndex - rightIndex;
   });
 
-  /* ③ 上次的用药/医嘱原文 */
   let medication: MedicationCarry = { paragraphs: [], sectionTitle: null, code: null, reason: null };
   const medSection = previousSections.find(isMedicationSection);
   if (!medSection) {

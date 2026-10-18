@@ -1,16 +1,4 @@
-/**
- * T26 验收自测：版式段落重建（几何启发式）。
- *
- *   node src/import/layout-self-test.ts
- *
- * 覆盖四层：
- *   A 视觉行聚类与拼接（同行多片段、英文折行补空格、中文不补）
- *   B 分段线索（段前间距 / 首行缩进 / 字号）与确定性，含两个实测缺陷的回归用例
- *   C 降级与边界（无坐标、单行、空输入、跨页不合并、缺坐标行不丢文本）
- *   D **导出 → 导入闭环**：源文档的每个段落必须恰好落在重建后的一个段落里
- *
- * 核心断言是 D：段落重建如果没有闭环验证，就只是"看起来切得挺像"。
- */
+// T26 验收自测：版式段落重建（几何启发式）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession } from '../core/session.ts';
@@ -51,7 +39,6 @@ function paragraphLines(texts: string[], startY: number, options: { indent?: num
 }
 
 async function main(): Promise<void> {
-  /* ========================= A 视觉行聚类与拼接 ========================= */
 
   await test('A1 同一视觉行：y 接近的片段按 x 排序合并（左标签 + 右数值）', async () => {
     const result = rebuildParagraphs([line('体温', MARGIN, 100), line('38.5 ℃', MARGIN + 60, 100)]);
@@ -81,8 +68,6 @@ async function main(): Promise<void> {
       `证据应说明"未发现线索"，实际：${result.paragraphs[0]!.evidence.join('；')}`,
     );
   });
-
-  /* ========================= B 分段线索 ========================= */
 
   await test('B1 段前间距：明显大于基准行距 → 切段，并给出间距依据', async () => {
     const first = paragraphLines(['第一段第一行', '第一段第二行'], 100);
@@ -168,8 +153,6 @@ async function main(): Promise<void> {
     assertEqual(JSON.stringify(rebuildParagraphs(input)), JSON.stringify(rebuildParagraphs(input)), '两次重建应完全一致');
   });
 
-  /* ========================= C 降级与边界 ========================= */
-
   await test('C1 无坐标信息：降级为"每页一段"，标 low 并明确警告（不假装切对了）', async () => {
     const result = rebuildParagraphs([
       { page: 0, text: '第一行' },
@@ -232,8 +215,6 @@ async function main(): Promise<void> {
     assert(joined.includes('有坐标的一行'), '有坐标行的文本不得丢失');
   });
 
-  /* ========================= D 导出 → 导入闭环 ========================= */
-
   await test('D1 闭环：源文档的每个段落恰好落在一个重建段落里（既不丢也不跨段）', async () => {
     const fixture = distinctFixture();
     const imported = await exportedImport(fixture.doc);
@@ -252,8 +233,8 @@ async function main(): Promise<void> {
       imported.layout.paragraphs.filter((paragraph) => paragraph.kind === 'body').every((paragraph) => paragraph.confidence !== 'low'),
       '正文段应至少有一条几何线索（置信度不为 low）',
     );
-    /* 字段文本是**内联在所属段落**里导出的（见 ofd.ts 的 renderLines），
-       所以段落总数 = 标题数 + 正文段数，而不是再加字段行数。 */
+    /* 字段文本是内联在所属段落里导出的（见 ofd.ts 的 renderLines），
+       所以段落总数 = 标题数 + 正文段数，而不是再加字段行数。  */
     assertEqual(imported.layout.stats.paragraphs, titles.length + fixture.texts.length, '段落总数应等于 标题数 + 正文段数');
     /* 但要确认内联的字段文本没有在重建中丢失 */
     const joined = imported.layout.paragraphs.map((paragraph) => paragraph.text.replace(/\s+/g, '')).join('');
@@ -281,7 +262,7 @@ async function main(): Promise<void> {
     assertEqual(texts.length, paragraphs.length, '每个段落应配一个 text 节点');
     const withEvidence = paragraphs.filter((node) => (node.provenance?.evidence ?? []).some((item) => (item.field ?? '').includes('段落重建')));
     assertEqual(withEvidence.length, paragraphs.length, '每个段落节点都应带"段落重建依据"来源链（事后可审计）');
-    /* "未确认"标在**内容节点**上（paragraph 是结构节点，本身不带确认标记） */
+    /* "未确认"标在内容节点上（paragraph 是结构节点，本身不带确认标记）  */
     assertEqual(
       texts.every((node) => node.humanConfirmed === false && node.provenance?.origin === 'imported'),
       true,
@@ -291,8 +272,6 @@ async function main(): Promise<void> {
 
   process.exit(suite.report());
 }
-
-/* ---------------------------- 测试内部工具 ---------------------------- */
 
 /** 构造段落文本各不相同的文档（文本相同会让"每段落在一段里"的断言失去意义） */
 function distinctFixture(): { doc: DocumentModel; texts: string[]; sectionCount: number; fieldCount: number } {

@@ -1,15 +1,4 @@
-/**
- * 持久化自测。
- *
- *   node src/core/persistence-self-test.ts
- *
- * 本套验证的不是"能存能读"，而是**失败时的行为**：
- *   P1 写后读回一致；P2 原子写不留临时文件；
- *   P3~P7 四类异常必须**显式报错** —— 文件不存在、JSON 截断、格式不符、版本不符、内容被改。
- *
- * 为什么重点在失败路径：这类系统里最危险的不是"读不到"，而是**把读不到伪装成读到了**——
- * 空启动会让质控痕迹消失而无人知晓（见 persistence.ts 文件头）。
- */
+// 持久化自测。
 
 import { mkdirSync, readdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';

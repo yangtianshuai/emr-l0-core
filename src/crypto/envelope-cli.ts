@@ -1,17 +1,6 @@
-/**
- * 加密归档命令行：把产物加密成 `.l0enc` 信封（或解回来）。
- *
- *   node src/crypto/envelope-cli.ts selfcheck
- *   node src/crypto/envelope-cli.ts encrypt <输入文件> <输出.l0enc> --passphrase <口令> [--iterations N]
- *   node src/crypto/envelope-cli.ts decrypt <输入.l0enc> <输出文件> --passphrase <口令>
- *
- * 为什么要有命令行（而不是只在代码里提供函数）：
- *   密码学的"能跑通"必须在**真实文件**上验证过 —— 界面上点一下只能证明"接口通"，
- *   而现场真正要做的是"把已签章的 OFD 加密后带走，回来后能原样解回来"。
- *   这条路径顺便把"解密后与原件逐字节一致"变成可核对的事实。
- *
- * ⚠️ 命令行参数里的口令会进 shell 历史：仅用于本地验证；生产应由界面/密码设备采集口令。
- */
+// 加密归档命令行：把产物加密成 `.l0enc` 信封（或解回来）。
+// node src/crypto/envelope-cli.ts decrypt <输入.l0enc> <输出文件> --passphrase <口令>
+// 命令行参数里的口令会进 shell 历史：仅用于本地验证；生产应由界面/密码设备采集口令。
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -20,12 +9,6 @@ import { decryptEnvelope, decryptEnvelopeWith, encryptEnvelope, encryptEnvelopeF
 import { demoKeyPair } from './provider.ts';
 import { publicKeyFingerprint } from './sm2.ts';
 
-/**
- * 失败即终止。
- * 返回类型写成 never 是必要的：否则调用点之后的收窄（`if (!passphrase) fail(...)` 之后
- * passphrase 仍是 `string | undefined`）不成立 —— 这是 TS 在 `process.exit()` 上的已知限制，
- * 而"参数可能 undefined"这种错误恰恰会在运行时才炸。
- */
 function fail(message: string): never {
   console.error(message);
   console.error(usageText());
@@ -71,9 +54,9 @@ function main(): void {
   const output = args[2];
   if (!input || !output) fail('缺少输入或输出文件路径');
 
-  /* ⚠️ 参数校验必须**绑定到子命令**：早期版本把 `--passphrase` 的检查放在全局，
+  /*  参数校验必须绑定到子命令：早期版本把 `--passphrase` 的检查放在全局，
      结果公钥模式的 seal-for / open-with 全被"缺少口令"拦住（实测发现）。
-     纪律本身没错（没有密钥就不该产出"看起来加密了"的东西），错的是它管得太宽。 */
+     纪律本身没错（没有密钥就不该产出"看起来加密了"的东西），错的是它管得太宽。  */
   const requirePassphrase = (): string => {
     const passphrase = argValue(args, '--passphrase');
     if (!passphrase) {
@@ -113,8 +96,8 @@ function main(): void {
   }
 
   /* --------------------- 公钥模式（演示用：由种子派生密钥） --------------------- */
-  /* ⚠️ 用种子派生密钥**只为本地演示**：真正的接收方密钥必须由密码设备生成并保管。
-     这里把这条限制写在命令输出里，避免被当成"生产用法"照抄。 */
+  /*  用种子派生密钥只为本地演示：真正的接收方密钥必须由密码设备生成并保管。
+     这里把这条限制写在命令输出里，避免被当成"生产用法"照抄。  */
   if (command === 'seal-for') {
     const seed = argValue(args, '--recipient-seed');
     if (!seed) fail('缺少 --recipient-seed（演示用；生产应由密码设备提供接收方公钥）');

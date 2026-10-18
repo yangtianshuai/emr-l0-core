@@ -1,19 +1,4 @@
-/**
- * 跨次就诊对比自测（C1~C6）。
- *
- *   node src/compare/visit-compare-self-test.ts
- *
- * ## 这一族最容易出错的地方（各有用例钉住）
- *
- *   C1 **同诊断只认编码**：两侧都有 J18.9 才算同诊断；正文写了"肺炎"不算；
- *   C2 **有交集才算**：两侧诊断各有、但没交集 → 不算同诊断，且要说明"仅供参考"；
- *   C3 **两侧都空不是"相同"**：没有可比的东西必须显式说出来（这条不对称最容易写反）；
- *   C4 **新增与删除都要看得见**：本次新开的章节、上次有这次没了的章节；
- *   C5 **用药沿用只给原文**：有"医嘱/用药"章就原样交出，没有就**说明原因**而不是给空；
- *   C6 **逐字相同 ≠ 没问题**：全相同要说"这是没改动"。
- *
- * 全部离线：合成文书，不读库、不联网。
- */
+// 跨次就诊对比自测（C1~C6）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { SCHEMA_VERSION, type DataElementTag, type DocNode, type DocumentModel, type NodeId } from '../model/types.ts';
@@ -24,8 +9,6 @@ const suite = new TestSuite('跨次就诊对比自测', [
 ]);
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
-
-/* ------------------------------ 夹具 ------------------------------ */
 
 interface ParagraphSpec {
   text: string;
@@ -100,8 +83,6 @@ const baseSections = (chief: string, diagnosis: string, extra: SectionSpec[] = [
   ...extra,
   { title: '五、初步诊断', code: 'diagnosis', paragraphs: [{ text: diagnosis, tags: [DIAGNOSIS('J18.9', '肺炎')] }] },
 ];
-
-/* ------------------------------- 用例 ------------------------------- */
 
 async function main(): Promise<void> {
   await test('C1 同诊断只认 ICD 编码；段落改写被算作"改写"而不是"相同"', () => {

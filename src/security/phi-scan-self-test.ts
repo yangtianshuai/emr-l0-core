@@ -1,20 +1,5 @@
-/**
- * 发布前隐私与密钥排查脚本自测（P1~P5）。
- *
- * ## 为什么一个"检查工具"也需要用例
- *
- * 因为它**静默失灵的表现与干净完全一样**：没报问题。
- * 本套件就是被这样一次失灵逼出来的 —— `"label": "张医生（内科）"` 的真实数据里，
- * 人名后面跟着科室，而规则要求"闭合引号紧跟纯中文"，于是整条失配，
- * 报告上表现为"没搜到姓名"，而人读到的是"没问题"。**这是这类工具最危险的失败模式**。
- *
- * 所以锁死的五条：
- *   P1 身份证号：**校验位复算**才叫命中；生日段不是日期的不报（宁可不报，不可误报）；
- *   P2 措辞不误报：`患者：门诊号`「住址替换为等长假值」这类**文案**不得当数据报出来；
- *   P3 值的形态要容得下真实写法（人名后面跟科室）—— 守住上面那次漏报；
- *   P4 **报告里不出现明文**：工具不能变成新的泄露源；
- *   P5 私钥归因：只有**确能由公开种子推导**的才允许降级，降级错了就是放过一把真私钥。
- */
+// 发布前隐私与密钥排查脚本自测（P1~P5）。
+// P5 私钥归因：只有确能由公开种子推导的才允许降级，降级错了就是放过一把真私钥。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { demoKeyPair } from '../crypto/provider.ts';
@@ -47,9 +32,9 @@ function hitsOfRule(text: string, rule: string): Finding[] {
 }
 
 await test('P1 身份证号：校验位通过才叫命中，生日段不是日期的不报', () => {
-  /* 两个号都是**合成的**：前 17 位固定为 `11010119810312001`（地区码 + 1981-03-12，虚构人员），
+  /* 两个号都是合成的：前 17 位固定为 `11010119810312001`（地区码 + 1981-03-12，虚构人员），
      末位分别填"按国标算法算出的正确校验位 `8`"与"错误的 `1`"。
-     这能验证实现照不照国标算 —— 但它替代不了"与外部权威样例比对"（那正是密码学那边用国标向量的做法）。 */
+     这能验证实现照不照国标算 —— 但它替代不了"与外部权威样例比对"（那正是密码学那边用国标向量的做法）。  */
   const passed = hitsOfRule('证件号：110101198103120018', '身份证号');
   assertEqual(passed.length, 1, '校验位通过的号必须报出来（那几乎一定是按真实规则编制的）');
   assert(passed[0]?.detail.includes('校验位通过') === true, '必须写明依据是"校验位通过"，否则它只是"18 位数字"');
@@ -93,7 +78,8 @@ await test('P4 报告里不出现明文：工具不得成为新的泄露源', ()
 await test('P5 私钥归因：只有确能由公开种子推导的才允许降级', () => {
   const known = demoPrivateHexes(['phi-scan-self-test-seed']);
 
-  /* ① 演示私钥：可由公开种子推导 → 降级为"已知可公开"，且必须**说清是哪个种子** */
+  // ① 演示私钥：可由公开种子推导 → 降级为"已知可公开"，且必须说清是哪个种子
+
   const demoHex = demoKeyPair('phi-scan-self-test-seed').privateKey.toString(16).padStart(64, '0');
   const demoFinding: Finding = {
     level: 'must',
@@ -108,7 +94,8 @@ await test('P5 私钥归因：只有确能由公开种子推导的才允许降�
   assertEqual(demoFinding.level, 'public', '演示私钥应降级为"已知可公开"');
   assert(demoFinding.detail.includes('phi-scan-self-test-seed'), '降级理由必须写明种子，便于人工复核');
 
-  /* ② 来历不明的私钥：**保持在"必须处置"**，并出现在未知清单里 */
+  // ② 来历不明的私钥：保持在"必须处置"，并出现在未知清单里
+
   const alienFinding: Finding = {
     level: 'must',
     rule: 'JSON 里的密钥字段',
@@ -131,8 +118,8 @@ await test('P6 .gitignore 判据：父目录规则算覆盖，注释不算规则
   assertEqual(isIgnored(text, 'artifacts/recipient-keys.json'), false, '没写进规则的路径不得算已覆盖');
   assertEqual(isIgnored('# /logs/', 'logs'), false, '注释行不是规则（否则"提一句就以为挡住了"）');
 
-  /* 已知限度：本判据**不处理 `!` 取反**，于是会保守地说"已覆盖"。
-     真要精确判断应交给 `git check-ignore`，但那要求仓库已 init —— 这一步不该由排查脚本替使用者决定。 */
+  /* 已知限度：本判据不处理 `!` 取反，于是会保守地说"已覆盖"。
+     真要精确判断应交给 `git check-ignore`，但那要求仓库已 init —— 这一步不该由排查脚本替使用者决定。  */
   assertEqual(isIgnored(text, 'artifacts/state/keep.json'), true, '取反的情形按"已覆盖"处理（保守方向已知）');
 });
 
@@ -142,23 +129,22 @@ await test('P7 复核记录：按指纹降级、理由必须带出来、失效�
   assert(!!fresh, '前置：该文本应命中身份证号规则');
   assertEqual(fresh.fingerprint, fingerprintOf('身份证号', '110101198103120011'), '指纹 = 规则名 + 原值的哈希');
 
-  /* 指纹**不含路径与行号**：同一段合成数据出现在别处、或行号变了，复核记录不该失效 */
+  /* 指纹不含路径与行号：同一段合成数据出现在别处、或行号变了，复核记录不该失效  */
   const moved = hitsOf(`\n\n\n${raw}`).find((item) => item.rule === '身份证号') as Finding;
   assertEqual(moved.where === fresh.where, false, '前置：两处位置不同（行号不同）');
   assertEqual(moved.fingerprint, fresh.fingerprint, '位置变了，指纹必须不变（否则复核记录会被行号变化反复作废）');
 
-  /* ① 命中复核记录 → 降级为 reviewed，且把理由与复核人带进报告 */
   const entry = { fingerprint: fresh.fingerprint, note: '自测夹具：合成号', reviewedBy: 'T', reviewedAt: '2026-10-10' };
   const stale = applyReview([fresh], [entry]);
   assertEqual(fresh.level, 'reviewed', '命中复核记录应降级为"已复核"');
   assertEqual(stale.length, 0, '有对应命中的记录不算失效');
   assert(fresh.detail.includes('自测夹具：合成号') && fresh.detail.includes('T 2026-10-10'), '理由与复核人必须出现在报告里');
 
-  /* ② 记录里写着、仓库里已无对应内容 → 必须报为"失效"（否则清单会悄悄烂掉） */
   const orphan = { fingerprint: 'deadbeefdeadbeef', note: '早已删除的内容', reviewedBy: 'T', reviewedAt: '2026-10-10' };
   assertEqual(applyReview([], [orphan]).length, 1, '无对应命中的复核记录应被报出');
 
-  /* ③ 复核**不得**盖过更严重的档：已归因为"已知可公开"的演示私钥保持原档（它本来就允许公开） */
+  // ③ 复核不得盖过更严重的档：已归因为"已知可公开"的演示私钥保持原档（它本来就允许公开）
+
   const pub: Finding = {
     level: 'public',
     rule: 'JSON 里的密钥字段',
@@ -171,8 +157,8 @@ await test('P7 复核记录：按指纹降级、理由必须带出来、失效�
 });
 
 await test('P8 密钥文件分级：空壳降为"需人工确认"，有内容仍是"必须处置"', () => {
-  /* 这条是被一次**假警报**逼出来的：清除密钥时"把文件写空"的旧实现留下 0 字节的空壳，
-     于是每次发布前排查都为它报一次"必须处置"。假警报的代价不是噪声，是**报告被跳读**。 */
+  /* 这条是被一次假警报逼出来的：清除密钥时"把文件写空"的旧实现留下 0 字节的空壳，
+     于是每次发布前排查都为它报一次"必须处置"。假警报的代价不是噪声，是报告被跳读。  */
   const empty = keyFileVerdict('.key', 0);
   assertEqual(empty.level, 'review', '0 字节的密钥文件不含材料，不该报最高级别');
   assert(empty.detail.includes('空'), '降级必须写明理由（"它是空的"），否则看起来像放水');

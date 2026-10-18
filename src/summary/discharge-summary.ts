@@ -1,30 +1,6 @@
-/**
- * 出院汇总（出院小结派生 + 缺口核对）。
- *
- * ## 它做什么
- *
- * 医生写出院小结时，真正花时间的不是判断，是**把已经写在别处的事实再抄一遍**：
- * 入院情况来自入院记录、住院经过来自历次病程记录、出院医嘱来自诊治调整。
- * 这里把这些源文书的**原文**搬过来，并按目标章节组织好；同时逐条回答
- * "这一章为什么派生不出来"——缺哪份文书、缺哪一章、还是那一章本身是空的。
- *
- * ## 三条不许越界
- *
- * 1. **不改写**：搬运的是原文，不是摘要。摘要错了医生看不出来，原文错了他一眼能看出来。
- *    多个段落之间用「；」连接（换行在文档模型里是段落边界，不是段内字符）。
- * 2. **不落笔**：产出是 `DeriveItem`，交给调用方走建议通道；采纳与否是临床判断。
- * 3. **不猜**：源文书没有 / 源章节没有 / 源章节是空的，一律落成 `gap` 并说明原因，
- *    绝不"根据上下文补一句"。缺口核对的价值就在于**缺口本身**，补一句等于把缺口抹掉。
- *
- * ## 为什么缺口与条目分两栏
- *
- * "派生出了什么"和"缺什么"是两个问题。混在一起时，医生看到的是一堆条目，
- * 而"这次为什么没有出院医嘱"会藏在某条的空字段里 —— 那正是最容易被忽略的地方。
- */
+// 出院汇总（出院小结派生 + 缺口核对）。
 
 import type { NodeId } from '../model/types.ts';
-
-/* ------------------------------ 输入 ------------------------------ */
 
 export interface SummaryParagraph {
   nodeId: NodeId;
@@ -47,8 +23,6 @@ export interface SummaryDoc {
   sections: SummarySection[];
 }
 
-/* ------------------------------ 输出 ------------------------------ */
-
 /** 来源：这一句原文出自哪份文书的哪个节点（界面据此跳回去） */
 export interface DeriveSource {
   docId: string;
@@ -65,7 +39,7 @@ export interface DeriveItem {
   /** 目标章节 code（也是批量生成建议时的勾选键） */
   key: string;
   title: string;
-  /** 目标章节下的文本节点；没有这一章时为 null —— 此时**不能**生成建议 */
+  /** 目标章节下的文本节点；没有这一章时为 null —— 此时不能生成建议  */
   targetNodeId: NodeId | null;
   text: string;
   sources: DeriveSource[];
@@ -96,17 +70,15 @@ export interface DischargeSummaryPlan {
   notes: string[];
 }
 
-/* ------------------------------ 规则表 ------------------------------ */
-
 /**
  * 目标章节 ← 来源章节。
  *
  * `merge: true` 表示"无条件一并取"（入院情况要同时要主诉与现病史）；
  * 缺省表示"按顺序取第一个有内容的"（出院诊断先看病程记录，没有再退回入院记录的初步诊断）。
  *
- * 这张表是**临床口径**，不是技术口径：哪一章该复述哪一章，只有写病历的人能定。
+ * 这张表是临床口径，不是技术口径：哪一章该复述哪一章，只有写病历的人能定。
  * 因此它放在一处、写得直白，改口径不改算法。
- */
+  */
 const TARGETS: Array<{
   target: string;
   title: string;
@@ -145,15 +117,14 @@ const TARGETS: Array<{
   },
 ];
 
-/** 多段合并用的连接符（理由见文件头：换行是段落边界，不是段内字符） */
 export const PARAGRAPH_JOINER = '；';
 
 /**
  * 合并多段原文。
  *
- * 前一段已经以句末/分号收尾时**不再插入连接符**：否则会出现「……3天。；患者1年前……」这种
+ * 前一段已经以句末/分号收尾时不再插入连接符：否则会出现「……3天。；患者1年前……」这种
  * 一句话里带两个终止符的样子。插入与省略的判据只看原文最后一个字符 —— 不改动任何原有字符。
- */
+  */
 function joinTexts(texts: string[]): string {
   let out = '';
   for (const text of texts) {
@@ -163,11 +134,9 @@ function joinTexts(texts: string[]): string {
   return out;
 }
 
-/* ------------------------------ 主函数 ------------------------------ */
-
 /**
- * 生成派生计划。**纯函数**：不读库、不写文档、不看时钟。
- */
+ * 生成派生计划。纯函数：不读库、不写文档、不看时钟。
+  */
 export function planDischargeSummary(input: {
   currentDocId: string;
   docs: SummaryDoc[];
@@ -191,9 +160,9 @@ export function planDischargeSummary(input: {
     }
 
     const sources: DeriveSource[] = [];
-    /* 先记账、后判定：优先级更高的来源缺失时，**只有最终一条都没取到**才算缺口。
+    /* 先记账、后判定：优先级更高的来源缺失时，只有最终一条都没取到才算缺口。
        否则会出现"出院诊断既有内容、又被报缺病程记录诊断章"的自相矛盾 ——
-       那句提示会让医生以为还得去补一份病程诊断，而实际上他已经有可用的原文。 */
+       那句提示会让医生以为还得去补一份病程诊断，而实际上他已经有可用的原文。  */
     const pending: DeriveGap[] = [];
     /**
      * 同一句缺口只说一次。
@@ -310,8 +279,6 @@ export function planDischargeSummary(input: {
   };
 }
 
-/* --------------------------- 适用性（摆不摆这一栏） --------------------------- */
-
 export interface ApplicabilityInput {
   /** 就诊类型（`outpatient` / `inpatient` / `emergency` / `physical-exam`；未知传空串） */
   visitType?: string | null;
@@ -320,8 +287,8 @@ export interface ApplicabilityInput {
    *
    * 导入件没有可信的就诊类型：导入时只给了一条 `outpatient` 的占位记录
    * （见 demo 的 `V_IMPORT_*`）。按它判"门诊"会把一份真实的出院记录挡在门外，
-   * 所以导入件一律**视为未知**，不做限制。
-   */
+   * 所以导入件一律视为未知，不做限制。
+    */
   imported?: boolean;
 }
 
@@ -336,14 +303,14 @@ const VISIT_LABEL: Record<string, string> = { outpatient: '门诊', emergency: '
 /**
  * 「出院汇总」这一栏该不该出现在本次就诊上。
  *
- * 判据只有一条：**是不是住院**。理由不是"门诊没有出院小结"这种常识，
+ * 判据只有一条：是不是住院。理由不是"门诊没有出院小结"这种常识，
  * 而是这一栏的全部内容都来自住院过程（入院记录 / 病程记录 / 出院记录）——
  * 在门诊接诊上摆一个永远算不出来的入口，等于让人点进去再被拒一次。
  *
  * 两条"不限制"的边界（与模板的 `templateFitsVisit` 同口径：认不出就不挡）：
  *   · 就诊类型为空 —— 认不出，不能替人断言"这不是住院"；
  *   · 导入件 —— 类型是占位值，不可信。
- */
+  */
 export function dischargeSummaryApplicability(input: ApplicabilityInput): Applicability {
   const type = String(input.visitType ?? '');
   if (input.imported === true || type === '') return { applicable: true, reason: null };

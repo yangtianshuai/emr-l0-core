@@ -1,30 +1,4 @@
-/**
- * 采集层的**入站面**：从一次 `POST /api/dictation/capture/segment` 里取出那一段音频。
- *
- * ## 为什么自己解 multipart，而不是"把请求体原样转给 ASR"
- *
- * 原样转发的确更短，但它把 **ASR 的协议暴露给了前端**（字段名、multipart 形状、甚至
- * 哪天换成 `audio_file` 就得改前端）—— 而"前端看不到 ASR 协议"正是采集层选
- * "浏览器 → 同源服务端 → ASR"这条路线的理由之一（见 `docs/L2-语音采集设计.md` 第二节）。
- * 前端与我们的契约只有一句：**提交一段音频，拿回这段的文本或失败原因**。
- *
- * ## 为什么解析器可以这么短（以及它守住了什么）
- *
- * 调用方是我们自己的前端，而 RFC 7578 的 multipart **没有嵌套、没有编码、没有 chunked**：
- * 一段前缀 + 若干"分段"（头部 + 空行 + 正文）+ 结束标记。于是这里只做四件事：
- *   ① 从 `Content-Type` 取 boundary（拿不到就拒）；
- *   ② 找到**唯一一个** `name="audio"` 的**文件**分段（`filename` 必须有）；
- *   ③ 按 `\r\n--boundary` 定界取正文（**按字节找，不按字符**：音频里任何一个字节都可能出现）；
- *   ④ 分段数不是 1 就拒。
- *
- * 第 ④ 条是刻意的严格：允许多余分段，就等于允许调用方夹带别的东西，
- * 而我们**不做**"哪个是音频"的猜测 —— 猜错一次就是把一份别的内容当成录音发出去。
- *
- * ## 它不校验音频内容
- *
- * 不检查是不是合法 WAV：那要读到文件头再判断，而"格式对不对"由 ASR 服务说了算，
- * 在这里再写一套判断只会造出第二个可能不一致的真相。这里只保证"取出来的字节就是那一段"。
- */
+// 采集层的入站面：从一次 `POST /api/dictation/capture/segment` 里取出那一段音频。
 
 import { CAPTURE_AUDIO_FIELD, CaptureError } from './capture.ts';
 
@@ -37,7 +11,7 @@ export interface UploadedAudio {
 const CRLF = Uint8Array.from([13, 10]);
 const HEADER_END = Uint8Array.from([13, 10, 13, 10]);
 
-/** 按**字节**找子串（`\r\n--boundary` 必须按字节比：转成字符串会破坏二进制正文） */
+/** 按字节找子串（`\r\n--boundary` 必须按字节比：转成字符串会破坏二进制正文）  */
 function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from = 0): number {
   if (needle.byteLength === 0) return -1;
   const last = haystack.byteLength - needle.byteLength;
@@ -96,7 +70,6 @@ function splitParts(body: Uint8Array, boundary: string): RawPart[] {
   for (;;) {
     /* 定界符后面的两种情况：`--` = 结束；`\r\n` = 还有分段 */
     if (body[cursor] === 45 && body[cursor + 1] === 45) break;
-    /* 跳过定界符后的 CRLF */
     cursor = indexOfBytes(body, CRLF, cursor) + 2;
     if (cursor <= 1) break;
     const headerEnd = indexOfBytes(body, HEADER_END, cursor);
@@ -105,8 +78,8 @@ function splitParts(body: Uint8Array, boundary: string): RawPart[] {
     }
     const headers = ascii(body.subarray(cursor, headerEnd));
     const bodyStart = headerEnd + HEADER_END.byteLength;
-    /* 正文结束于**下一个** `\r\n--boundary`：按规范 boundary 不得出现在正文里，
-       发送方（我们自己的前端）随机生成它，所以"第一个命中"就是真边界。 */
+    /* 正文结束于下一个 `\r\n--boundary`：按规范 boundary 不得出现在正文里，
+       发送方（我们自己的前端）随机生成它，所以"第一个命中"就是真边界。  */
     const nextBoundary = indexOfBytes(body, nextDelimiter, bodyStart);
     if (nextBoundary === -1) {
       throw new CaptureError('E_CAPTURE_UPLOAD_INVALID', '分段没有结束标记：请求体被截断（拒绝按"读到的部分"当完整音频）');

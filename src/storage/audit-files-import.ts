@@ -1,26 +1,4 @@
-/**
- * 管理审计与锚点**从旧 NDJSON 文件搬进库**的一次性动作。
- *
- * ## 三条只有在这里才说得清的规则
- *
- * **① 只在库里一条都没有时导入。** 两套链不能混：库里的第一条必须是"链的开头"，
- * 否则逐条验链会在第一条就断（`prevHash` 对不上零值），而那是**看起来最像篡改**的一种形态。
- * 所以：库里已有记录 → 不导入、只记账（旧文件留着作凭据）。
- *
- * **② 只导入**验过的那一段**。** 旧文件可能是被撕断的尾行、也可能中间被人改过 ——
- * 两者都**只导入断点之前**的记录，并把问题如实报出来（不修补、不跳过）。
- * 这与"审计系统不销毁证据"一致：**文件本身不动**，断点之后的记录留在原处。
- *
- * **③ 锚点只保留"指向本次导入链上"的那些。** 这一点是刻意的清理，不是顺手：
- * 旧文件时代多进程各自追加，实测同一份文件里混着**两条互不相容的链的锚**（286 条）。
- * 把它们照搬进库，等于把那个混乱原样封存；只留指向本链的锚，
- * 才是"锚点回答的问题"（这条链在某个时刻是什么样）。丢掉的条数**如实报**。
- *
- * ## 记账（同部署参数那条教训）
- *
- * 记了账就不再碰旧文件。否则"库里没有就从旧文件导"会每次启动重演 ——
- * 而管理员**清空审计**（比如换了合规要求）之后，旧文件会把清掉的记录**悄悄导回来**。
- */
+// 管理审计与锚点从旧 NDJSON 文件搬进库的一次性动作。
 
 import { existsSync, readFileSync } from 'node:fs';
 import { GENESIS_HASH, auditRecordHash, insertAuditRow, type ChainedAdminAuditRecord } from '../core/admin-audit-store.ts';
@@ -30,7 +8,7 @@ import type { SqliteDatabase } from '../storage/sqlite.ts';
 export const LEGACY_AUDIT_LEDGER_ID = 'admin-audit-files-import';
 
 export interface AuditImportResult {
-  /** 这次有没有真的执行（被记账拦住时为 false —— 那是**正常**结果） */
+  /** 这次有没有真的执行（被记账拦住时为 false —— 那是正常结果）  */
   ran: boolean;
   records: number;
   anchors: number;
@@ -49,12 +27,12 @@ interface LegacyLineResult {
 }
 
 /**
- * 读旧文件并**逐条验链**。
+ * 读旧文件并逐条验链。
  *
  * 这段逻辑只此一处：文件格式已经没有别的读者了（写入早就走库）。
- * 之所以不删掉"能读旧文件"的能力，是因为**搬家要能重跑**（删掉记账那行即可），
+ * 之所以不删掉"能读旧文件"的能力，是因为搬家要能重跑（删掉记账那行即可），
  * 而重跑时得能再验一遍旧文件的链 —— 否则"导进来的东西可信吗"就答不上来。
- */
+  */
 export function readLegacyAuditFile(file: string): LegacyLineResult {
   const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
   const lines = text.split('\n');
@@ -135,13 +113,13 @@ export function importAuditOnce(deps: {
   const hasAuditFile = exists(deps.auditFile);
   const hasAnchorFile = exists(deps.anchorFile);
   if (!hasAuditFile && !hasAnchorFile) {
-    /* 没有旧文件 → **不记账**：部署时后放进来仍然该被搬一次 */
+    /* 没有旧文件 → 不记账：部署时后放进来仍然该被搬一次  */
     return { ran: true, ...empty, reason: '没有旧的审计文件' };
   }
 
   const existing = Number((deps.db.prepare('select count(*) as n from admin_audit').get() as { n?: number } | undefined)?.n ?? 0);
   if (existing > 0) {
-    /* 库里已有链：**绝不混**（混进去会在第一条就断，而那是看起来最像篡改的形态） */
+    /* 库里已有链：绝不混（混进去会在第一条就断，而那是看起来最像篡改的形态）  */
     deps.workStore.ledgerMark(LEGACY_AUDIT_LEDGER_ID, `库里已有 ${existing} 条审计记录，旧文件不导入（保留原处）`);
     return { ran: true, ...empty, reason: `库里已有 ${existing} 条审计记录：不导入旧文件（两套链不能混）` };
   }
@@ -156,8 +134,8 @@ export function importAuditOnce(deps: {
     if (hasAnchorFile) {
       const anchors = readLegacyAnchorFile(deps.anchorFile);
       for (const anchor of anchors.anchors) {
-        /* **只留指向本次导入链上的锚**：旧文件里可能混着另一条链的锚
-           （多进程各自追加留下的污染），那些指着链外，照搬进库只会把混乱封存起来。 */
+        /* 只留指向本次导入链上的锚：旧文件里可能混着另一条链的锚
+           （多进程各自追加留下的污染），那些指着链外，照搬进库只会把混乱封存起来。  */
         if (!onChain.has(`${anchor.seq}:${anchor.hash}`)) {
           result.droppedAnchors += 1;
           continue;

@@ -1,16 +1,4 @@
-/**
- * 系统取数（LIS/HIS 搬运）自测。
- *
- *   node src/core/ingest-self-test.ts
- *
- * 背景：医生的时间被"逐条确认"吃掉的两大来源，一是确认动作本身（已做批量/子树确认），
- * 二是**系统取数也要人点确认** —— 体温 37.8 是从 LIS 搬来的确定值，让人点一下并不增加安全性。
- * 本套锁死"搬运可以直通，但四条约束一条都不能少"：
- *   B1~B2 身份与来源约束（只有 system 能走；必须带强引用）
- *   B3~B4 幂等与修正（重复到达不重复写；值变了允许更新）
- *   B5    不覆盖人工内容（系统悄悄覆盖医生写的东西是最不能接受的事故）
- *   B6    搬运 ≠ 核对（落笔后仍待确认，关键内容照旧被签名门控拦）
- */
+// 系统取数（LIS/HIS 搬运）自测。
 
 import { TestSuite, assert, assertEqual, codeOfAsync } from '../testing/harness.ts';
 import { buildTrend } from '../model/trend.ts';
@@ -192,7 +180,7 @@ async function main(): Promise<void> {
     assertEqual(result.applied.length, 3, '三天数据应一次带入');
     assertEqual(session.auditLog().slice(-1)[0]?.op, 'external', '一次带入只产生一条留痕（同一次触发）');
 
-    /* 关键：**不需要任何额外步骤**，趋势自动成形 —— 这就是闭环 */
+    /* 关键：不需要任何额外步骤，趋势自动成形 —— 这就是闭环  */
     const trend = buildTrend(session.document, 'LIS.WBC');
     assert(!!trend, '带入后应自动形成趋势');
     assertEqual(trend!.points.map((point) => point.valueText), ['9.8', '15.2', '18.4'], '趋势应按采样时间升序');

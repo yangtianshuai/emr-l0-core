@@ -1,25 +1,9 @@
-/**
- * SM2 椭圆曲线公钥密码算法（GB/T 32918）—— 自研纯 TS 实现，零依赖。
- *
- * ⚠️ **定位与 SM3 相同**：原型与交叉验证用，未经第三方审计，**不得直接用于生产签名**。
- *    生产必须换成经认证的密码模块（商用密码产品 / HSM / UKey）。
- *
- * 实现范围（只做签章真正需要的那部分，不用的能力不写）：
- *   - sm2p256v1 曲线上的点运算（仿射坐标 + 扩展欧几里得求逆，代码短、易核对）；
- *   - **GB/T 32918.2 签名/验签全流程**，含容易被漏掉的 **Z 值（签名者标识杂凑）**——
- *     漏掉 Z 就与 OpenSSL/国密设备互不兼容（这是本实现第一次交叉验证失败的原因）；
- *   - DER 签名（SEQUENCE{INTEGER r, INTEGER s}）与 SPKI 公钥编解码，用于与 OpenSSL 互操作。
- *
- * 互操作是**正确性的第二重证据**：
- *   自研签 → OpenSSL 验 / OpenSSL 签 → 自研验，双向都必须通过。
- *   只做"自签自验"是不够的：那只能证明"实现自洽"，不能证明"实现对了"。
- */
+// SM2 椭圆曲线公钥密码算法（GB/T 32918）—— 自研纯 TS 实现，零依赖。
+// 定位与 SM3 相同：原型与交叉验证用，未经第三方审计，不得直接用于生产签名。
+// 生产必须换成经认证的密码模块（商用密码产品 / HSM / UKey）。
 
 import { fromHex, sm3, toHex, utf8 } from './sm3.ts';
 
-/* ------------------------------- 曲线参数 ------------------------------- */
-
-/** 曲线阶、域特征与方程参数、基点（SM2 推荐曲线 sm2p256v1） */
 export const SM2_P = BigInt('0xfffffffeffffffffffffffffffffffffffffffff00000000ffffffffffffffff');
 export const SM2_A = BigInt('0xfffffffeffffffffffffffffffffffffffffffff00000000fffffffffffffffc');
 export const SM2_B = BigInt('0x28e9fa9e9d9f5e344d5a9e4bcf6509a7f39789f515ab8f92ddbcbd414d940e93');
@@ -65,8 +49,6 @@ function invMod(value: bigint, m: bigint): bigint {
   return mod(oldS, m);
 }
 
-/* ------------------------------- 点运算 ------------------------------- */
-
 function addPoints(p1: MaybePoint, p2: MaybePoint): MaybePoint {
   if (!p1) return p2;
   if (!p2) return p1;
@@ -97,8 +79,6 @@ export function isOnCurve(point: Sm2Point): boolean {
   return mod(point.y * point.y, SM2_P) === mod(point.x * point.x * point.x + SM2_A * point.x + SM2_B, SM2_P);
 }
 
-/* ------------------------------- 密钥 ------------------------------- */
-
 /** 随机标量（拒绝采样）。导出给 ECDSA 交叉验证桥复用，不重复实现随机源处理 */
 function randomScalar(): bigint {
   const source = (globalThis as unknown as { crypto?: { getRandomValues(array: Uint8Array): Uint8Array } }).crypto;
@@ -124,8 +104,6 @@ export function derivePublicKey(privateKey: bigint): Sm2Point {
   return point;
 }
 
-/* ------------------------------- Z 值 ------------------------------- */
-
 function intToBytes32(value: bigint): Uint8Array {
   const out = new Uint8Array(32);
   for (let i = 0; i < 32; i += 1) out[31 - i] = Number((value >> BigInt(8 * i)) & 0xffn);
@@ -145,8 +123,8 @@ function concat(parts: Uint8Array[]): Uint8Array {
 
 /**
  * 待签名摘要 e = SM3(Z ‖ M)，其中 Z = SM3(ENTL ‖ ID ‖ a ‖ b ‖ xG ‖ yG ‖ xA ‖ yA)。
- * **这一层不做就等于签了另一个算法**：OpenSSL/国密设备的验签会直接失败。
- */
+ * 这一层不做就等于签了另一个算法：OpenSSL/国密设备的验签会直接失败。
+  */
 export function sm2Digest(message: Uint8Array, publicKey: Sm2Point, id: string = SM2_DEFAULT_ID): bigint {
   const idBytes = utf8(id);
   const bitLength = idBytes.length * 8;
@@ -166,18 +144,8 @@ export function sm2Digest(message: Uint8Array, publicKey: Sm2Point, id: string =
   return BigInt(`0x${toHex(sm3(concat([z, message])))}`);
 }
 
-/* ------------------------------- 签名/验签 ------------------------------- */
+// 安全性：k 的取值依赖私钥 d（秘密），外部无法预测，因此不构成"k 可猜"的经典漏洞；
 
-/**
- * 确定性 k 派生（RFC 6979 思路的简化版）：
- *   k = SM3("SM2-DETERMINISTIC-K/V1" ‖ d ‖ e ‖ 计数器) mod (n-1) + 1，越界或退化则递增计数器重试。
- *
- * 为什么需要它：验收要求"同样输入 → 同样产物字节"（内容寻址、去重、跨端比对都依赖这一点），
- * 而随机 k 会让同一文档每次导出的字节都不同。
- *
- * 安全性：k 的取值依赖**私钥 d**（秘密），外部无法预测，因此不构成"k 可猜"的经典漏洞；
- * 但它不是标准 RFC 6979，若需与密码设备行为一致，应由设备自行派生 k。
- */
 function deterministicK(privateKey: bigint, e: bigint, attempt: number): bigint {
   const seed = concat([intToBytes32(privateKey), intToBytes32(e), intToBytes32(BigInt(attempt))]);
   const digest = sm3(concat([utf8('SM2-DETERMINISTIC-K/V1'), seed]));
@@ -230,19 +198,14 @@ export function sm2Verify(message: Uint8Array, publicKey: Sm2Point, signature: S
   return mod(e + point.x, SM2_N) === r;
 }
 
-/* ------------------------------- DER 编解码 ------------------------------- */
-
 function encodeInteger(value: bigint): Uint8Array {
   let bytes: Uint8Array;
   if (value === 0n) {
     bytes = new Uint8Array([0]);
   } else {
-    /* padStart(2, '0') 只能补到"至少 2 位"，奇数长度（如 0x123 → '123'）并不会变成偶数，
-       于是 hex 解析直接报"长度必须为偶数"（实测踩到：签名值恰好 3 位十六进制时必炸）。
-       正确做法是按长度奇偶补前导零。 */
     const hex = value.toString(16);
     const raw = fromHex(hex.length % 2 === 0 ? hex : `0${hex}`);
-    /* DER INTEGER 用最小字节数、且为**有符号**：最高位为 1 时必须补一个 0x00 */
+    /* DER INTEGER 用最小字节数、且为有符号：最高位为 1 时必须补一个 0x00  */
     bytes = (raw[0]! & 0x80) !== 0 ? concat([new Uint8Array([0]), raw]) : raw;
   }
   return concat([new Uint8Array([0x02, bytes.length]), bytes]);
@@ -281,8 +244,6 @@ export function decodeDerSignature(bytes: Uint8Array): Sm2Signature {
   return { r: r.value, s: s.value };
 }
 
-/* ------------------------------- SPKI（公钥 DER） ------------------------------- */
-
 /**
  * SM2 公钥 SPKI 的固定前缀（26 字节）：
  *   SEQUENCE / AlgorithmIdentifier(id-ecPublicKey + sm2p256v1) / BIT STRING 头
@@ -299,15 +260,8 @@ export type SpkiParseResult =
   | { ok: true; publicKey: Sm2Point }
   | { ok: false; code: 'E_SPKI_STRUCTURE' | 'E_SPKI_NOT_ON_CURVE'; reason: string };
 
-/**
- * 解析 SM2 SPKI，并**分别报告**"结构不对"与"点不在曲线上"。
- *
- * 为什么要分开：这两件事的处置完全不同 ——
- *   结构问题多是"数据被截断/传错/贴错地方"；而点不在曲线上意味着**数据被改动或构造过**，
- *   若拿去加密，会产出一份**没有任何私钥能解开**的密文（加密本身不会报错）。
- * 早期只有一个 `publicKeyFromSpki` 抛字符串错误，上层只能整段 catch，
- * 结果把"点不对"归因成"结构非法"，排查方向被带偏（由接收方公钥目录的用例发现）。
- */
+// 若拿去加密，会产出一份没有任何私钥能解开的密文（加密本身不会报错）。
+
 export function parseSm2Spki(der: Uint8Array): SpkiParseResult {
   if (der.length < 65 || der[der.length - 65] !== 0x04) {
     return { ok: false, code: 'E_SPKI_STRUCTURE', reason: 'SPKI 结构非法（末尾不是 04‖X‖Y 未压缩点）' };

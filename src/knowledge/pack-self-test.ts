@@ -1,18 +1,4 @@
-/**
- * 知识资产包 · 通用层自测（P1~P8）。
- *
- *   node src/knowledge/pack-self-test.ts
- *
- * 这一层是"模板包 / 规则包 / 术语包"的公共地基，因此本套的重点全在**失败路径**：
- *   P1 校验：缺字段、未知字段、未知类别、非法版本、空条目、条目重名 —— 各有独立错误码；
- *   P2 **契约精确匹配**：版本号更大不算兼容；未实现的类别一律拒绝（不摆假路径）；
- *   P3 包级冲突与显式替换（不允许"悄悄覆盖"，那会让人以为载的还是原来那一版）；
- *   P4 **条目级冲突**：两条同名条目"谁生效"不该由装载顺序决定；
- *   P5 开关：只动"生效指纹"，不动"内容指纹"——两者必须分得开；
- *   P6 指纹与键序/装载顺序无关（否则跨端比对会退化成"比装载风格"）；
- *   P7 归一化与深拷贝：`enabled` 补缺省、外部对象改动不得影响已装载的包；
- *   P8 装载是**原子**的：类别专有校验失败时，包一个字都不该进注册表。
- */
+// 知识资产包 · 通用层自测（P1~P8）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
@@ -33,8 +19,6 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 /** 与真实装配一致的口径：rule 已实现；template / term 尚无引擎 */
 const SUPPORTED: SupportedEngineApis = { rule: ['qc-rule/1'], template: [], term: [] };
 
-/* 包**不再有版本字段**（见 `pack-store.ts` 文件头：一个包一行，"现在跑的是哪一份内容"由指纹回答）。
-   夹具里刻意不再放 `version` —— 它现在会被当成未知字段拒绝。 */
 function rawPack(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     packId: 'qc.demo.a',
@@ -79,8 +63,6 @@ async function main(): Promise<void> {
       'E_PACK_ITEM_ID_DUPLICATE',
       '包内条目重名',
     );
-    /* 版本概念已删（见 `pack-store.ts` 文件头）—— 这里改成钉住"它真的不再是字段"：
-       带着 `version` 的旧包会被**未知字段**拒绝，而不是被静默忽略。 */
     assertEqual(
       codeOf(() => validatePack(rawPack({ version: '1.0.0' }), SUPPORTED)),
       'E_PACK_FIELD_INVALID',
@@ -99,7 +81,6 @@ async function main(): Promise<void> {
       validatePack(rawPack({ packId: 'tpl.demo', kind: 'template', engineApi: 'doc-template/1', items: [{ itemId: 'T-1' }] }), SUPPORTED),
     );
     assertEqual(templateAttempt, 'E_PACK_ENGINE_API_UNSUPPORTED', '模板包尚无引擎，必须明确拒绝');
-    /* 提示必须说清"是没有引擎"，而不是"契约版本不对" —— 否则排查方向会被带偏到改版本号上 */
     try {
       validatePack(rawPack({ packId: 'tpl.demo', kind: 'template', engineApi: 'doc-template/1', items: [{ itemId: 'T-1' }] }), SUPPORTED);
     } catch (err) {
@@ -121,8 +102,8 @@ async function main(): Promise<void> {
     try {
       store.load(rawPack({ name: '演示规则包（换一份内容）' }));
     } catch (err) {
-      /* 新模型里没有版本可比，要说清的是"**同一个 packId 只对应一份内容**"，
-         并且把出路写出来（显式 replace）—— 让人知道下一步能做什么。 */
+      /* 新模型里没有版本可比，要说清的是"同一个 packId 只对应一份内容"，
+         并且把出路写出来（显式 replace）—— 让人知道下一步能做什么。  */
       assert(
         String((err as Error).message).includes('两份内容不同') && String((err as Error).message).includes('replace'),
         `冲突提示要说清"两份内容不同"并给出出路，实际：${(err as Error).message}`,
@@ -212,7 +193,7 @@ async function main(): Promise<void> {
     source.items[0]!.itemId = '被改掉了';
     assertEqual(store.get('qc.demo.a')?.items[0]?.itemId, 'X-1', '装载后应持有副本，不受外部对象影响');
 
-    /* **结构级证明"包是数据不是代码"**：包里若含函数，JSON 往返会丢掉它，两者就不再相等 */
+    /* 结构级证明"包是数据不是代码"：包里若含函数，JSON 往返会丢掉它，两者就不再相等  */
     const stored = store.get('qc.demo.a') as Pack;
     assertEqual(JSON.parse(JSON.stringify(stored)), stored, '包必须能被 JSON 无损往返（函数/类实例都会在这里暴露）');
     assertEqual(PACK_NOT_IN_DOCUMENT, true, '包不是文档内容，不进签名覆盖范围');

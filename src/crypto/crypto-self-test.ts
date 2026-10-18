@@ -1,20 +1,5 @@
-/**
- * T18 验收自测：国密算法（SM3 / SM2）与密码学后端。
- *
- *   node src/crypto/crypto-self-test.ts
- *
- * 覆盖四层：
- *   A SM3：国标测试向量 + 与 OpenSSL 逐字节比对（含 0/1/55/56/63/64/65 等填充边界）
- *   B SM2：曲线参数自检（**nG = 无穷远**）、**GB/T 32918 示例向量**、签名/验签、篡改反例、DER/SPKI
- *   C 交叉验证：SPKI 逐字节一致、SM3 同算法比对、**ECDSA-SM3 与 OpenSSL 双向签验**，
- *      以及"两套验签器互不通用"的对照实验
- *   D 密钥与后端契约：演示密钥确定性、私钥越界拒绝、后端元数据完整、环境能力如实上报
- *
- * 为什么交叉验证如此关键：密码学实现"自签自验通过"**什么也证明不了** ——
- * 一个自洽但错误的实现（漏了 Z 值、填充写错、DER 补零错）可以自己一路全绿，
- * 而它的签名在真实设备上验不过。所以必须有第二个独立实现参与，
- * 并且**正例反例一起验**（只验正例时，"永远返回 true"的验签器也能全绿）。
- */
+// T18 验收自测：国密算法（SM3 / SM2）与密码学后端。
+// D 密钥与后端契约：演示密钥确定性、私钥越界拒绝、后端元数据完整、环境能力如实上报
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { fromHex, sm3, sm3Hex, toHex, utf8 } from './sm3.ts';
@@ -85,7 +70,6 @@ function messages(): Uint8Array[] {
 }
 
 async function main(): Promise<void> {
-  /* ============================== A SM3 ============================== */
 
   await test('A1 国标测试向量：SM3("abc") 与 SM3("abcd"×16)', () => {
     assertEqual(
@@ -123,8 +107,6 @@ async function main(): Promise<void> {
     const odd = repeat('x', 65537);
     assertEqual(sm3Hex(odd), toHex(opensslSm3(odd)), '65537 字节（跨多块 + 奇数长度）应与 OpenSSL 一致');
   });
-
-  /* ============================== B SM2 ============================== */
 
   await test('B1 曲线参数自检：基点在曲线上且 nG 为无穷远点（抄错任一参数都过不了）', () => {
     assertEqual(isOnCurve(BASE), true, '基点 G 必须在曲线上');
@@ -194,7 +176,6 @@ async function main(): Promise<void> {
       assertEqual(decoded.r, item.r, `r 往返应一致（${item.r}）`);
       assertEqual(decoded.s, item.s, `s 往返应一致（${item.s}）`);
     }
-    /* DER = 30 len | 02 len 00 ff | …：第 4 字节才是 INTEGER 的值首字节（前 3 字节是 tag/长度） */
     const der = encodeDerSignature({ r: 0xffn, s: 0x80n });
     assertEqual(der[4], 0x00, 'INTEGER 最高位为 1 时必须补 0x00（否则被解析成负数）');
   });
@@ -220,8 +201,6 @@ async function main(): Promise<void> {
     broken[broken.length - 65] = 0x03;
     assertEqual(failOf(() => publicKeyFromSpki(broken)), 'E', '非未压缩点标志应报错');
   });
-
-  /* ========================== C 交叉验证（核心） ========================== */
 
   await test('C1 SPKI 与 OpenSSL 导出的 DER 逐字节一致（魔法常量不是抄错没人发现）', () => {
     if (!openssl) throw new Error('运行环境缺少 OpenSSL SM2 曲线，无法完成交叉验证');
@@ -287,8 +266,6 @@ async function main(): Promise<void> {
     assertEqual(sm2Verify(message, pair.publicKey, signature, '8765432187654321'), false, '换 ID 必须验签失败');
     assertEqual(ecdsaSm3Verify(message, pair.publicKey, ecdsaSm3Sign(message, pair.privateKey)), true, 'ECDSA 桥也应可用');
   });
-
-  /* ============================ D 密钥与后端 ============================ */
 
   await test('D1 演示密钥确定性：同种子同密钥，异种子异密钥（产物可复现的前提）', () => {
     const a = demoKeyPair('seed-a');

@@ -1,18 +1,4 @@
-/**
- * 规则包自测（R1~R8）。
- *
- *   node src/qc/rule-pack-self-test.ts
- *
- * 重点不在"包能跑"，而在三件最容易做错、也最容易在改代码时被破坏的事：
- *   R1 **包化不改变既有判定**（内置包编译出来必须与原来的三条规则逐项一致）；
- *   R2 **规则号由引擎注入**：包不能自带、更不能冒充别的规则 —— 医生看到的依据必须追得到真实条目；
- *   R6 **包不进文档、不进签名**：装载与开关前后，文档字节、rev、文档留痕一律不变（这才是"包是数据"的实证）。
- *
- * 其余各条守的是失败路径：未知谓词、未知/非法参数、非法级别、装载期校验与原子性。
- *
- * R9 / R10 守**条目级编辑**（管理后台「规则库」的逐条新建与修改）：改的是包内容、
- * 原包一字不动、改回原样能回到原内容，而判定机制与级别上限不跟着放开。
- */
+// 规则包自测（R1~R8）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -22,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { PackRegistry, type Pack, type SupportedEngineApis } from '../knowledge/pack.ts';
 import { runFormRules, type QcContext, type QcNodeView, type QcRule } from './form-rules.ts';
 
-/** 判定上下文：时刻**写死**（判定结果不该随运行时刻变化，否则复核无从谈起） */
+/** 判定上下文：时刻写死（判定结果不该随运行时刻变化，否则复核无从谈起）  */
 const CTX: QcContext = { now: '2026-10-12T00:00:00Z' };
 
 /** 三态收敛成两态：命中 → 内容；不适用 → `null`；"判不了" → 直接让用例失败（本文件不该出现它） */
@@ -48,17 +34,17 @@ import { readSamplePack, SAMPLE_PACK_FILES } from '../knowledge/sample-packs.ts'
 import { validateTemplatePack } from '../template/template-pack.ts';
 import type { TemplatePack } from '../template/types.ts';
 import type { QcConditionDefinition, QcRuleDescriptor, QcRulePack } from './types.ts';
-/* 出厂种子判定方式：本文件用它当"库里那几条"的来源（判定方式是**库级资产**，见 R12~R14） */
+/* 出厂种子判定方式：本文件用它当"库里那几条"的来源（判定方式是库级资产，见 R12~R14）  */
 import { SEED_CONDITIONS } from './seed-conditions.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 /**
  * 两个样例规则包与一个样例模板包（`samples/packs/*.json`）。
  *
- * 它们是**外部数据**，与从接口灌进库里的那份同级 —— 所以下面装载时一样要过
+ * 它们是外部数据，与从接口灌进库里的那份同级 —— 所以下面装载时一样要过
  * 通用校验与类别专有校验（`validateRulePack` / `validateTemplatePack`），
  * 没有"因为是自己人就跳过校验"的路径。
- */
+  */
 const FORM_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.formRules) as QcRulePack;
 const TIME_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.timeRules) as QcRulePack;
 const TEMPLATE_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.templates) as TemplatePack;
@@ -242,7 +228,6 @@ async function main(): Promise<void> {
     const revBefore = session.docRev;
     const logBefore = session.auditLog().length;
 
-    /* ① 装载规则包；② 关掉一条；③ 开回来；④ 再装一个包 */
     const registry = new PackRegistry(SUPPORTED);
     registry.load(FORM_PACK, { validate: (pack) => validateRulePack(pack as QcRulePack) });
     registry.setItemEnabled(FORM_PACK.packId, 'R-FORM-02', false);
@@ -301,9 +286,6 @@ async function main(): Promise<void> {
   });
 
   await test('R8 装配：空注册表就是"没有包"；显式载入样例包后才跑规则，且指纹可复现', () => {
-    /* **空就是空**：出厂装配已经删掉（`createEmptyPackRegistry()` 一个包都不装）。
-       这一条锁的是"空"这件事本身 —— 它是如实的状态，不是"没配好"。
-       空库最危险的表现是"质控跑了、0 命中"，看起来像"没问题"。 */
     const empty = createEmptyPackRegistry();
     assertEqual(empty.list().length, 0, '空装配：没有任何包');
     assertEqual(rulesFromRegistry(empty).length, 0, '没有包 → 没有任何规则在跑（界面据此显示"质控当前不可用"）');
@@ -316,11 +298,11 @@ async function main(): Promise<void> {
     };
     const first = withSamples(createEmptyPackRegistry());
     const second = withSamples(createEmptyPackRegistry());
-    /* 按**类别**取：还装了模板包（K4），数"一共几个包"会把两类混在一起来数，
-       而这条用例关心的是"规则包装了什么" */
+    /* 按类别取：还装了模板包（K4），数"一共几个包"会把两类混在一起来数，
+       而这条用例关心的是"规则包装了什么"  */
     const rulePacks = first.list('rule');
-    /* **两个规则包**：形式类（3 条）+ 时限类（4 条）。按 id 逐个点名，而不是只数个数 ——
-       "多了一个包"这件事必须是因为**这一条**，而不是因为"数量对上了"。 */
+    /* 两个规则包：形式类（3 条）+ 时限类（4 条）。按 id 逐个点名，而不是只数个数 ——
+       "多了一个包"这件事必须是因为这一条，而不是因为"数量对上了"。  */
     assertEqual(
       rulePacks.map((pack) => pack.packId),
       [FORM_PACK.packId, TIME_PACK.packId],
@@ -332,8 +314,8 @@ async function main(): Promise<void> {
     assertEqual(first.contentFingerprint(), second.contentFingerprint(), '两次装配应得到同一内容指纹（可复现）');
     assertEqual(first.effectiveFingerprint(), second.effectiveFingerprint(), '生效指纹同样可复现');
     assertEqual(rulesFromRegistry(first).length, 7, '七条规则可用（形式类 3 + 时限类 4）');
-    /* 时限类**不需要改引擎就能加进来**：它走的还是 `qc-rule/1` 那套描述符，
-       变的只是谓词 —— 这一点正是"包是数据"该有的样子，顺手钉住。 */
+    /* 时限类不需要改引擎就能加进来：它走的还是 `qc-rule/1` 那套描述符，
+       变的只是谓词 —— 这一点正是"包是数据"该有的样子，顺手钉住。  */
     assertEqual(rulePacks[1]?.engineApi, rulePacks[0]?.engineApi, '两族规则用的是同一个引擎契约（包格式没变）');
   });
 
@@ -341,7 +323,6 @@ async function main(): Promise<void> {
     const pack = packOf([descriptor({ itemId: 'R-DEMO-01' })]);
     const before = JSON.stringify(pack);
 
-    /* ① 改标题与参数：返回**新包**，原包一个字不动（写库失败时要保持内存里那一份原样） */
     const patched = patchRuleDescriptor(pack, 'R-DEMO-01', {
       title: '本段缺少记录时间（专科版）',
       predicate: { kind: 'text-missing-time', params: { minLength: 3 } },
@@ -355,25 +336,22 @@ async function main(): Promise<void> {
       '判定方式与参数一起换（换谓词时参数必须整套换）',
     );
 
-    /* ② 改回原样：内容逐字回到原来那一版 —— 可逆是这条编辑口子唯一的安全感 */
     const restored = patchRuleDescriptor(patched, 'R-DEMO-01', {
       title: '演示规则',
       predicate: { kind: 'text-missing-time' },
     });
     assertEqual(JSON.stringify(restored), JSON.stringify(pack), '改回原样应回到原内容（否则"我把它改回去了"与"它还是另一版"分不开）');
 
-    /* ③ 判定依据的覆盖与清除：清掉是**删字段**，不是写空串 */
     const withDetail = patchRuleDescriptor(pack, 'R-DEMO-01', { detail: '本专科要求病程记录带记录时间。' });
     assertEqual((withDetail.items[0] as QcRuleDescriptor).detail, '本专科要求病程记录带记录时间。', '应能覆盖谓词内置的判定依据');
     const cleared = patchRuleDescriptor(withDetail, 'R-DEMO-01', { detail: null });
     assertEqual(JSON.stringify(cleared), JSON.stringify(pack), '清掉覆盖 = 回到内置文案（并且回到原内容指纹）');
 
-    /* ④ 级别：只开放 info / warn。block 意味着卡住流程，不随一次保存被带进部署 */
     assertEqual(codeOf(() => patchRuleDescriptor(pack, 'R-DEMO-01', { severity: 'block' })), 'E_RULE_SEVERITY_EDIT_LIMIT', 'block 不得由条目编辑打开');
     assertEqual(codeOf(() => patchRuleDescriptor(pack, 'R-DEMO-01', { severity: 'fatal' as never })), 'E_RULE_SEVERITY_EDIT_LIMIT', '非法级别同样拒');
     assertEqual((patchRuleDescriptor(pack, 'R-DEMO-01', { severity: 'info' }).items[0] as QcRuleDescriptor).severity, 'info', 'info / warn 可改');
 
-    /* ⑤ 判定机制不放开：走的是**与装载期同一段**校验（两套迟早会漂移） */
+    /* ⑤ 判定机制不放开：走的是与装载期同一段校验（两套迟早会漂移）  */
     assertEqual(codeOf(() => patchRuleDescriptor(pack, 'R-DEMO-01', { predicate: { kind: 'write-document' } as never })), 'E_RULE_PREDICATE_UNKNOWN', '未知谓词拒');
     assertEqual(codeOf(() => patchRuleDescriptor(pack, 'R-DEMO-01', { predicate: { kind: 'text-missing-time', params: { minLength: 0 } } })), 'E_RULE_PARAM_INVALID', '非法参数拒');
     assertEqual(codeOf(() => patchRuleDescriptor(pack, 'R-DEMO-01', { detail: '规则 R-DEMO-01：自带规则号' })), 'E_RULE_DETAIL_INVALID', '判定依据里不得出现自身规则号');
@@ -397,8 +375,8 @@ async function main(): Promise<void> {
     assertEqual(second.pack.items.length, 2, '新包里两条');
     assertEqual(created.pack.items.length, 1, '上一步那份包仍是一条（原包不动）');
 
-    /* 新建的条目**不设** `enabled`：条目开关在库里是单独一列，
-       写进内容会让"新建出来先不跑"连带改变内容指纹。 */
+    /* 新建的条目不设 `enabled`：条目开关在库里是单独一列，
+       写进内容会让"新建出来先不跑"连带改变内容指纹。  */
     assertEqual('enabled' in (second.pack.items[1] as object), false, '新建的条目不得把开关写进包内容');
 
     /* 非法输入当场拒：判定方式与级别走的是与装载同一段校验 */
@@ -411,14 +389,11 @@ async function main(): Promise<void> {
     assertEqual(second.pack.items.length, 2, '原包仍然不动');
     assertEqual(codeOf(() => removeRule(second.pack, 'R-NOPE')), 'E_RULE_ITEM_NOT_FOUND', '删不存在的条目要明确报出');
 
-    /* 编辑过的包必须**仍能编译成可运行规则**：否则表现是"保存成功、质控却少一条" */
+    /* 编辑过的包必须仍能编译成可运行规则：否则表现是"保存成功、质控却少一条"  */
     assertEqual(compileRulePack(removed).map((rule) => rule.id), ['R-CUSTOM-2'], '改完的包仍能编译');
   });
 
   await test('R11 下发给界面的谓词规格与谓词注册表逐项一致（界面照它生成参数表单，引擎照它校验参数）', () => {
-    /* 「能配哪些参数」只该有**一处**定义：管理后台照 `qcPredicateCatalog()` 生成参数表单，
-       引擎照各谓词的 `paramsSpec` 校验参数。两处一旦漂移，表现是"界面能配、引擎不认"，
-       而它只会在有人真的点了那一下的时候才暴露 —— 所以把两者钉在一起。 */
     const catalog = qcPredicateCatalog();
     assertEqual(
       catalog.map((entry) => entry.kind).join(','),
@@ -437,12 +412,6 @@ async function main(): Promise<void> {
       );
       for (const spec of entry.params) {
         assert(
-          /* `condition` 是第 7 种判法（条件树）专用的控件类型：它不是"多一种输入框"，
-             而是一整块构造器（字段表与算子表由 `qcCondition` 另发，见 `condition-self-test`）；
-             `condition-ref` 是它的另一种写法：引用条件库里的一条具名条件
-             （下拉的选项来自 `state.qcConditions`，界面同样不自己抄一份清单）；
-             `condition-args` 是引用**带参数的判定方式**时要填的那一组实参
-             （要填哪几格同样来自 `state.qcConditions` 里的参数规格） */
           ['integer', 'number', 'string', 'enum', 'string-list', 'condition', 'condition-ref', 'condition-args'].includes(spec.kind),
           `${entry.kind}.${spec.name} 的控件类型要在允许集合里（否则界面不知道生成哪种格）`,
         );
@@ -455,9 +424,9 @@ async function main(): Promise<void> {
         }
       }
     }
-    /* 条件树那一格只该由**一种**谓词用：它是"自己拼判法"的入口。
+    /* 条件树那一格只该由一种谓词用：它是"自己拼判法"的入口。
        若别的谓词也冒出一格条件树，"这条规则到底按什么判"就说不清了 ——
-       写死的判定逻辑与拼出来的条件混在一条规则里，谁也答不上来。 */
+       写死的判定逻辑与拼出来的条件混在一条规则里，谁也答不上来。  */
     const conditionUsers = catalog.filter((entry) => entry.params.some((spec) => spec.kind === 'condition'));
     assertEqual(conditionUsers.length, 1, '条件树参数只该有一个谓词在用');
     assert(
@@ -472,14 +441,6 @@ async function main(): Promise<void> {
     );
   });
 
-  /* ================== R12~R14 判定方式（**库级资产**） ==================
-     判定方式存在**库里**（不属于任何包），任何包的规则都能引用它 —— 这一组守四件事：
-     ① **跨包引用成立**（这正是它从"包内容"改成"库级资产"的原因：交付方包里的规则
-     也要能用上本院维护的判定方式）；② 库里没有那一条 → 悬空引用在装载那一刻就拒；
-     ③ 同一份判定方式里不能有两条同码，而且**包内同码条目遮不住库里的那一份**；
-     ④ 数据化之后的结论与内核谓词**逐条一致** —— 最后一条最重要：
-     一旦两条路径给出不同结论，"同一件事"就有了两个说法。 */
-
   /* 出厂那 6 条就是自测用的"库里那几条"（`seed-conditions.ts` 是它们的出处） */
   const seedOf = (itemId: string): QcConditionDefinition => {
     const found = SEED_CONDITIONS.find((item) => item.itemId === itemId);
@@ -489,7 +450,7 @@ async function main(): Promise<void> {
   const libraryOf = (...itemIds: string[]): ConditionLibrary =>
     resolveConditionLibrary(itemIds.map(seedOf), '判定方式库（自测）');
 
-  /** 一个**不含任何判定方式**的规则包：判定方式在库里，包只写规则 */
+  /** 一个不含任何判定方式的规则包：判定方式在库里，包只写规则  */
   const conditionRefPack = (params: Record<string, JsonValue>): QcRulePack => ({
     packId: 'qc.condition-ref-test',
     name: '引用库里判定方式的包',
@@ -540,19 +501,14 @@ async function main(): Promise<void> {
   await test('R13 引用面跨包：库里有就能引用；库里没有就拒；库优先于包内同码', () => {
     const library = libraryOf('C-BUILTIN-MISSING-TIME');
 
-    /* ① **跨包引用成立**：包是交付产物，判定方式归本院 —— 交付方包里的规则照样能引用它。
-       这一条是"判定方式改为库级资产"的全部理由，钉住它才谈得上那个模型是活的。 */
     validateRulePack(conditionRefPack({ conditionId: 'C-BUILTIN-MISSING-TIME', args: { minLength: 4 } }), library);
 
-    /* ② 库里没有那一条 → 悬空引用在装载那一刻就拒（不能"少跑一条"） */
     assertEqual(
       codeOf(() => validateRulePack(conditionRefPack({ conditionId: 'C-NOT-IN-LIBRARY' }), library)),
       'E_RULE_CONDITION_UNKNOWN',
       '库里没有那一条就必须拒：悬空引用会让这条规则什么都判不了，而它在界面上仍然列着',
     );
 
-    /* ③ **库优先**：包里那份历史遗留的同码条目遮不住库里的权威份 ——
-       否则"本院改了判定口径，但某个包里的旧拷贝还在生效"会是一件没人看得见的事。 */
     const placeholderLibrary = libraryOf('C-BUILTIN-PLACEHOLDER');
     const staleCopy = {
       ...seedOf('C-BUILTIN-PLACEHOLDER'),
@@ -574,7 +530,6 @@ async function main(): Promise<void> {
     if (!legacy) throw new Error('应编译出一条规则');
     assert(hitOrNull(legacy, staleOwner) !== null, '库里还没有这一条时，包内那份是唯一的定义，照常生效');
 
-    /* ④ 同一份判定方式里两条同码：连库都建不起来（编码是引用键，同码等于两条规则引用了两件事） */
     assertEqual(
       codeOf(() => resolveConditionLibrary([seedOf('C-BUILTIN-MISSING-TIME'), seedOf('C-BUILTIN-MISSING-TIME')])),
       'E_RULE_CONDITION_INVALID',
@@ -607,7 +562,7 @@ async function main(): Promise<void> {
           },
         },
       ],
-    /* 数据化的那条判定方式在**库里**（它要跟它对上的内核谓词比对的是同一件事） */
+    /* 数据化的那条判定方式在库里（它要跟它对上的内核谓词比对的是同一件事）  */
     }, libraryOf('C-BUILTIN-VISIT-DOC-INTERVAL'));
     const viaPredicate = compileRuleDescriptor('qc.pred', {
       itemId: 'R-PRED',

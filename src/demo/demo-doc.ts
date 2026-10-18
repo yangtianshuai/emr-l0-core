@@ -1,24 +1,10 @@
-/**
- * Demo 数据层：多患者 × 多次就诊 × 多份病历 的工作区（不是单份文档）。
- *
- * 为什么 Demo 必须是多文档：单份文档只能演示"门控"，演示不了"文档切换后状态独立"，
- * 而"每份病历有自己的机读信息、自己的留痕链、自己的签章状态"恰恰是归档系统的真实约束。
- *
- * 结构：
- *   患者 → 就诊（门诊/住院）→ 病历（门诊病历 / 入院记录 / 病程记录 / 出院记录）
- *
- * 每份病历都覆盖演示需要的四类节点：
- *   ① 章节；② 带标准标签的文本节点（进机读块）；③ 带数据元标签的字段（进机读块）；
- *   ④ 关键内容标记（签章前必须人工确认）。
- */
+// Demo 数据层：多患者 × 多次就诊 × 多份病历 的工作区（不是单份文档）。
 
 import { SCHEMA_VERSION, type DataElementTag, type DocNode, type DocTypeRef, type DocumentModel, type EncounterRef, type JsonValue, type NodeId, type PatientRef } from '../model/types.ts';
 
 const AT = '2026-10-08T01:00:00Z';
 
 export type DocKind = 'outpatient' | 'admission' | 'progress' | 'discharge';
-
-/* ------------------------------ 数据元标签 ------------------------------ */
 
 const TAG = {
   chiefComplaint: { system: 'WST500', code: 'WST500.2.001', display: '主诉' } as DataElementTag,
@@ -37,9 +23,9 @@ const TAG = {
 /**
  * 体征/检验的参考范围（演示数据用的常规成人值）。
  *
- * 它不只是"多一个字段"：**没有范围就没有"异常"这回事**，而就诊时间轴上
+ * 它不只是"多一个字段"：没有范围就没有"异常"这回事，而就诊时间轴上
  * "变化有没有写进后面的文书"整条结论，都建立在"哪些点算变化"之上。
- */
+  */
 const RANGE = {
   temperature: { low: 36, high: 37.2 },
   pulse: { low: 60, high: 100 },
@@ -47,16 +33,14 @@ const RANGE = {
   wbc: { low: 3.5, high: 9.5 },
 };
 
-/* -------------------------------- 模板 -------------------------------- */
-
 interface FieldSpec {
   tag: DataElementTag;
   value: number | string;
   unit: string;
   /**
-   * 参考范围。**体征必须带它**：不带就只能显示数值，回答不了"这个值是不是异常"，
+   * 参考范围。体征必须带它：不带就只能显示数值，回答不了"这个值是不是异常"，
    * 而"就诊时间轴"要把异常变化与后续病程记录对照 —— 没有范围就没有"异常"这回事。
-   */
+    */
   range?: { low?: number; high?: number };
 }
 
@@ -200,8 +184,6 @@ const TEMPLATES: Record<DocKind, { label: string; docType: DocTypeRef; sections:
   },
 };
 
-/* ------------------------------ 工作区构建 ------------------------------ */
-
 export interface DocSpec {
   docId: string;
   kind: DocKind;
@@ -209,14 +191,6 @@ export interface DocSpec {
   encounter: EncounterRef;
   pack: ContentPack;
   author: string;
-  /**
-   * 该文书的**成文时刻**（缺省 = 就诊/入院时刻）。
-   *
-   * 为什么必须能单独给：同一次就诊的多份文书**不可能都在同一秒写成**，而
-   * 跨文书质控（间隔 / 应有而缺）与就诊时间轴看的正是它们的先后与间距。
-   * 演示数据若全用同一个时刻，时间轴上所有文书会叠成一个点 —— 那不是"线是连的"，
-   * 而是"根本没有线"，两者在界面上必须能分开。
-   */
   createdAt?: string;
 }
 
@@ -285,8 +259,6 @@ export function buildDocument(spec: DocSpec): DocumentModel {
           valueText: String(field.value),
           unit: field.unit,
           tags: [field.tag],
-          /* 采样时间 = 本文书的成文时刻。为什么必须有它：趋势与"变化有没有写进后面的文书"
-             都要按**采样先后**比，而缺了它这件事在原理上无法还原（见 `FieldNode.sampledAt`）。 */
           sampledAt: at,
           ...(field.range ? { referenceRange: field.range } : {}),
           provenance: system('system/lis'),
@@ -330,23 +302,23 @@ export interface WorkspaceVisit {
   visitId: string;
   visitType: NonNullable<EncounterRef['visitType']>;
   /**
-   * **就诊科室（存编码，不存名称）**。
+   * 就诊科室（存编码，不存名称）。
    *
    * 名称由科室字典解释（`storage/department-store.ts`）：它才是"限产科"这类判定的依据，
    * 而名称只是给人看的。存名称会让"科室改名"变成一句谎话 ——
    * 病历里写着旧名、字典里已经是新名，两边永远对不上，且没有任何地方会报错。
-   */
+    */
   dept: string;
   date: string;
   docs: WorkspaceDoc[];
 }
 
 /**
- * 出厂演示的**科室字典**（与就诊数据里的编码逐一对齐）。
+ * 出厂演示的科室字典（与就诊数据里的编码逐一对齐）。
  *
- * 只在**空库时播种一次**（与工作区数据同一次），之后以库里的那一份为准：
+ * 只在空库时播种一次（与工作区数据同一次），之后以库里的那一份为准：
  * 删掉一个科室后重启，它不会自己回来。
- */
+  */
 export const DEPARTMENTS: Array<{ code: string; name: string; enabled: boolean }> = [
   { code: 'DEPT_RESP', name: '呼吸内科', enabled: true },
   { code: 'DEPT_CARD', name: '心血管内科', enabled: true },
@@ -354,15 +326,6 @@ export const DEPARTMENTS: Array<{ code: string; name: string; enabled: boolean }
   { code: 'DEPT_OB', name: '产科', enabled: true },
 ];
 
-/**
- * 出厂演示的**文书类型**（与下面 `TEMPLATES` 里各类型声明的 `docType` 逐一对齐）。
- *
- * 只在**空库时播种一次**（与科室字典同一次），之后以库里的那一份为准：
- * 删掉一个类型后重启，它不会自己回来。
- *
- * 为什么种子必须与模板声明的类型一致：这份字典是"新建文书时能选哪几类"的清单，
- * 也是质控规则定位文书的依据；种子里少一类，界面上就选不出它，而模板里明明有。
- */
 export const DOC_TYPES: Array<{ system: DocTypeRef['system']; code: string; display: string; enabled: boolean }> = [
   { system: 'WST500', code: 'WST500.1', display: '入院记录', enabled: true },
   { system: 'WST500', code: 'WST500.2', display: '门（急）诊病历', enabled: true },
@@ -393,7 +356,7 @@ const PATIENTS: Array<{
       dept: string;
       date: string;
       admittedAt: string;
-      /** 出院时刻：频次类判定的**右端**（缺它就会把"出院之后"算成"一直没写病程记录"） */
+      /** 出院时刻：频次类判定的右端（缺它就会把"出院之后"算成"一直没写病程记录"）  */
       dischargedAt?: string;
     };
     docs: Array<{ docId: string; kind: DocKind; pack: ContentPack; createdAt?: string }>;
@@ -454,9 +417,9 @@ const PATIENTS: Array<{
     patient: { patientId: 'P_DEMO_002', nameMasked: '李**', gender: 'F', birthDate: '1964-07-20', age: 62 },
     visits: [
       {
-        /* 这次住院是"就诊时间轴"的主样本：三份文书**各有成文时刻**（入院 → 6 小时后首次病程
+        /* 这次住院是"就诊时间轴"的主样本：三份文书各有成文时刻（入院 → 6 小时后首次病程
            → 60 小时后出院记录），因此轴上能画出一条真实的线：病程记录之后 54 小时没有记录，
-           超过 24 小时时限 —— 正是"看整条线缺了什么"要抓的那类缺漏。 */
+           超过 24 小时时限 —— 正是"看整条线缺了什么"要抓的那类缺漏。  */
         visit: {
           visitId: 'V_20261005_0011',
           visitType: 'inpatient',

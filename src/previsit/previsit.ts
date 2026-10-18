@@ -1,39 +1,12 @@
-/**
- * 预问诊单（患者候诊时自填）—— **只采集、只搬运，不做任何判断**。
- *
- * ## 它为什么合规压力最小
- *
- * 它产出的东西里没有一句是"判断"：没有诊断、没有处理建议、没有解释。
- * 患者写"胸口闷三天"，系统就只把这句话原样搬到现病史的候选建议里。
- * 任何"可能是什么病"的语义推导都不在这里发生 —— 那属于医生的职责，
- * 也属于要单独论证、单独门控的能力（见 `ai/` 与 `qc/` 的边界说明）。
- *
- * ## 三条不许越界
- *
- * 1) **不改写**：原文一字不动。"患者自述'有点喘不上气'"不能被润色成"呼吸困难"——
- *    那是把患者的话换成术语，而换完之后就分不清哪句是他说的了。
- * 2) **不猜落点**：预问诊只填"主诉 / 现病史 / 既往史 / 过敏史 / 用药 / 家族史"这六项，
- *    对应章节在本次文书里不存在时，如实报"缺章节"，不往相近的章节里塞。
- *    诊断章**永远不在映射表里**：那是医生的判断，不是患者的自述。
- * 3) **不落笔**：这里只产出"候选建议"（带来源与采集时刻），
- *    写进正文一律走建议通道由医生逐条采纳。
- *
- * ## 为什么来源要单独占一档（`EvidenceKind = 'patient'`）
- *
- * 混进 `user-input` 就再也答不了"这句是患者说的还是医生打的" ——
- * 而这恰恰是这类内容最需要回答的问题（出了争议，先要能分清谁说的）。
- */
+// 预问诊单（患者候诊时自填）—— 只采集、只搬运，不做任何判断。
 
 import type { EvidenceRef, NodeId } from '../model/types.ts';
 
-/* ------------------------------ 数据结构 ------------------------------ */
-
 export interface PrevisitItem {
-  /** 字段键（见 `PREVISIT_KEYS`） */
   key: string;
   /** 给人看的名字（缺省取 `PREVISIT_LABELS`） */
   label: string;
-  /** 患者填的原文，**不改写** */
+  /** 患者填的原文，不改写  */
   text: string;
   /** 这一项的采集时刻（ISO8601） */
   reportedAt: string;
@@ -50,12 +23,10 @@ export interface PrevisitRecord {
   items: PrevisitItem[];
 }
 
-/* ------------------------------ 字段与落点 ------------------------------ */
-
 /**
- * 允许的字段。**这是个白名单**：接口收到白名单外的 key 一律拒，
+ * 允许的字段。这是个白名单：接口收到白名单外的 key 一律拒，
  * 不静默丢弃 —— 丢了等于"患者说的那句话没到"，而现场看不出来。
- */
+  */
 export const PREVISIT_KEYS = ['chiefComplaint', 'presentIllness', 'pastHistory', 'allergy', 'medication', 'familyHistory'] as const;
 
 export const PREVISIT_LABELS: Record<string, string> = {
@@ -71,9 +42,9 @@ export const PREVISIT_LABELS: Record<string, string> = {
  * 字段 → 目标章节 code。
  *
  * 过敏史 / 家族史 / 用药在门诊模板里没有独立章节，分别落到既往史与诊疗计划 ——
- * 这是**明示的近似**：落到既往史的那句仍然是原文，且带采集时刻与"患者自填"来源，
+ * 这是明示的近似：落到既往史的那句仍然是原文，且带采集时刻与"患者自填"来源，
  * 医生一眼能看出它是患者说的。真正不能做的是"落到看似相关的别处还不说"。
- */
+  */
 export const PREVISIT_SECTION: Record<string, string> = {
   chiefComplaint: 'chiefComplaint',
   presentIllness: 'presentIllness',
@@ -87,8 +58,6 @@ export const PREVISIT_SECTION: Record<string, string> = {
 export const MAX_ITEM_CHARS = 2000;
 /** 一次提交的条目上限 */
 export const MAX_ITEMS = 32;
-
-/* ------------------------------- 入参校验 ------------------------------- */
 
 export interface IntakeRejected {
   ok: false;
@@ -187,8 +156,6 @@ export function parsePrevisitIntake(input: unknown, now: string): IntakeAccepted
   };
 }
 
-/* ------------------------------ 落点与建议 ------------------------------ */
-
 /** 本次文书里"某章节的第一个文本节点"（摊平后的形状，由调用方给） */
 export interface SectionAnchor {
   code: string;
@@ -228,7 +195,7 @@ export function planPrevisitDrafts(record: PrevisitRecord, keys: string[], ancho
       sectionCode,
       nodeId: sectionCode === '' ? null : (anchorOf.get(sectionCode) ?? null),
       /* 来源可定位到"哪一份预问诊单的哪一项"：`ref` 带患者与提交时刻，`field` 是字段键，
-         `capturedAt` 是**患者填写的时刻**（不是我们收到它的时刻） */
+         `capturedAt` 是患者填写的时刻（不是我们收到它的时刻）  */
       evidence: {
         kind: 'patient',
         ref: `previsit:${record.patientId}@${record.submittedAt}`,

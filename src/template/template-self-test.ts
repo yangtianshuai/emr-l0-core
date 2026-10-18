@@ -1,17 +1,4 @@
-/**
- * 模板体系自测（K1~K9）。
- *
- *   node src/template/template-self-test.ts
- *
- * 重点全在**两条最容易被悄悄破坏的性质**上：
- *   K2 实例化产物**必然通过 `validateDocument`** —— 一份通不过校验的模板，
- *      等于让医生从一个坏掉的起点开始写病历；
- *   K4 **算不出来就不给值** —— 身高没填，BMI 是"算不出"，不是 0、不是上一次的值。
- *      假数会被当成测量结果，进而进机读信息、进签名范围。
- *
- * 一条贯穿的取节点方式：**用 `result.slots` 按槽位名找节点**，不写死节点 id。
- * 写死 id 会让"引擎换个命名规则"看起来像"模板坏了"，而槽位名是模板与引擎之间的契约。
- */
+// 模板体系自测（K1~K9）。
 
 import { TestSuite, assert, assertEqual, assertThrows } from '../testing/harness.ts';
 import { fileURLToPath } from 'node:url';
@@ -67,9 +54,9 @@ import type {
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 /**
- * 样例模板包（`samples/packs/doc.template.builtin.json`）：**外部数据**。
+ * 样例模板包（`samples/packs/doc.template.builtin.json`）：外部数据。
  * 装载时一样过 `validateTemplatePack` —— 没有"因为它是仓库里自带的就跳过校验"这回事。
- */
+  */
 const SAMPLE_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.templates) as TemplatePack;
 const SAMPLE_FORM_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.formRules) as QcRulePack;
 const SAMPLE_TIME_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.timeRules) as QcRulePack;
@@ -77,11 +64,11 @@ const SAMPLE_TIME_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.timeRules) as Qc
 const sampleTemplateIds = (): string[] => templateItemsOf(SAMPLE_PACK).map((item) => item.itemId);
 
 /**
- * 装上**三个样例包**的注册表：**空装配 + 显式装载**（不再有自动顶上的出厂包）。
+ * 装上三个样例包的注册表：空装配 + 显式装载（不再有自动顶上的出厂包）。
  *
  * 三个都装，是为了让"两类包并存互不干扰"这条（K9）仍然成立 —— 那一条关心的是
  * 跨类别的指纹与开关不会互相污染，而不是"出厂装了什么"。
- */
+  */
 function registryWithSamples(): PackRegistry {
   const registry = createEmptyPackRegistry();
   registry.load(SAMPLE_FORM_PACK, { validate: (pack) => validateRulePack(pack as QcRulePack) });
@@ -139,10 +126,10 @@ const codeOf = (fn: () => unknown): string => {
 /**
  * 一份最小测试包：既能验算，也能造"缺输入"与"除零"这两种边界。
  *
- * `weightFilled: false` 表示**体重槽位在、但医生还没填**（没有默认值）。
+ * `weightFilled: false` 表示体重槽位在、但医生还没填（没有默认值）。
  * 这与"把体重槽位删掉"是两回事：后者会让控件引用一个不存在的填写项，
- * 属于**模板本身不合法**（装载期就该拒）—— 实测踩到过，故在注释里写清。
- */
+ * 属于模板本身不合法（装载期就该拒）—— 实测踩到过，故在注释里写清。
+  */
 function testPack(options: { weightFilled?: boolean; divisor?: number } = {}): TemplatePack {
   const weightFilled = options.weightFilled ?? true;
   /* 默认除 3（平均动脉压的真实公式）；测试"除零"时显式传 0 */
@@ -248,7 +235,7 @@ function testPack(options: { weightFilled?: boolean; divisor?: number } = {}): T
         name: '孕周',
         unit: '周',
         enabled: true,
-        /* 后半段取**上下文**：证明"只依赖上下文、不依赖填写项"的控件也能成立 */
+        /* 后半段取上下文：证明"只依赖上下文、不依赖填写项"的控件也能成立  */
         expression: { kind: 'fn', name: 'weeksBetween', args: [{ kind: 'slot', key: 'lmpDate' }, { kind: 'ctx', key: 'now' }] },
       },
     ],
@@ -378,7 +365,7 @@ async function main(): Promise<void> {
     const sections = Object.values(doc.nodes).filter((node) => node.type === 'section');
     assertEqual(sections.length, 5, '门诊模板 5 个章节');
 
-    /* 关键内容：主诉与初步诊断必须带 keyContent —— 模板赋予的是**责任标记**，不是样式 */
+    /* 关键内容：主诉与初步诊断必须带 keyContent —— 模板赋予的是责任标记，不是样式  */
     assertEqual(nodeAt(output, 'chiefComplaint').keyContent, true, '主诉是关键内容');
     assertEqual(nodeAt(output, 'diagnosis').keyContent, true, '初步诊断是关键内容');
     assertEqual(nodeAt(output, 'presentIllness').keyContent, undefined, '模板没标就不该有');
@@ -391,7 +378,7 @@ async function main(): Promise<void> {
     const map = nodeAt(output, 'map').value as number;
     assert(Math.abs(map - 280 / 3) < 1e-9, `平均动脉压应为 (120 + 2×80) ÷ 3，实际 ${String(map)}`);
 
-    /* 缺一个输入：整体算不出，**给 null 而不是 0** */
+    /* 缺一个输入：整体算不出，给 null 而不是 0  */
     const missing = instantiateTemplate(testPack({ weightFilled: false }), inputOf('t.demo'));
     assertEqual(nodeAt(missing, 'bmi').value, null, '缺体重时 BMI 必须是"算不出"，不是 0、不是上一次的值');
     assertEqual(nodeAt(missing, 'bmi').valueText, '', '算不出就不要给一个看起来像结果的值文本');
@@ -408,12 +395,11 @@ async function main(): Promise<void> {
     const dates = instantiateTemplate(testPack(), inputOf('t.dates', { context: { now: LATER } }));
     assertEqual(nodeAt(dates, 'weeks').value, 4, '2026-01-01 → 2026-01-29 应为 4 周');
 
-    /* 日期类控件在**样例包**里也必须真的算得出来：曾经因为走了"只收数字"的通道而恒为 null，
-       而"产物能通过校验"完全看不出来（空值本身是合法的 field 值）—— 故这里直接断言值。 */
+    /* 日期类控件在样例包里也必须真的算得出来：曾经因为走了"只收数字"的通道而恒为 null，
+       而"产物能通过校验"完全看不出来（空值本身是合法的 field 值）—— 故这里直接断言值。  */
     const admission = instantiateTemplate(SAMPLE_PACK, inputOf('tpl.admission.general'));
     assertEqual(nodeAt(admission, 'age').value, 45, '1981-03-12 出生、2026-10-08 就诊应为 45 周岁');
 
-    /* 求值器本身的边界 */
     assertEqual(evaluate({ kind: 'fn', name: 'div', args: [{ kind: 'num', value: 1 }, { kind: 'num', value: 0 }] }, { slots: {}, context: {} }), null, '除零 → null');
     assertEqual(evaluate({ kind: 'fn', name: 'add', args: [{ kind: 'num', value: 1 }, { kind: 'slot', key: 'absent' }] }, { slots: {}, context: {} }), null, '缺输入 → null');
     assertEqual(evaluate({ kind: 'slot', key: 'x' }, { slots: { x: 'abc' }, context: {} }), 'abc', '字符串（日期）可作为中间值');
@@ -443,12 +429,12 @@ async function main(): Promise<void> {
     const output = instantiateTemplate(testPack(), inputOf('t.demo'));
     const json = JSON.stringify(output.doc);
 
-    /* 模板定义、表达式 AST 都是**包的内容**，不得混进文档 */
+    /* 模板定义、表达式 AST 都是包的内容，不得混进文档  */
     assert(!json.includes('"kind":"fn"'), '表达式 AST 不得进入文档（进文档的只能是可读的公式文本）');
     assert(!json.includes('useExpression'), '模板定义字段不得进入文档');
     assert(json.includes('round(div(weightKg'), '派生值必须把**公式原文**写进证据链 —— 否则事后没人说得清那个 22.5 怎么来的');
-    /* 出处的尾部是**内容指纹**（包不再有版本号）：它由内容算出，改了内容必然变 ——
-       而版本号靠人记得改，改漏了这句"出自哪一份模板"就成了假话。 */
+    /* 出处的尾部是内容指纹（包不再有版本号）：它由内容算出，改了内容必然变 ——
+       而版本号靠人记得改，改漏了这句"出自哪一份模板"就成了假话。  */
     assert(
       json.includes(`doc.template.test#t.demo@${packFingerprintOf(testPack())}`),
       '每个节点都要能追到"出自哪份模板的哪一份内容"（指纹，不是版本号）',
@@ -458,7 +444,6 @@ async function main(): Promise<void> {
     assert(refs.some((ref) => ref.startsWith('doc.template.test#t.demo@')), '模板出处');
     assert(refs.some((ref) => ref === 'expr:doc.template.test/t.bmi'), '控件出处（带包 id：同一公式被多份模板、多个包复用时，这一条才答得出"用的哪一版"）');
 
-    /* 空骨架：模板不塞正文 */
     assertEqual(textAt(output, 'vitals'), '', '模板不产生正文内容（"看起来写完的病历"比空白危险得多）');
   });
 
@@ -491,7 +476,7 @@ async function main(): Promise<void> {
     const found = findTemplate(registry, 'tpl.obstetric.outpatient');
     assert(!!found && found.pack.packId === SAMPLE_PACK.packId, '应能按模板 id 找到它所属的包（跨包引用会让"依赖哪几个包在线"变成隐式条件）');
 
-    /* 开关沿用的是**上一步那套机制**：停用一份模板，它就从"能开"里消失 */
+    /* 开关沿用的是上一步那套机制：停用一份模板，它就从"能开"里消失  */
     registry.setItemEnabled(SAMPLE_PACK.packId, 'tpl.obstetric.outpatient', false);
     assertEqual(listTemplates(registry).length, 2, '停用一份模板后清单少一条');
     assertEqual(findTemplate(registry, 'tpl.obstetric.outpatient'), null, '停用的模板找不到（否则界面列出、实际开不出来）');
@@ -514,8 +499,8 @@ async function main(): Promise<void> {
   });
 
   await test('K10 派生值重算：依赖从**文档本身**还原；缺输入不编值、手改过的不动、重算幂等', () => {
-    /* 重算要**回到包里取公式**，所以测试包必须先装载 —— 否则会走成 unresolved
-       （"控件在当前包里找不到就不算"），而那条路径另有覆盖 */
+    /* 重算要回到包里取公式，所以测试包必须先装载 —— 否则会走成 unresolved
+       （"控件在当前包里找不到就不算"），而那条路径另有覆盖  */
     const registry = registryWithSamples();
     registry.load(testPack(), { validate: (pack) => validateTemplatePack(pack as TemplatePack) });
     const instantiated = instantiateTemplate(testPack({ weightFilled: false }), inputOf('t.demo'));
@@ -523,7 +508,6 @@ async function main(): Promise<void> {
     const weightId = instantiated.result.slots.weightKg as NodeId;
     const bmiId = instantiated.result.slots.bmi as NodeId;
 
-    /* ① 依赖边写进了**证据链**：重算据此从文档自身取输入，不依赖任何进程内状态 */
     const evidence = (doc.nodes[bmiId]?.provenance.evidence ?? []) as Array<{ ref: string; field?: string; nodeId?: string }>;
     assert(evidence.some((item) => item.field === 'bmi'), '派生值的主出处要带槽位名（重算要按它回填）');
     assert(
@@ -535,13 +519,11 @@ async function main(): Promise<void> {
       '输入边要指向**具体的填写项节点**（否则重启之后这个派生值就再也算不出来了）',
     );
 
-    /* ② 还没填体重：算不出来 → 计入 pending，**不产生任何变更、更不编值** */
     let plan = planRecompute({ nodes: doc.nodes, patient: doc.patient, at: AT, registry });
     assertEqual(plan.changes.length, 0, '缺输入时不应产生变更');
     assertEqual(plan.pending.length, 1, '应如实报"算不出来"');
     assertEqual(plan.pending[0]?.missing, ['weightKg'], 'pending 要点名缺哪一格（测试包的字段没打标签，故回落为 key）');
 
-    /* ③ 医生填了体重 → 重算得出体质指数（65 ÷ 1.7² = 22.5） */
     const weightNode = doc.nodes[weightId] as { value: JsonValue; valueText?: string };
     weightNode.value = 65;
     weightNode.valueText = '65';
@@ -550,14 +532,13 @@ async function main(): Promise<void> {
     assertEqual(plan.changes[0]?.key, 'bmi', '变的是 bmi 这一格');
     assertEqual(plan.changes[0]?.next, 22.5, '65 ÷ 1.7² = 22.5');
 
-    /* ④ 落笔走会话的**系统取数**：system 身份 + 强引用；写完再规划应无事可做（幂等） */
     const session = WriteSession.open(doc);
     const keepEvidence = () => (session.document.nodes[bmiId]?.provenance.evidence ?? []).map((item) => ({ ...item }));
     const applied = session.applyExternalData({ items: [{ nodeId: bmiId, value: 22.5, evidence: keepEvidence() }] }, { id: 'template-engine', kind: 'system' });
     assertEqual(applied.applied, [bmiId], '应落笔到派生值节点');
     assertEqual(session.document.revisions.at(-1)?.op, 'external', '留痕要如实记成 external（不是"医生编辑"）');
-    /* 落笔会把 provenance **整体替换**，所以必须把原有证据带过去 ——
-       否则依赖边被抹掉，下一次重算就再也找不到输入（实测踩到过） */
+    /* 落笔会把 provenance 整体替换，所以必须把原有证据带过去 ——
+       否则依赖边被抹掉，下一次重算就再也找不到输入（实测踩到过）  */
     assert(
       (session.document.nodes[bmiId]?.provenance.evidence ?? []).some((item) => item.ref.startsWith('expr-dep:')),
       '重算落笔**不得抹掉依赖边**，否则"重算一次之后就再也算不出来"',
@@ -565,10 +546,10 @@ async function main(): Promise<void> {
     const again = planRecompute({ nodes: session.document.nodes, patient: session.document.patient, at: AT, registry });
     assertEqual(again.changes.length, 0, '同值再算不应产生变更（否则每次重算都写一条无意义留痕）');
 
-    /* ⑤ 医生**确认过**的派生值：输入变了也不动它，如实报 skipped
-       （"确认"的含义是"我看过并认可"，系统之后不该背着他改掉） */
-    /* ⚠️ 必须改 `session.document` 里的节点而不是外层那个 doc：`WriteSession.open` 会**拷贝**文档，
-       改错对象的表现是"输入其实没变"，于是这条断言会静默失去意义 */
+    /* ⑤ 医生确认过的派生值：输入变了也不动它，如实报 skipped
+       （"确认"的含义是"我看过并认可"，系统之后不该背着他改掉）  */
+    /*  必须改 `session.document` 里的节点而不是外层那个 doc：`WriteSession.open` 会拷贝文档，
+       改错对象的表现是"输入其实没变"，于是这条断言会静默失去意义  */
     (session.document.nodes[weightId] as { value: JsonValue }).value = 70; // 体重改了 → 公式值应为 24.2
     const bmiNode = session.document.nodes[bmiId] as { value: JsonValue; humanConfirmed?: boolean; provenance: { origin: string } };
     bmiNode.humanConfirmed = true;
@@ -631,9 +612,9 @@ async function main(): Promise<void> {
       '留空 = 不限科室：字段整个不写（于是改回原样能回到原内容指纹，改动可逆）',
     );
 
-    /* 槽位元数据（显示名 / 从系统带入 / 必填 / 单位）：**已发布的文书也改得动**。
+    /* 槽位元数据（显示名 / 从系统带入 / 必填 / 单位）：已发布的文书也改得动。
        它与"改章节与槽位"不是一回事 —— 这几项在开文书那一刻才起作用，不进任何已开出的病历，
-       所以不该逼人为了把"体温"显示成中文名而撤稿（撤稿后医生端立刻开不出这份文书）。 */
+       所以不该逼人为了把"体温"显示成中文名而撤稿（撤稿后医生端立刻开不出这份文书）。  */
     const definition = SAMPLE_PACK.items.find((item) => item.itemId === targetId) as unknown as {
       sections: Array<{ sectionCode: string; slots: Array<Record<string, unknown>> }>;
     };
@@ -705,8 +686,8 @@ async function main(): Promise<void> {
       (err) => (err as { code?: string }).code === 'E_TPL_FIELD_INVALID',
       '什么都不给要报错（否则"点了保存什么都没发生"）',
     );
-    /* 章节 / 槽位 / 引用哪个控件是**文书骨架**：这条路上改不到它们 ——
-       改骨架会让已开出的病历与模板对不上，只能重新载入一份包 */
+    /* 章节 / 槽位 / 引用哪个控件是文书骨架：这条路上改不到它们 ——
+       改骨架会让已开出的病历与模板对不上，只能重新载入一份包  */
     assertEqual(
       JSON.stringify((patched.items.find((item) => item.itemId === targetId) as { sections: unknown }).sections),
       JSON.stringify((SAMPLE_PACK.items.find((item) => item.itemId === targetId) as { sections: unknown }).sections),
@@ -738,8 +719,6 @@ async function main(): Promise<void> {
       return found as Record<string, unknown>;
     };
 
-    /* ① 四项一起打在**已发布**的文书上：它们都在开文书那一刻才起作用，不进任何已开出的病历，
-       所以不该逼人为了标一格关键内容而撤稿（撤稿后医生端立刻开不出这份文书）。 */
     const withMeta = patchTemplateMeta(SAMPLE_PACK, targetId, {
       slotMeta: [{
         sectionCode: section.sectionCode,
@@ -761,10 +740,6 @@ async function main(): Promise<void> {
       '改的是**新包**：原包那一格一个字都不该动',
     );
 
-    /* ①b **目录要能把它们读回来**：编辑抽屉是一条"读回 → 改 → 写回"的回路，
-       投影里少给一项，表现就是"库里配了参考范围、编辑框里却是空的"，
-       而人一保存就把库里那份覆盖没了 —— 包写得进去、校验也过得去，没有任何地方会报错。
-       所以这条钉在**投影**上，而不是只钉在包里。 */
     const registry = registryWithSamples();
     registry.load(withMeta, { validate: (pack) => validateTemplatePack(pack as TemplatePack), replace: true });
     const catalogSlot = (((templateCatalogOf(registry).find((entry) => entry.itemId === targetId) as unknown as {
@@ -776,8 +751,6 @@ async function main(): Promise<void> {
     assertEqual((catalogSlot.referenceRange as { high?: number })?.high, 180, '目录要把参考范围带出来');
     assertEqual(catalogSlot.newParagraph, true, '目录要把"另起一段"带出来');
 
-    /* ② 实例化：四项都进得了节点，且产物照旧通过 validateDocument ——
-       这条是"模板存得进去、产出的文档校验不过"那类漂移的拦网。 */
     const output = instantiateTemplate(withMeta, inputOf(targetId));
     assertEqual(errorsOf(validateDocument(output.doc)), [], '带参考范围 / 默认值的模板，产物必须照旧合法');
     const node = nodeAt(output, fieldKey);
@@ -789,8 +762,6 @@ async function main(): Promise<void> {
       '参考范围要**深拷贝**进节点：同一份模板开出的多份文书不能共用同一个对象（改一份悄悄改到另一份）',
     );
 
-    /* ③ 清掉：`null` / `false` = 回到"没有这个设置"，并且**指纹要能回到原样** ——
-       可逆是这条编辑口子唯一的安全感（"我把它改回去了"与"它还是另一版"必须分得开）。 */
     const cleared = patchTemplateMeta(withMeta, targetId, {
       slotMeta: [{
         sectionCode: section.sectionCode,
@@ -812,8 +783,6 @@ async function main(): Promise<void> {
       '全部改回去必须回到**原内容指纹**（否则"改回原样"这件事就说不清了）',
     );
 
-    /* ④ 写错当场被拒：这几种错在界面上一模一样，后果却都在**别处**（趋势判反、派生值算不出）。
-       报错要落在模板这一层，别让它推迟到医生开着病历的时候。 */
     const badMeta = (slotMeta: unknown[]): string =>
       codeOf(() => patchTemplateMeta(SAMPLE_PACK, targetId, { slotMeta: slotMeta as never }));
     assertEqual(
@@ -858,7 +827,6 @@ async function main(): Promise<void> {
     const registry = registryWithSamples();
     const pack = registry.get(SAMPLE_PACK.packId) as TemplatePack;
 
-    /* ① 新建：默认草稿 */
     const created = addTemplate(pack, {
       name: '产科入院记录',
       docType: { system: 'local', code: 'obAdmission', display: '产科入院记录' },
@@ -878,7 +846,6 @@ async function main(): Promise<void> {
       '原包不动：新建是"换一份新包"',
     );
 
-    /* ② 草稿**开不出**：列表里没有它，按 id 也找不到（"找得到"与"开得出"必须是同一件事） */
     /* 同 packId 重新装载要显式声明 `replace`：否则"两份内容顶着同一个 id"会被拒绝，
        而这也正是"换一版内容"必须被看见的意思 */
     registry.load(created.pack, { validate: (p) => validateTemplatePack(p as TemplatePack), replace: true });
@@ -889,7 +856,6 @@ async function main(): Promise<void> {
     );
     assertEqual(findTemplate(registry, created.itemId), null, '草稿按 id 也找不到（否则界面列着、实际开不出）');
 
-    /* ③ 草稿可以改骨架（这正是"草稿"这个状态存在的理由） */
     const withSections = patchTemplateMeta(created.pack, created.itemId, {
       sections: [{ sectionCode: 'cc', title: '主诉', slots: [{ slot: 'text', key: 'cc', text: '' }] }],
     });
@@ -899,7 +865,6 @@ async function main(): Promise<void> {
       '草稿的章节可以改',
     );
 
-    /* ④ 发布之后就改不了骨架了：它可能已经开出过病历 */
     const published = patchTemplateMeta(withSections, created.itemId, { status: 'active' });
     registry.load(published, { validate: (p) => validateTemplatePack(p as TemplatePack), replace: true });
     assertEqual(
@@ -955,7 +920,6 @@ async function main(): Promise<void> {
   });
 
   await test('K13 系统带入与科室判定：字段按上下文取值（取不到不编值），"限科室"真的拦得住', () => {
-    /* ① 从系统带入（`slot.from`）：值来自调用方给的事实，不由模板编 */
     const custom = addTemplate(null, {
       name: '带入测试文书',
       docType: { system: 'local', code: 'bringIn', display: '带入测试文书' },
@@ -976,7 +940,7 @@ async function main(): Promise<void> {
     });
     const output = instantiateTemplate(custom.pack, inputOf(custom.itemId, {
       doctor: { actorId: 'DR_9' },
-      /* 科室**名称**由调用方补进上下文：引擎不认识科室字典，也不该认识 */
+      /* 科室名称由调用方补进上下文：引擎不认识科室字典，也不该认识  */
       context: { 'encounter.deptName': '呼吸内科' },
     }));
     assertEqual(nodeAt(output, 'name').value, '王**', '患者姓名按上下文带入');
@@ -992,13 +956,12 @@ async function main(): Promise<void> {
       (deptNode.provenance.evidence ?? []).some((evidence) => evidence.kind === 'his' && evidence.ref === 'ctx:encounter.deptName'),
       `从系统带入的值要在证据链里留下来源，实际：${JSON.stringify(deptNode.provenance.evidence)}`,
     );
-    /* 取不到必须**告警说出缺哪一格**：否则"没带入"与"医生还没填"长得一模一样 */
+    /* 取不到必须告警说出缺哪一格：否则"没带入"与"医生还没填"长得一模一样  */
     assert(
       output.result.warnings.some((warning) => warning.includes('outAt') && warning.includes('encounter.dischargedAt')),
       `取不到值时要有告警，实际：${JSON.stringify(output.result.warnings)}`,
     );
 
-    /* ② 写错路径当场被拒：不拦的话表现是"这一格一直空着"，而人只会去怀疑数据没同步 */
     const badPath = JSON.parse(JSON.stringify(custom.pack)) as TemplatePack;
     (badPath.items[0] as unknown as { sections: Array<{ slots: Array<Record<string, unknown>> }> }).sections[0].slots[0].from = 'patient.nickname';
     assertThrows(
@@ -1007,8 +970,6 @@ async function main(): Promise<void> {
       '未登记的取值路径要报，并点出错的那个路径',
     );
 
-    /* ③ 科室判定：通用谁都能开；限科室必须匹配；**就诊没有科室时不放行** ——
-       放行会让"限产科"在缺数据时静默变成"全院都能开"，那正是这套判定要消灭的那句假话 */
     const generic = addTemplate(null, {
       name: '通用文书',
       docType: { system: 'local', code: 'anyDept', display: '通用文书' },
@@ -1027,7 +988,6 @@ async function main(): Promise<void> {
     assertEqual(deptAllowsTemplate(limitedDef, 'DEPT_RESP'), false, '科室不匹配时开不出');
     assertEqual(deptAllowsTemplate(limitedDef, undefined), false, '就诊没有科室信息时，限科室的开不出');
 
-    /* ④ 名单按科室过滤：**不给 deptCode = 不过滤**（管理后台要看到全部，它管的是配置而不是能不能开） */
     const registry = createEmptyPackRegistry();
     registry.load(limited.pack, { validate: (pack) => validateTemplatePack(pack as TemplatePack) });
     assertEqual(listTemplates(registry, { deptCode: 'DEPT_OB' }).length, 1, '科室匹配时列入名单');
@@ -1037,7 +997,6 @@ async function main(): Promise<void> {
   });
 
   await test('K14 控件可改可删：改公式换的是"怎么算"，被文书引用的控件删不掉（并指出是谁在用）', () => {
-    /* ① 新建一个控件 */
     const created = addExpression(null, {
       name: '自测 BMI',
       unit: 'kg/m²',
@@ -1046,12 +1005,10 @@ async function main(): Promise<void> {
     const controlId = created.itemId;
     const controlOf = (pack: TemplatePack): ExpressionDefinition => pack.items.find((item) => item.itemId === controlId) as ExpressionDefinition;
 
-    /* ② 改名称与单位：它不进任何已开出的病历，所以改起来没有代价 */
     const renamed = patchExpression(created.pack, controlId, { name: '体质量指数', unit: 'kg/m²' });
     assertEqual(controlOf(renamed).name, '体质量指数', '改名生效');
     assertEqual(controlOf(created.pack).name, '自测 BMI', '原包一个字不动（改的是"换一版内容"）');
 
-    /* ③ 改公式：换的是"这个数怎么算出来的" */
     const repatched = patchExpression(renamed, controlId, {
       expression: {
         kind: 'fn',
@@ -1076,10 +1033,9 @@ async function main(): Promise<void> {
       (err) => (err as { code?: string }).code === 'E_TPL_FIELD_INVALID',
       '没有要改的字段要报错，不能静默返回原包',
     );
-    /* 单位清空 = **去掉这个字段**（而不是留一个空串）：否则"改回原样"回不到原内容指纹 */
+    /* 单位清空 = 去掉这个字段（而不是留一个空串）：否则"改回原样"回不到原内容指纹  */
     assertEqual('unit' in (patchExpression(repatched, controlId, { unit: '' }).items[0] as object), false, '单位留空 = 去掉这个字段');
 
-    /* ④ 被文书引用时删不掉：并**列出是哪些文书**在用 —— 否则人只知道自己删不成，不知道下一步该干什么 */
     const withTemplate = addTemplate(repatched, {
       name: '用控件的文书',
       docType: { system: 'local', code: 'usesExpr', display: '用控件的文书' },
@@ -1119,11 +1075,11 @@ async function main(): Promise<void> {
   });
 
   /* ------------------- L：章节属性 / 排序 / 从已有内容出发（复制与片段） -------------------
-     这一组盯的是三件**会被静默破坏**的事：
+     这一组盯的是三件会被静默破坏的事：
        · 章节属性（必备 / 整章算关键内容）抄漏了不会当场报错，只会让"必备"变成一句空话；
        · 顺序若被当成包里一个字段去维护，就会出现"界面看到的顺序与库里那份不一致"；
        · 复制与片段若丢了控件引用，要等医生开那份文书的时候才发现（那时早已想不起复制过什么）。
-     每一条都用**产物**说话（实例化出来的文档、写回包里那一份），不看中间变量。 */
+     每一条都用产物说话（实例化出来的文档、写回包里那一份），不看中间变量。  */
 
   /** 章节标题按 order 排出来的那一串（顺序是这一组要证的东西） */
   const sectionTitlesOf = (output: InstantiateOutput): string => Object.values(output.doc.nodes)
@@ -1160,8 +1116,8 @@ async function main(): Promise<void> {
     assertEqual('required' in note, false, '没标必备的章节不得写 required:false（那会凭空多出一份指纹差异）');
     assertEqual('keyContent' in note, false, '没标关键内容的章节同理');
     assertEqual('description' in vital, false, '章节说明是给医生的提示、不是病历内容：不得进文档模型');
-    /* 这一条是 `model/validate.ts` 白名单的回归闸：漏登记 `required` 会让**全部文档**以
-       E_UNKNOWN_FIELD 报错，而那份报错会指向"节点字段不认"，很难联想到"加了章节属性" */
+    /* 这一条是 `model/validate.ts` 白名单的回归闸：漏登记 `required` 会让全部文档以
+       E_UNKNOWN_FIELD 报错，而那份报错会指向"节点字段不认"，很难联想到"加了章节属性"  */
     assertEqual(errorsOf(validateDocument(output.doc)).length, 0, '带章节属性的产物必须通过文档校验');
   });
 
@@ -1178,8 +1134,8 @@ async function main(): Promise<void> {
     const before = instantiateTemplate(created.pack, inputOf(created.itemId));
     assertEqual(sectionTitlesOf(before), '甲乙丙', '初始顺序按数组顺序');
 
-    /* 排序 = **数组重排**（界面上就是把两个元素换个位置）：不改包格式、不改内核、
-       不需要在包里多一个 order 字段 —— 多一个字段就多一处"它和数组顺序不一致"的可能 */
+    /* 排序 = 数组重排（界面上就是把两个元素换个位置）：不改包格式、不改内核、
+       不需要在包里多一个 order 字段 —— 多一个字段就多一处"它和数组顺序不一致"的可能  */
     const items: TemplatePackItem[] = created.pack.items.map((item) => (item.itemType === 'template' && item.itemId === created.itemId
       ? { ...item, sections: [item.sections[2], item.sections[0], item.sections[1]] }
       : item));
@@ -1227,7 +1183,7 @@ async function main(): Promise<void> {
     assertEqual((stillSource.sections[0].slots[2] as { useExpression: string }).useExpression, 't.bmi', '原模板的引用不得被改写');
     assertEqual(source.pack.items.length, sourceItemCount, '原包条目数不变（复制不往源包里加东西）');
 
-    /* 目标包里已经有同名控件 → **复用**，不再复制一份（否则"改公式改哪一份"就变成猜谜） */
+    /* 目标包里已经有同名控件 → 复用，不再复制一份（否则"改公式改哪一份"就变成猜谜）  */
     const again = copyTemplateIntoPack(copied.pack, copied.pack, copied.itemId);
     assertEqual(again.copiedControls.length, 0, '同包已有同名控件时复用');
 
@@ -1288,7 +1244,7 @@ async function main(): Promise<void> {
     });
     assertEqual(carried.copiedControls.length, 1, '控件定义能取到就带进目标包（片段必须自足）');
     assertEqual(codeOf(() => validateTemplatePack(carried.pack)), 'OK', '带控件的片段包必须通过校验');
-    /* 取不到定义（本机任何包里都没有这个控件）：**明说**，而不是存一条永远插不进去的素材 */
+    /* 取不到定义（本机任何包里都没有这个控件）：明说，而不是存一条永远插不进去的素材  */
     assertEqual(codeOf(() => addFragment(null, { name: '引用缺失控件', sections })), 'E_TPL_EXPR_UNKNOWN', '找不到控件定义要报 E_TPL_EXPR_UNKNOWN');
   });
 
@@ -1330,7 +1286,7 @@ async function main(): Promise<void> {
       '整份骨架与元数据补丁不能一起交（该照哪一份算没有共识）',
     );
 
-    /* 章节编码在模板内重复时**拒绝**：按编码定位的补丁不能悄悄改到"第一个同码的章节"上 */
+    /* 章节编码在模板内重复时拒绝：按编码定位的补丁不能悄悄改到"第一个同码的章节"上  */
     const dup = addTemplate(testPack(), {
       name: '重码',
       docType: { system: 'local', code: 'dup', display: '重码' },
@@ -1377,7 +1333,6 @@ async function main(): Promise<void> {
     const templateId = created.itemId;
     const output = instantiateTemplate(withTable, inputOf(templateId));
 
-    /* ① 产物必须照旧合法：表格是新增的一类节点，最容易出的问题是"模板存得进去、产出的文档校验不过" */
     assertEqual(errorsOf(validateDocument(output.doc)), [], '带表格的模板产出的文档必须通过 validateDocument');
 
     const kids = (id: string): Array<Record<string, unknown>> => Object.values(output.doc.nodes)
@@ -1388,7 +1343,6 @@ async function main(): Promise<void> {
       return runs.map((run) => run.text).join('');
     };
 
-    /* ② 结构：1 行表头 + rows 行数据；列数 = 表头列数 */
     const tableId = output.result.slots.vitalsTable as string;
     const table = output.doc.nodes[tableId] as unknown as Record<string, unknown>;
     assertEqual(table.type, 'table', '槽位名指向表格节点');
@@ -1404,7 +1358,6 @@ async function main(): Promise<void> {
       '表头文字就是列名（列名写错的表现就是表头写错，所以这一条要钉住）',
     );
 
-    /* ③ 数据格里是**填写项**：医生在格子里写字走的是与正文填写项完全相同的那条写路径 */
     const dataRowCells = kids(String(rows[1].id));
     const cellField = (cell: Record<string, unknown>): Record<string, unknown> => kids(String(cell.id))[0];
     assertEqual(cellField(dataRowCells[0]).type, 'field', '数据格里是填写项（不是只读文本）');
@@ -1412,8 +1365,8 @@ async function main(): Promise<void> {
     assertEqual(cellField(dataRowCells[1]).dataType, 'number', '数值列才画得出趋势');
     assertEqual(cellField(dataRowCells[1]).unit, '℃', '列上的单位要落进格子（"32 是什么"必须有答案）');
     assertEqual(cellField(dataRowCells[2]).dataType, 'text', '不写 dataType 的列默认 text');
-    /* 列上绑的数据元必须落到**每一格**上：机器读的是一格一格的值，表格只是容器。
-       同一列的多行共用同一条标签（`code` 一致），跨文书比对才认得出"这是同一个体温"。 */
+    /* 列上绑的数据元必须落到每一格上：机器读的是一格一格的值，表格只是容器。
+       同一列的多行共用同一条标签（`code` 一致），跨文书比对才认得出"这是同一个体温"。  */
     assertEqual(
       JSON.stringify(cellField(dataRowCells[1]).tags),
       JSON.stringify([{ system: 'local', code: 'vitals.temp', display: '体温' }]),
@@ -1431,7 +1384,6 @@ async function main(): Promise<void> {
     );
     assertEqual(cellField(dataRowCells[0]).value, null, '格子默认空待填：模板不编值');
 
-    /* ④ 格子也能按「槽位名.r行c列」定位（它同时是证据链里的 `field`，事后查得清这个数从哪来） */
     const secondRowFirstCell = output.result.slots['vitalsTable.r2c3'] as string;
     assert(typeof secondRowFirstCell === 'string', '第 2 行第 3 列应能按名字定位');
     assertEqual((output.doc.nodes[secondRowFirstCell] as unknown as { type: string }).type, 'field', '定位到的是填写项');
@@ -1442,7 +1394,7 @@ async function main(): Promise<void> {
       '证据链要写清是哪个格子（否则"这个数从哪一格来的"事后没人答得出）',
     );
 
-    /* ⑤ 表格**自己占一段**：跟在一句话后面（同一个段落里）会让段落操作把整张表当成那句话的一部分搬走 */
+    /* ⑤ 表格自己占一段：跟在一句话后面（同一个段落里）会让段落操作把整张表当成那句话的一部分搬走  */
     const tableParagraphId = String(table.parentId);
     assertEqual(
       (output.doc.nodes[tableParagraphId] as unknown as { type: string }).type,
@@ -1483,7 +1435,7 @@ async function main(): Promise<void> {
     assertEqual(temps.length, 2, '每一行的体温格子各产一条数据元（标签属于列，值属于格）');
     assertEqual(temps[0]?.unit, '℃', '机读要带上单位（否则外部系统不知道 37.2 是摄氏度还是华氏度）');
 
-    /* ⑧ 表格没有元数据档：往它身上打元数据要**明说**，而不是逐项静默忽略（忽略会让调用方以为改成功了） */
+    /* ⑧ 表格没有元数据档：往它身上打元数据要明说，而不是逐项静默忽略（忽略会让调用方以为改成功了）  */
     assertEqual(
       codeOf(() => patchTemplateMeta(withTable, templateId, {
         slotMeta: [{ sectionCode: 'vitals', key: 'vitalsTable', display: '生命体征表' }],
@@ -1492,7 +1444,7 @@ async function main(): Promise<void> {
       '表格不接受"显示名"这类元数据（列定义与行数属于骨架，只有草稿能改）',
     );
 
-    /* ⑧ 形状写错当场被拒：这几处界面上都看得见，但后果都在**别处** */
+    /* ⑧ 形状写错当场被拒：这几处界面上都看得见，但后果都在别处  */
     const badTable = (slot: Record<string, unknown>): string => codeOf(() => addTemplate(null, {
       name: '坏表格',
       docType: { system: 'local', code: 'bad', display: '坏表格' },
@@ -1547,9 +1499,6 @@ async function main(): Promise<void> {
   });
 
   await test('K17 专科控件槽位：五种形状都能落地、格键只有一处算得出来、写不对当场被拒', () => {
-    /* 一个包：五种形状各一个控件 + 一份把它们排进去的文书。
-       为什么五种都要跑：形状决定渲染器，而"画不出来"在数据层看不出来 ——
-       能看出来的只有"节点上带没带上形状、格清单算不算得出来、写路径认不认那个键"。 */
     const controlDefs = [
       {
         itemType: 'control',
@@ -1648,7 +1597,6 @@ async function main(): Promise<void> {
       '产出的文档必须通过 validateDocument：控件是新增的一类节点，最容易出的问题是"模板存得进去、产出的病历校验不过"',
     );
 
-    /* ① 形状与呈现结构**随节点走**：渲染器拿不到包，画法只能靠节点上这几项 */
     const scale = nodeAt(output, 'pain');
     assertEqual(scale.type, 'control', '控件是独立的一类节点');
     assertEqual(scale.shape, 'scale', '形状要随节点走（渲染器按它分派）');
@@ -1689,12 +1637,10 @@ async function main(): Promise<void> {
       '影像格的值是**资源地址**：字段类型只能是 text',
     );
 
-    /* ② 初值：只填定义给了 `defaultValue` 的格，其余**没有这个键** */
     const consentPayload = nodeAt(output, 'consent').payload as Record<string, unknown>;
     assertEqual(consentPayload.signed, true, '定义给了默认值的格要填上');
     assertEqual(consentPayload.read, undefined, '没给默认值的格不写键（"空着"与"填了个空"是两件事）');
 
-    /* ③ 目录投影：编辑抽屉是"读回 → 改 → 写回"，少回显一项就静默清掉一项 */
     const registry = createEmptyPackRegistry();
     registry.load(pack, { validate: (candidate) => validateTemplatePack(candidate as TemplatePack) });
     const catalogSlots = templateCatalogOf(registry).find((entry) => entry.itemId === 't.control')?.sections[0].slots ?? [];
@@ -1704,7 +1650,6 @@ async function main(): Promise<void> {
     assert(String(painSlot?.detail ?? '').includes('疼痛数字量表'), '目录那一行要说清用的是哪份控件');
     assertEqual(catalogSlots.find((slot) => slot.key === 'temper')?.rows, 2, '行数要带出来（少回显一项 = 一保存就把行数改回去）');
 
-    /* ④ 写路径：键必须落在格上、值要与那一格的数据类型相符、清空 = 删键 */
     const session = WriteSession.open(output.doc);
     const human = { kind: 'human', id: 'DR_TEST', name: '测试医生' } as const;
     const seriesId = String(output.result.slots.temper);
@@ -1726,8 +1671,8 @@ async function main(): Promise<void> {
     session.setControlValue({ nodeId: seriesId, fieldKey: 'temper.r2', value: '' }, human);
     assertEqual('temper.r2' in payloadOf(), false, '清空 = **删掉这个键**（不是写 null）');
 
-    /* 影像格写进去的是一条**地址**（一个字符串），它没有"数值"这个概念 ——
-       但"清空 = 删键"这条纪律与其余形状完全一样。 */
+    /* 影像格写进去的是一条地址（一个字符串），它没有"数值"这个概念 ——
+       但"清空 = 删键"这条纪律与其余形状完全一样。  */
     const filmsId = String(output.result.slots.films);
     const filmPayloadOf = (): Record<string, unknown> =>
       (session.document.nodes[filmsId] as unknown as { payload: Record<string, unknown> }).payload;
@@ -1771,7 +1716,7 @@ async function main(): Promise<void> {
       `影像格在纸面上要带 [影像：…] 前缀（实际行：${paperTexts.join(' ⏎ ')}）`,
     );
 
-    /* ⑥ 引用一个包里没有的控件：**装载期**就拒，而不是等到有人点开这份文书 */
+    /* ⑥ 引用一个包里没有的控件：装载期就拒，而不是等到有人点开这份文书  */
     const orphan: TemplatePack = {
       packId: 'doc.template.orphan',
       kind: 'template',
@@ -1834,10 +1779,10 @@ async function main(): Promise<void> {
   });
 
   await test('K18 空段落与图片槽：段落产出空 text、图片产出待贴空槽（空 resRef 也过校验）、纸面写「待贴图」', () => {
-    /* 这两类槽位产出的是**已有**的节点类型（text / image），考验的不是"新节点"，
+    /* 这两类槽位产出的是已有的节点类型（text / image），考验的不是"新节点"，
        而是"它们在最空的状态下仍然合法"：空段落 runs 为空、图片槽 resRef 为空。
        后者尤其容易被旧校验（"resRef 必须是非空字符串"）拦下，而表现是
-       "模板存得进去、开文书时校验不过"。 */
+       "模板存得进去、开文书时校验不过"。  */
     const pack: TemplatePack = {
       packId: 'doc.template.blanktest',
       kind: 'template',
@@ -1871,12 +1816,10 @@ async function main(): Promise<void> {
       '产出的文档必须过校验：图片槽的 resRef 是空串，而旧校验要求"非空字符串"——这条不改，图片槽根本开不出来',
     );
 
-    /* ① 空段落：产出的就是 text 节点（与结构文本同一种，下游只有一条路可认） */
     assertEqual(nodeAt(output, 'free').type, 'text', '空段落产出 text 节点，不是另一种新节点');
     assertEqual(textAt(output, 'free'), '', '空段落没有文字');
     assertEqual(nodeAt(output, 'keyNote').keyContent, true, '空段落可以标关键内容（医生端有确认动作，标了才可达）');
 
-    /* ② 图片槽：空地址 = 待贴，不是"已填" */
     const cxr = nodeAt(output, 'cxr');
     assertEqual(cxr.type, 'image', '图片槽产出 image 节点');
     assertEqual(cxr.resRef, '', '图片槽开出来是**空地址**：意思是"待贴"，不是"填过了"');
@@ -1888,7 +1831,6 @@ async function main(): Promise<void> {
     const cxrParent = output.doc.nodes[cxrId as NodeId]?.parentId;
     assertEqual(output.doc.nodes[cxrParent as NodeId]?.type, 'paragraph', '图挂在段落下面（与医生端贴图的挂法一致）');
 
-    /* ③ 纸面：空槽写成「待贴图」，不是「图片缺失」 */
     const paper = renderLines(output.doc).map((line) => line.text);
     assert(
       paper.some((text) => text === '[待贴图：胸部 CT 正位]'),
@@ -1899,7 +1841,6 @@ async function main(): Promise<void> {
       '空槽不是"图丢了"：写成「图片缺失」会让审计去追一起根本没发生过的资源事故',
     );
 
-    /* ④ 空槽贴图：写路径只改地址，不改"这一格是什么"；空地址要被拒 */
     const session = WriteSession.open(output.doc);
     const human = { kind: 'human', id: 'DR_TEST', name: '测试医生' } as const;
     session.setImageRef({ nodeId: cxrId as NodeId, resRef: '/res/a1b2.png', altText: '医生起的名字' }, human);
@@ -1955,8 +1896,8 @@ async function main(): Promise<void> {
       '图片不出关键内容（医生端没有"确认这一张图"这个动作）',
     );
 
-    /* ⑥ 槽位元数据补丁：图片与空段落那几条否定规则要在**改的那一刻**就说清楚 ——
-       留到医生端才发现，等于一份签不出去、也不知道去哪儿确认的病历。 */
+    /* ⑥ 槽位元数据补丁：图片与空段落那几条否定规则要在改的那一刻就说清楚 ——
+       留到医生端才发现，等于一份签不出去、也不知道去哪儿确认的病历。  */
     const badMeta = (slotMeta: unknown[]): string =>
       codeOf(() => patchTemplateMeta(pack, 't.blank', { slotMeta: slotMeta as never }));
     assertEqual(
@@ -1976,7 +1917,7 @@ async function main(): Promise<void> {
       'E_TPL_FIELD_INVALID',
       '空段落本来就另起一段（这一项对它没有意义）',
     );
-    /* 但空段落**可以**标关键内容：它产出文本节点，医生端有「确认内容」这个动作 */
+    /* 但空段落可以标关键内容：它产出文本节点，医生端有「确认内容」这个动作  */
     const withKey = patchTemplateMeta(pack, 't.blank', {
       slotMeta: [{ sectionCode: 'blank', key: 'free', keyContent: true }],
     });
@@ -2109,7 +2050,7 @@ async function main(): Promise<void> {
     assertEqual(vitalView?.items?.[0]?.field?.tags?.[0]?.code, 'list.temp', '格子绑的数据元要带进目录（编码原样）');
     assertEqual(vitalView?.items?.[0]?.text, '体温', '格子那一项的文字也在');
 
-    /* 否定规则：空列表 / 空项 / 数据元 / 关键内容，都要在**装包那一刻**说清楚 */
+    /* 否定规则：空列表 / 空项 / 数据元 / 关键内容，都要在装包那一刻说清楚  */
     const badPack = (slots: unknown[]): string => codeOf(() => validateTemplatePack({
       ...pack,
       items: [{

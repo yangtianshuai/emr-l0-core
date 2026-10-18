@@ -1,12 +1,4 @@
-/**
- * 运行时目录自测（R1~R7）。
- *
- *   node src/core/runtime-dir-self-test.ts
- *
- * 守两件事：
- *   R1 **默认落在仓库之外** —— 这条一破，患者数据与加密凭据又回到被审查、被打包的目录树里；
- *   R4~R7 **一次性迁移的边界** —— 不覆盖、只做一次、失败不记账、旧目录不删。
- */
+// 运行时目录自测（R1~R7）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -27,7 +19,7 @@ import {
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'runtime-dir');
 
-/** ⚠️ 本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言 */
+/**  本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
 const suite = new TestSuite('运行时目录自测', [
@@ -86,7 +78,7 @@ async function main(): Promise<void> {
     assertEqual(overridden.auditFile, 'E:\\isolated\\audit.log', '审计文件同样优先');
     assertEqual(overridden.dbFile, 'E:\\isolated\\custom.db', '数据库文件同样优先');
 
-    /* 空串**不算**指定：环境变量被导出成空值是很常见的意外，不该因此改变路径 */
+    /* 空串不算指定：环境变量被导出成空值是很常见的意外，不该因此改变路径  */
     const blank = resolveRuntimeLayout({ LOCALAPPDATA: 'C:\\L', L0_STATE_DIR: '   ' });
     assertEqual(blank.explicit, false, '空白取值不算显式指定');
     assertEqual(blank.stateDir, join('C:\\L', 'l0-electronic-record', 'state'), '空白取值走派生');
@@ -190,14 +182,14 @@ async function main(): Promise<void> {
     assert(result.marker !== null && existsSync(result.marker), '要写出记账文件');
     const marker = JSON.parse(readFileSync(String(result.marker), 'utf8')) as { copied: string[]; from: string };
     assertEqual(marker.copied.length, 2, '记账里要写清搬了哪几项');
-    /* **旧目录保留**：新位置出问题时它是回滚凭据 */
+    /* 旧目录保留：新位置出问题时它是回滚凭据  */
     assertEqual(existsSync(join(legacyState, 'l0.db')), true, '旧目录不该被删');
 
     /* 再跑一次：已记账 → 不再迁（否则每次启动都搬一遍，且会覆盖新位置里刚写的东西） */
     const again = planRuntimeMigration(layout, { ...legacy, stateDir: legacyState }, realProbe(), '2026-10-14T01:00:00.000Z');
     assertEqual(again.needed, false, '第二次不该再迁');
 
-    /* 失败就不记账：拿一个不存在的源让复制失败，随后**计划仍应判定需要迁移** */
+    /* 失败就不记账：拿一个不存在的源让复制失败，随后计划仍应判定需要迁移  */
     const failTarget = join(DIR, 'target-fail');
     const failPlan = {
       ...planRuntimeMigration(resolveRuntimeLayout({}, { root: failTarget }), { ...legacy, stateDir: legacyState }, realProbe(), '2026-10-14T02:00:00.000Z'),
@@ -215,7 +207,7 @@ async function main(): Promise<void> {
 
   await test('R8 归档：**新位置没有的旧数据绝不动**；有的才搬（先复制后删源）', () => {
     /* 安全闸：这条是"归档"会不会变成数据丢失的分界线。
-       少了它，一次失败的迁移之后启动就会把**唯一的一份**搬去归档目录。 */
+       少了它，一次失败的迁移之后启动就会把唯一的一份搬去归档目录。  */
     const legacyState = join(DIR, 'arch-legacy', 'state');
     mkdirSync(legacyState, { recursive: true });
     writeFileSync(join(legacyState, 'l0.db'), 'db-bytes', 'utf8');
@@ -227,7 +219,6 @@ async function main(): Promise<void> {
       legacyPackDir: join(DIR, 'arch-legacy', 'knowledge'),
     };
 
-    /* ① 新位置是空的 → 不归档（并说明是"新位置还没有对应数据"） */
     const bare = resolveRuntimeLayout({}, { root: join(DIR, 'arch-target-bare') });
     const gate = planLegacyArchive(bare, legacyShares, realProbe(), '2026-10-14T00:00:00.000Z');
     assertEqual(gate.needed, false, '新位置没有数据时不该归档');
@@ -236,7 +227,6 @@ async function main(): Promise<void> {
     assert(gate.skipped[0]?.why.includes('新位置'), `理由要指向安全闸，实际：${gate.skipped[0]?.why ?? ''}`);
     assertEqual(existsSync(join(legacyState, 'l0.db')), true, '被跳过时原处必须原封不动');
 
-    /* ② 新位置有数据了 → 归档：搬进归档目录、原处清空、归档里内容一致 */
     const target = resolveRuntimeLayout({}, { root: join(DIR, 'arch-target-full') });
     mkdirSync(target.stateDir, { recursive: true });
     writeFileSync(join(target.stateDir, 'l0.db'), 'db-bytes', 'utf8');
@@ -257,10 +247,6 @@ async function main(): Promise<void> {
       `归档目录必须在**仓库之外**的运行时目录下，实际：${result.archiveDir}`,
     );
 
-    /* ③ 归档失败 → 原处不动（任何时刻都不低于两份）。
-       用一份**新的**夹具：② 已经按设计把它搬走了，拿同一个路径断"没被动过"是测不出东西的
-       （实测第一次就是这么红了一次）。
-       失败也是**真**失败：把归档目标指向一个**已存在的文件**之下，mkdir 必然 ENOTDIR。 */
     const failLegacy = join(DIR, 'arch-legacy-fail', 'state');
     mkdirSync(failLegacy, { recursive: true });
     writeFileSync(join(failLegacy, 'l0.db'), 'still-here', 'utf8');

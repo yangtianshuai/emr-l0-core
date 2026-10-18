@@ -1,14 +1,5 @@
-/**
- * T18c 验收自测：SM2 公钥加密 → 公钥信封 → 受控加密阅读（授权即密钥交付）。
- *
- *   node src/crypto/public-key-envelope-self-test.ts
- *
- * 三层：
- *   A SM2 加解密：往返、结构、**C3 校验必须拦住篡改与错私钥**（"拒绝而不是纠错"）；
- *   B 公钥信封：指纹先判"是不是给我的"、换接收方/换接口/改封装各自的错误码要能区分；
- *   C 受控加密阅读：**"授权书不可转让"必须是密码学事实**——换密钥解不开、
- *     改交付片段签名不过、拿 A 文档的授权读 B 文档密钥对不上。
- */
+// T18c 验收自测：SM2 公钥加密 → 公钥信封 → 受控加密阅读（授权即密钥交付）。
+// A SM2 加解密：往返、结构、C3 校验必须拦住篡改与错私钥（"拒绝而不是纠错"）；
 
 import { createHash } from 'node:crypto'; // 用于交叉印证 SM3 摘要（外部实现）
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -53,7 +44,6 @@ function flipByte(bytes: Uint8Array, index: number, mask = 0x01): Uint8Array {
 }
 
 async function main(): Promise<void> {
-  /* ============================== A SM2 加解密 ============================== */
 
   await test('A1 往返：1 / 16 / 100 / 1000 字节都能原样还原；顺序声明为 C1C3C2', async () => {
     assertEqual(SM2_CIPHERTEXT_ORDER, 'C1C3C2', '密文顺序必须显式声明（两种顺序混用极难排查）');
@@ -143,8 +133,6 @@ async function main(): Promise<void> {
     assertEqual(publicKeyFingerprint(publicKeyFromSpki(spki)), keyA.fingerprint, 'SPKI 往返后指纹应不变');
   });
 
-  /* ============================== B 公钥信封 ============================== */
-
   await test('B1 公钥信封往返：只有接收方私钥能解开', async () => {
     const plaintext = utf8('受控归档件内容');
     const envelope = encryptEnvelopeFor(plaintext, keyA);
@@ -194,7 +182,7 @@ async function main(): Promise<void> {
   await test('B6 注入固定 dek/iv 时**密文**可复现；被封装的密钥每次不同（SM2 加密本身随机）', async () => {
     /* 注意：不能断言"整个信封逐字节可复现" —— SM2 加密内部取随机 k，
        所以即使 DEK 固定，封装结果（wrappedKey，以及覆盖它的 MAC）每次也不同。
-       可复现的是**密文**（由 dek+iv 决定）。这里把这条性质写清楚，避免后来人误以为实现有随机性 bug。 */
+       可复现的是密文（由 dek+iv 决定）。这里把这条性质写清楚，避免后来人误以为实现有随机性 bug。  */
     const plaintext = utf8('可复现性');
     const options = { dek: new Uint8Array(16).fill(3), iv: new Uint8Array(16).fill(4) };
     const first = encryptEnvelopeFor(plaintext, keyA, options);
@@ -211,8 +199,6 @@ async function main(): Promise<void> {
     const b = encryptEnvelopeFor(plaintext, keyA);
     assert(a.ciphertext !== b.ciphertext, '不注入 dek/iv 时密文应随机（内容密钥必须每次新取）');
   });
-
-  /* ========================= C 受控加密阅读 ========================= */
 
   function fixture(): { doc: ReturnType<typeof buildSyntheticDoc>['doc']; json: string; context: ReadingContext } {
     const { doc } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1 });

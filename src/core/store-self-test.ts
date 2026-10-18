@@ -1,16 +1,4 @@
-/**
- * 工作区存储自测。
- *
- *   node src/core/store-self-test.ts
- *
- * 本套验证的是"**重启之后还对不对**"，而不只是"能存能读"：
- *   S1 三份数据一起存、一起恢复；
- *   S2 **首次启动 vs 数据损坏必须分开**（把两者混成一个"读不出来就当空"的分支，
- *      是数据丢失最容易被伪装成正常的方式）；
- *   S3 **seq 不重置**（ID 复用会让历史留痕指向另一个建议，且不会报错）；
- *   S4 注解处置史完整保留（它是质控可追溯的唯一载体）；
- *   S5 一次真实的"重启"往返；S6 快照自相矛盾必须报错而不是静默取舍。
- */
+// 工作区存储自测。
 
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -105,8 +93,8 @@ async function main(): Promise<void> {
     assertEqual(loaded.ok, true, '应加载成功');
     if (!loaded.ok) return;
     const after = loaded.scope.suggestions.add({ targetNodeId: 'n_1', text: 'b', confidence: 0.9, modelId: 'm1', at: AT }).suggestion;
-    /* 若只存 items 不存 seq，这里会再次产出 sg_0001 —— 与历史留痕里引用的那条**不是同一条**，
-       而审计只能看到 id，于是"这条建议被谁采纳"会指向错误的对象。 */
+    /* 若只存 items 不存 seq，这里会再次产出 sg_0001 —— 与历史留痕里引用的那条不是同一条，
+       而审计只能看到 id，于是"这条建议被谁采纳"会指向错误的对象。  */
     assert(after.id !== first.id, `新建议 ID 不得与历史重复（${first.id} → ${after.id}）`);
     assertEqual(after.id, 'sg_0002', '应继续递增');
     assertEqual(loaded.scope.suggestions.size(), 2, '历史条目仍在');
@@ -201,12 +189,12 @@ async function main(): Promise<void> {
     assertEqual(ok.ok, true, '口令正确应能解密');
     if (ok.ok && !ok.firstRun) assertEqual(ok.data.suggestions.seq, 1, '内容应完整恢复');
 
-    /* 口令错：必须报错，**不能**返回空数据（那会把"解不开"伪装成"本来就没有"） */
+    /* 口令错：必须报错，不能返回空数据（那会把"解不开"伪装成"本来就没有"）  */
     const wrong = loadSidecarsSealed(target, 'pass-2');
     assertEqual(wrong.ok, false, '口令错必须失败');
     if (!wrong.ok) assertEqual(wrong.firstRun, false, '不得被当成首次启动');
 
-    /* 没有口令：**拒绝写入**，绝不静默退回明文 */
+    /* 没有口令：拒绝写入，绝不静默退回明文  */
     assert(
       (() => {
         try {
@@ -231,9 +219,9 @@ async function main(): Promise<void> {
     const scope = emptyScope();
     const data = { suggestions: scope.suggestions.snapshot(), annotations: scope.annotations.snapshot() };
 
-    /* 盐只有一个来源：服务端配置文件（`server-config.json`）的 `stateSalt`，经**参数**传进来。
+    /* 盐只有一个来源：服务端配置文件（`server-config.json`）的 `stateSalt`，经参数传进来。
        原先这一档读环境变量 `L0_STATE_SALT`，本轮取消 —— 需要存储的东西一律入库，
-       而盐与它服务的口令同源，两处配置会让"换了一处、漏了另一处"变成一场事故。 */
+       而盐与它服务的口令同源，两处配置会让"换了一处、漏了另一处"变成一场事故。  */
     assertEqual(resolveStateSalt('pass-1', SALT_A).source, 'option', '显式给盐时来源应为 option');
     assertEqual(
       saltFingerprint(resolveStateSalt('pass-1', SALT_A).salt),
@@ -248,8 +236,8 @@ async function main(): Promise<void> {
 
     assertEqual(resolveStateSalt('pass-1').source, 'derived', '没给盐时应退回按口令派生');
 
-    /* 非法值：**必须抛错**。静默退回派生盐会让"我以为我配了独立盐"悄悄变成假话，
-       而它恰好是这条链路上唯一被改的那个参数 —— 没有任何别的迹象会暴露它 */
+    /* 非法值：必须抛错。静默退回派生盐会让"我以为我配了独立盐"悄悄变成假话，
+       而它恰好是这条链路上唯一被改的那个参数 —— 没有任何别的迹象会暴露它  */
     assert(
       (() => {
         try {
@@ -294,8 +282,8 @@ async function main(): Promise<void> {
     if (before.ok) assertEqual(before.usesCurrentSalt, true, '前置：文件是盐 A 写的');
     const rawBefore = readFileSync(target, 'utf8');
 
-    /* 关键的一条：**换盐不会让旧文件读不出来** —— 解密用的是信封头部那一个盐，
-       不是"当前配置的盐"。正因如此，轮换不需要保留旧盐、也不需要登记表 */
+    /* 关键的一条：换盐不会让旧文件读不出来 —— 解密用的是信封头部那一个盐，
+       不是"当前配置的盐"。正因如此，轮换不需要保留旧盐、也不需要登记表  */
     const loaded = loadSidecarsSealed(target, 'pass-1');
     assertEqual(loaded.ok, true, '换盐之后旧文件必须仍可读');
     if (loaded.ok && !loaded.firstRun) {
@@ -330,8 +318,8 @@ async function main(): Promise<void> {
       assertEqual(result.after, saltFingerprint(fromHex(SALT_B)), '应记录重写后的盐指纹');
     }
 
-    /* 迁移唯一的正确性要求：**内容不变**。用整份数据的深比较，
-       而不是挑一两个字段断言 —— 漏掉的字段恰恰可能在迁移里悄悄丢掉 */
+    /* 迁移唯一的正确性要求：内容不变。用整份数据的深比较，
+       而不是挑一两个字段断言 —— 漏掉的字段恰恰可能在迁移里悄悄丢掉  */
     const after = loadSidecarsSealed(target, 'pass-1');
     assertEqual(after.ok, true, '迁移后应仍能读');
     if (after.ok && !after.firstRun && loadedBefore.ok && !loadedBefore.firstRun) {

@@ -1,16 +1,5 @@
-/**
- * 电子签名后端（配置 + 远程适配器）自测。
- *
- *   node src/sign/sign-self-test.ts
- *
- * 锁死六件事：
- *   S1 配置校验：fail-closed（选了 http 没地址必须报错）、非法数值不取默认、指纹格式；
- *   S2 请求构造：**声明式映射**真的生效（字段名 / 编码 / 附加字段 / 认证头）；
- *   S3 响应解析：JSON 路径（含数组）、编码、公钥/证书；
- *   S4 失败一律 fail-closed：非 2xx / 超时 / 非法 JSON / 缺签名值；
- *   S5 测试签名：**自验** + 指纹核对（匹配 / 不匹配 / 尚未固定）；
- *   S6 配置存储：落库、**密钥单独一行加密入库且永不回显**、undefined 不改 / null 清除（真删行）、损坏不静默。
- */
+// 电子签名后端（配置 + 远程适配器）自测。
+// S3 响应解析：JSON 路径（含数组）、编码、公钥/证书；
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -94,7 +83,7 @@ const realSignatureBase64 = toBase64(realSigner.sign(utf8(TEST_SIGN_MESSAGE)));
 
 async function main(): Promise<void> {
   await test('S1 配置校验：默认"未配置"、非法值不取默认、指纹格式', () => {
-    /* **没有"内置软件签名"这一档**：默认就是"未配置"，而未配置 = 签不了章 */
+    /* 没有"内置软件签名"这一档：默认就是"未配置"，而未配置 = 签不了章  */
     assertEqual(validateSignConfig({}).http, undefined, '默认没有签名服务');
     assertEqual(isSignConfigured(validateSignConfig({})), false, '默认不足以签章');
     assert(missingSignConfig(validateSignConfig({})).includes('服务地址'), '应指出缺服务地址');
@@ -148,7 +137,7 @@ async function main(): Promise<void> {
       },
     );
     const signer = createHttpSigner(config.http as HttpSignConfig, {
-      /* 密钥**只从参数来**（真实链路里由调用方从库中解出后递进来，见 S6） */
+      /* 密钥只从参数来（真实链路里由调用方从库中解出后递进来，见 S6）  */
       apiKey: 'secret-value',
       transport: async (request) => {
         seen.push({ url: request.url, headers: request.headers, body: JSON.parse(request.body) as Record<string, unknown> });
@@ -242,7 +231,6 @@ async function main(): Promise<void> {
       body: JSON.stringify({ signature: realSignatureBase64, publicKey: realPublicKeyBase64 }),
     });
 
-    /* ① 未固定指纹：允许测试，但必须提示"尚未固定" */
     const unfixed = await testSign(httpConfig(), { transport });
     assertEqual(unfixed.selfVerified, true, '自验应通过（这把钥确实能验这条签名）');
     assertEqual(unfixed.fingerprintMatches, null, '未固定指纹时应为 null');
@@ -250,17 +238,14 @@ async function main(): Promise<void> {
     assert(unfixed.notes.some((note) => note.includes('尚未固定')), `应提示指纹尚未固定，实际：${unfixed.notes.join(' | ')}`);
     assertEqual(unfixed.certificateCount, 0, '未配证书路径时证书张数为 0');
 
-    /* ② 期望指纹与实际的相符：核对通过 */
     const matched = await testSign(httpConfig({ expectedFingerprint: realFingerprint }), { transport });
     assertEqual(matched.fingerprintMatches, true, '指纹一致应通过核对');
 
-    /* ③ 指纹不符：必须报出**不一致**（这是"连错环境 / 换了把钥"的唯一线索） */
     const other = softwareSigner(demoKeyPair('another-key').privateKey);
     const mismatch = await testSign(httpConfig({ expectedFingerprint: publicKeyFingerprint(other.publicKey) }), { transport });
     assertEqual(mismatch.fingerprintMatches, false, '指纹不符应判为 false');
     assert(mismatch.notes.some((note) => note.includes('不一致')), `应说明指纹不一致，实际：${mismatch.notes.join(' | ')}`);
 
-    /* ④ 服务返回的签名值验不过：必须说出来，而不是只报"服务返回 200" */
     const bogus = await testSign(httpConfig(), {
       transport: async () => ({
         status: 200,
@@ -282,7 +267,6 @@ async function main(): Promise<void> {
       assertEqual(isSignConfigured(loadSignConfig(kv).config), false, '没配过 = 不足以签章（不是"默认用软件签名"）');
       assertEqual(loadSignConfig(kv).apiKeyPresent, false, '没配过时密钥不就位');
 
-      /* ① 设置密钥：配置与密钥**分两行**落库，密钥在内存里可取到供适配器用，界面只据此显示"是否就位" */
       const saved = saveSignConfig(
         kv,
         { ...signInput('http://emr-sign.test/api/sign'), apiKey: 'sk-sign-secret-1' },
@@ -300,20 +284,19 @@ async function main(): Promise<void> {
       assert(sealed !== null, '密钥应单独占一行落库');
       assert(!String(sealed).includes('sk-sign-secret-1'), '密钥明文字面量不得出现在库里那一行');
 
-      /* ② undefined 不改：只改地址不该顺手把密钥弄丢 */
       const unchanged = saveSignConfig(kv, signInput('http://emr-sign.test/api/sign'), 'ADMIN');
       assertEqual(unchanged.apiKeyAction, 'unchanged', '没动密钥字段应记为 unchanged');
       assertEqual(loadSignConfig(kv).apiKey, 'sk-sign-secret-1', 'undefined 不得清掉已存的密钥');
       assertEqual(loadSignConfig(kv).apiKeyPresent, true, '密钥应仍然就位');
 
-      /* ③ null 清除：**真删那一行**（只置 apiKeyStored=false 而留着密文，等于"我清掉了"是假话） */
       const cleared = saveSignConfig(kv, { ...signInput('http://emr-sign.test/api/sign'), apiKey: null }, 'ADMIN');
       assertEqual(cleared.apiKeyAction, 'cleared', 'null 应记为 cleared');
       assertEqual(loadSignConfig(kv).apiKeyPresent, false, '清除后密钥不就位');
       assertEqual(loadSignConfig(kv).apiKey, undefined, '清除后内存里不得再取到密钥');
       assertEqual(sealedBlobOf(fixture, SIGN_API_KEY_KEY), null, '清除应真删那一行（不是留个空壳）');
 
-      /* ④ 密钥那一行解不开（口令换过 / 被改动过）→ **不许当作"没有密钥"** */
+      // ④ 密钥那一行解不开（口令换过 / 被改动过）→ 不许当作"没有密钥"
+
       saveSignConfig(kv, { ...signInput('http://emr-sign.test/api/sign'), apiKey: 'sk-recover' }, 'ADMIN');
       writeCorruptRow(fixture, SIGN_API_KEY_KEY);
       assertEqual(codeOf(() => loadSignConfig(kv)), 'E_SIGN_CONFIG_INVALID', '密钥读不出来不得当作"没有密钥"');
@@ -324,8 +307,8 @@ async function main(): Promise<void> {
         '非法配置不得落库',
       );
 
-      /* ⑤ 配置那一行读不出来（口令换过 / 那一行被改过）→ **不许当作"没配过"**：
-         那会让"我配的签名服务没了"表现成"退回了软件签名"。 */
+      /* ⑤ 配置那一行读不出来（口令换过 / 那一行被改过）→ 不许当作"没配过"：
+         那会让"我配的签名服务没了"表现成"退回了软件签名"。  */
       writeCorruptRow(fixture, SIGN_CONFIG_KEY);
       assertEqual(codeOf(() => loadSignConfig(kv)), 'E_SIGN_CONFIG_INVALID', '读不出来的配置不得当作"没配过"');
     } finally {
@@ -341,7 +324,6 @@ async function main(): Promise<void> {
   /* ========================= S7 接入内核（配置 → Signer） ========================= */
 
   await test('S7 接入内核：配置 → Signer；未配置一律拒绝，签出的值可被独立验签', async () => {
-    /* ① 未配置 / 缺预置公钥：都必须**拒绝构造**，而不是给一个"能签但身份不明"的东西 */
     assertEqual(
       codeOf(() => createRemoteSigner(validateSignConfig({}))),
       'E_SIGN_NOT_CONFIGURED',
@@ -363,8 +345,6 @@ async function main(): Promise<void> {
       '缺预置公钥就签不了（SignedInfo 里含公钥指纹，没有预置公钥就没有指纹）',
     );
 
-    /* ② 一台会**真的签**的假服务：从请求体取出待签数据，用自研 SM2 签一次再回包。
-       这样"请求构造 → 服务签 → 取签名值 → 独立验签"整条链路才是真的走通了。 */
     const sign = (key: typeof realSigner): SignTransport => async (request) => {
       const body = JSON.parse(request.body) as Record<string, unknown>;
       const toSign = fromBase64(String(readJsonPath(body, 'toSign')));
@@ -384,7 +364,6 @@ async function main(): Promise<void> {
     const signature = await signer.sign(message);
     assertEqual(softwareVerifier(realSigner.publicKey).verify(message, signature), true, '服务签出的值应能被独立验签器验过');
 
-    /* ③ 服务回了**另一把**公钥：必须拒绝这次签名值（否则"签名"与"身份"对不上） */
     const alien = softwareSigner(demoKeyPair('alien-key').privateKey);
     const alienSigner = createRemoteSigner(httpConfig({ publicKeyBase64: realPublicKeyBase64 }), { transport: sign(alien) });
     assertEqual(
@@ -393,7 +372,6 @@ async function main(): Promise<void> {
       '服务换了把钥匙时必须拒绝（不能"换了钥匙还认账"）',
     );
 
-    /* ④ 期望指纹与预置公钥不一致：配置自相矛盾，构造时就报，而不是签完才发现 */
     assertEqual(
       codeOf(() =>
         createRemoteSigner(

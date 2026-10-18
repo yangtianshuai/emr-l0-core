@@ -1,27 +1,5 @@
-/**
- * L0 可交互 Demo 服务（零依赖，仅用 node:http）。
- *
- *   node src/demo/demo-server.ts [--port 8787]
- *
- * 演示的目标不是"界面好看"，而是把 L0 的门控链路看得见：
- *   ① AI 只能出建议（直接写会被 E_AI_DIRECT_WRITE_FORBIDDEN 拦下）；
- *   ② 置信度低于阈值不得落笔；关键内容阈值更高；
- *   ③ 采纳 ≠ 确认责任，签章前必须人工确认；
- *   ④ 内容一变，机读信息即"陈旧"，导出被拒，必须显式重算；
- *   ⑤ 导出的是真实 OFD-H 容器，并用独立探针（tools/ofd-check）现场验收。
- *
- * 工作区模型：多患者 × 多次就诊 × 多份病历，每份病历一个独立会话，
- * 留痕链、机读信息、签章状态、建议与日志各自独立。
- *
- * ⚠️ 本 Demo 的"AI"是本地规则模拟（无外部模型调用），仅用于演示门控与时序；
- *    指纹、哈希、容器格式都是真实的。签名与加密用的也是真实的国密算法
- *    （SM2-SM3 签名、SM4-CTR + HMAC-SM3 信封，见 T18 / T18b），
- *    但它们未经第三方审计，不得用于合规声明。
- *
- * 签章必须经过医院签名服务（「配置管理 → 电子签名」填写地址与字段映射）：
- * 本系统没有"内置软件签名"可回退，未配置时签章一律被拒（`E_SIGN_NOT_CONFIGURED`）。
- * 内置软件实现只出现在自测与契约验证靶子里，且会标注来源。
- */
+// L0 可交互 Demo 服务（零依赖，仅用 node:http）。
+// 但它们未经第三方审计，不得用于合规声明。
 
 import { spawnSync } from 'node:child_process';
 /* 管理后台会话 id：必须是不可猜的随机值（它等同于一次登录凭证） */
@@ -122,7 +100,7 @@ import {
   validateRulePack,
   type ConditionLibrary,
 } from '../qc/rule-pack.ts';
-/* 出厂种子判定方式：首次启动写进**判定方式库**一次，此后归本院维护（可改可删，不会再回来） */
+/* 出厂种子判定方式：首次启动写进判定方式库一次，此后归本院维护（可改可删，不会再回来）  */
 import { SEED_CONDITIONS } from '../qc/seed-conditions.ts';
 /* 判定方式库的落库（库级资产：全院一份、不属于任何包，见该模块文件头） */
 import {
@@ -135,7 +113,7 @@ import {
   saveConditions,
   type LoadedConditions,
 } from '../qc/condition-store.ts';
-/* 算子插件（T3）：部署方安装的**签名组件** —— 包是数据，插件是代码，两件事的信任门槛不同 */
+/* 算子插件（T3）：部署方安装的签名组件 —— 包是数据，插件是代码，两件事的信任门槛不同  */
 import { loadQcPlugins, readPluginKey, type QcPluginLoadReport } from '../qc/plugin.ts';
 /* 规则条目的编辑（新建 / 修改 / 删除）：与"整包载入"改的是同一件东西（包内容） */
 import {
@@ -146,7 +124,6 @@ import {
   predicateLabelOf,
   removeRule,
 } from '../qc/rule-edit.ts';
-/* 具名条件（判定方式库）的维护：**库级资产**，不属于任何包（见 `condition-store.ts`） */
 import {
   addCondition,
   conditionCatalogOf,
@@ -156,9 +133,9 @@ import {
   type QcConditionCatalogEntry,
 } from '../qc/condition-library.ts';
 import type { AnnotationSeverity } from '../core/annotations.ts';
-/* 改动幅度的**分档**也读内核那一处（`editBandOf`）：前端与这里都不自己定阈值 ——
+/* 改动幅度的分档也读内核那一处（`editBandOf`）：前端与这里都不自己定阈值 ——
    否则"调一次边界"会变成一次前后端联动发布，而漏改的那一侧只表现为
-   "同一批数据在界面上分档与报表对不上" */
+   "同一批数据在界面上分档与报表对不上"  */
 import { editBandOf } from '../core/suggestions.ts';
 import type { QcConditionDefinition, QcRuleDescriptor, QcRulePack, QcUnevaluated, QcVisitDoc } from '../qc/types.ts';
 import {
@@ -235,7 +212,7 @@ import {
 /* 生效配置指纹：与文件指纹同一口径（SHA-256），便于相互核对 */
 import { sha256Hex } from '../import/import-types.ts';
 import { utf8 } from '../crypto/sm3.ts';
-/* 服务端文件配置：口令 / 盐 / 装机凭据 —— **打开数据库之前就必须知道的东西**（见该模块文件头） */
+/* 服务端文件配置：口令 / 盐 / 装机凭据 —— 打开数据库之前就必须知道的东西（见该模块文件头）  */
 import {
   bootstrapOf,
   describeServerConfig,
@@ -246,7 +223,7 @@ import {
   stateKeyOf,
   stateSaltHexOf,
 } from '../core/server-config.ts';
-/* 系统策略（鉴权模式 / 会话寿命 / 限流 / 锚定节奏）：**落库**，不再由环境变量给 */
+/* 系统策略（鉴权模式 / 会话寿命 / 限流 / 锚定节奏）：落库，不再由环境变量给  */
 import {
   describeSystemConfig,
   loadSystemConfig,
@@ -255,9 +232,9 @@ import {
   type LoadedSystemConfig,
   type RateConfig,
 } from '../storage/system-config.ts';
-/* 接收方公钥目录：**落库**（`recipient_keys` 表），不再是一个 JSON 文件 */
+/* 接收方公钥目录：落库（`recipient_keys` 表），不再是一个 JSON 文件  */
 import { loadRecipientKeyStore as loadRecipientKeyTable, saveRecipientKeyStore as saveRecipientKeyTable } from '../storage/recipient-key-store.ts';
-/* 受控阅读的授权登记：**落库**（`reading_grants` 表），不再是一个整体式密封文件 */
+/* 受控阅读的授权登记：落库（`reading_grants` 表），不再是一个整体式密封文件  */
 import {
   countReadingGrants,
   loadAllReadingGrants,
@@ -265,7 +242,7 @@ import {
   type ReadingGrantRecord,
 } from '../storage/reading-grant-store.ts';
 import { importReadingGrantsOnce } from '../storage/reading-grants-import.ts';
-/* 内涵质控配置（规则清单 / 引擎 / 引擎凭据）：**落库**，不再由环境变量给 */
+/* 内涵质控配置（规则清单 / 引擎 / 引擎凭据）：落库，不再由环境变量给  */
 import {
   describeQcContentConfig,
   importQcRulesOnce,
@@ -276,29 +253,20 @@ import {
 } from '../qc/qc-content-store.ts';
 
 /**
- * 运行时目录：**先于一切文件读取**解析出来（服务端配置文件就放在它下面）。
+ * 运行时目录：先于一切文件读取解析出来（服务端配置文件就放在它下面）。
  *
- * 这里只做纯计算；迁移/归档的**副作用**仍留在下面原来那一段（它们必须在打开任何库与文件之前，
+ * 这里只做纯计算；迁移/归档的副作用仍留在下面原来那一段（它们必须在打开任何库与文件之前，
  * 且在顺序上更靠后）。拆成两处是为了让"目录在哪"与"目录怎么搬"各自只有一处答案。
- */
+  */
 const RUNTIME = resolveRuntimeLayout(process.env);
 
-/**
- * **服务端文件配置**：密封口令、盐、装机凭据（`<运行目录>/server-config.json`）。
- *
- * 它是"系统里需要存储的东西一律入库"这条规则的**唯一例外**，而且只有这一类：
- * 口令是用来解开库内密文的钥匙，存进它自己要开的库里只有"存明文"或"自加密"两条路，
- * 都不是答案（理由写在 `core/server-config.ts` 文件头）。文件不在时会**自动生成模板**并在此后警告。
- */
 const SERVER_CONFIG = loadServerConfig(serverConfigPath(RUNTIME.dir));
 const STATE_KEY_INFO = stateKeyOf(SERVER_CONFIG);
-/** 旁挂快照与库内密文的口令（**只报来源，绝不回显值**） */
+/** 旁挂快照与库内密文的口令（只报来源，绝不回显值）  */
 const STATE_PASSPHRASE = STATE_KEY_INFO.key;
-/** 独立盐（32 位十六进制）；未配则按口令派生（见 `core/store.ts` 的"盐的来源与轮换"） */
 const STATE_SALT_HEX = stateSaltHexOf(SERVER_CONFIG);
 /** 环境标识（原先的 `L0_ENV`）：只是界面上的标注，不改变任何行为 */
 const ENV_NAME = envNameOf(SERVER_CONFIG);
-/** 一次性搬运的来源（原先是 `L0_QC_CONTENT_RULES_FILE`，见 `qc/qc-content-store.ts`） */
 const IMPORTS = importsOf(SERVER_CONFIG);
 function statePassphrase(): string {
   return STATE_PASSPHRASE;
@@ -311,14 +279,12 @@ import { checkConsistency, toSuggestionDrafts, type ConsistencyIssue } from '../
 import { TAG_SYSTEMS, type DataElementTag, type DocNode, type DocumentModel, type EvidenceRef, type NodeId, type TextRun } from '../model/types.ts';
 /* 即时结构化（V4）：与落位并列的一层（内核之外），只产"数据元提议"，落笔在下面的 `/api/structure-apply` */
 import { proposeStructurings } from '../ai/structuring.ts';
-/* 出院汇总（出院小结派生 + 缺口核对）：纯函数只算不写，落笔一律走建议通道（见 `/api/discharge-summary/apply`） */
 import {
   planDischargeSummary,
   dischargeSummaryApplicability,
   type DischargeSummaryPlan,
   type SummaryDoc,
 } from '../summary/discharge-summary.ts';
-/* 预问诊（患者候诊时自填）：只登记原文 + 给候选落点，落笔一律走建议通道（见 `/api/previsit/take`） */
 import {
   parsePrevisitIntake,
   planPrevisitDrafts,
@@ -340,13 +306,6 @@ import { buildWorkspace, DEPARTMENTS, DOC_TYPES, type DemoWorkspace, type Worksp
 /* 跨次对比：只做编码级与原文级对照（不判断语义是否等价），纯函数、无 I/O */
 import { compareVisits, type VisitCompare } from '../compare/visit-compare.ts';
 
-/**
- * 跨次对比的下发形态（存进 `DocEntry`，随 state 一起回给界面）。
- *
- * 为什么放在 state 而不是只用响应体的 `data`：界面是"整页重渲染"的，
- * 任何一次别的写入（改一个字、采纳一条建议）都会重画；若对照结果只活在 `data` 里，
- * 医生刚看完的并排视图会在下一次保存后**变回"还没读过"**。
- */
 interface VisitCompareState {
   patientId: string;
   patientName: string;
@@ -386,10 +345,6 @@ import {
   type RecipientKeyStore,
 } from '../core/recipient-keys.ts';
 
-/* 这里没有"演示签发者"。授权由院内授权平台签发，本系统没有任何签发路径，
-   测试与演示工具需要构造凭据时，自己在工具里取 `demoReadingIssuer()`（见 `test:authority`），
-   而产品代码里不该存在一把可以签发授权的钥匙。 */
-
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const UI_FILE = fileURLToPath(new URL('./ui.html', import.meta.url));
 /* 结构 / 样式 / 脚本三件套：ui.html 通过 <link> 与 <script src> 引用后两者 */
@@ -398,24 +353,21 @@ const UI_JS_FILE = fileURLToPath(new URL('./ui.js', import.meta.url));
 /* 命令面板（Ctrl+K）：纯界面件，与 ui.js 同样 no-store —— 它没有自己的业务规则，
    改的是"候选怎么排、按键怎么走"，而这类改动必须立刻看得见。 */
 const COMMAND_PALETTE_JS_FILE = fileURLToPath(new URL('./command-palette.js', import.meta.url));
-/* 浏览器端采集实现（C3b④）：真实麦克风源与它所需的那一份段规则。
-   ui.js 是经典脚本、不 import 它 —— 页面按需用动态 `import()` 拉取，
-   于是"浏览器麦克风"这条路只在真的选到它时才加载代码。 */
 const CAPTURE_WEB_JS_FILE = fileURLToPath(new URL('./capture-web.js', import.meta.url));
-/* 自定义弹框（确认 / 提示 / 一句话）：医生端与管理后台**共用**的一份经典脚本，
+/* 自定义弹框（确认 / 提示 / 一句话）：医生端与管理后台共用的一份经典脚本，
    两页都 `<script src="/dialog.js">`。它的存在就是为了不出现系统弹框，
-   所以它自己也必须由本服务提供（不能走 CDN）。 */
+   所以它自己也必须由本服务提供（不能走 CDN）。  */
 const DIALOG_JS_FILE = fileURLToPath(new URL('./dialog.js', import.meta.url));
 /* 管理后台：独立页面（页面/路由 + 登录）。配置是部署参数（模型地址决定病历内容发往哪台服务器），
    不该摆在医生端，理由与边界写在 admin.html 的文件头。 */
 const ADMIN_FILE = fileURLToPath(new URL('./admin.html', import.meta.url));
 const ADMIN_JS_FILE = fileURLToPath(new URL('./admin.js', import.meta.url));
-/* 正文渲染（逐节点的那套 HTML）：**医生端与管理后台的模板预览共用这一份经典脚本**。
+/* 正文渲染（逐节点的那套 HTML）：医生端与管理后台的模板预览共用这一份经典脚本。
    两页都 `<script src="/doc-view.js">`，于是"预览与正文长得一样"由结构保证，
-   而不是靠两处各自照着对方小心翼翼地改 —— 那种一致迟早会漂，且漂了没人报错。 */
+   而不是靠两处各自照着对方小心翼翼地改 —— 那种一致迟早会漂，且漂了没人报错。  */
 const DOC_VIEW_JS_FILE = fileURLToPath(new URL('./doc-view.js', import.meta.url));
 /* 自由流式视图（整页连续书写）：与 doc-view.js 并列的第二套正文画法。
-   两者**共用同一批视图项与同一条写路径**，差别只在"怎么落笔"（见 flow-view.js 文件头）。 */
+   两者共用同一批视图项与同一条写路径，差别只在"怎么落笔"（见 flow-view.js 文件头）。  */
 const FLOW_VIEW_JS_FILE = fileURLToPath(new URL('./flow-view.js', import.meta.url));
 /* 管理后台的独立登录页：未登录访问 `/admin` 会被 302 到这里（见下方路由）。
    登录控件不再与配置体同页，`hidden` 只挡住"看得见"，字段名与占位符照样进响应体。 */
@@ -431,21 +383,9 @@ function escapeForHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] ?? ch);
 }
 
-/**
- * 登录页渲染：服务端决定下发哪一态。
- *
- * 两种形态回答的是两个不同的问题，因此不做"一个页面两种提示"：
- *   - 未初始化（库里一个账号都没有）：这是"这台机器还没有主"，要的是创建第一个管理员；
- *   - 已初始化：这是"你是谁"，要的是用户名 + 口令。
- *
- * 两者由服务端二选一下发（`<!--FORM:...-->` 之间整段裁掉），而不是都发下去再由前端藏起来，
- * 与"未登录不下发配置体"同一条纪律。登录页上这两种形态确实都不含机密，
- * 但下发什么就等于承认什么：把初始化表单发给一台已经初始化过的机器，
- * 就是在告诉每个访问者"这里可能还有一次初始化机会"。
- *
- * 口令永不出现在页面上（无论它来自环境变量还是数据库）：内置演示口令已经取消，
- * 而"演示时找不到口令"这件事现在由第一条日志与初始化流程解决，不由页面解决。
- */
+// - 已初始化：这是"你是谁"，要的是用户名 + 口令。
+// 口令永不出现在页面上（无论它来自环境变量还是数据库）：内置演示口令已经取消，
+
 function renderLoginPage(): string {
   const initialized = userStore.count() > 0;
   const note = initialized
@@ -467,20 +407,6 @@ function renderLoginPage(): string {
   return html;
 }
 
-/**
- * 装机凭据（原先的 `L0_ADMIN_TOKEN` / `L0_ADMIN_USER`，现在写在**服务端配置文件**里）。
- *
- * 它不参与登录（账号与口令都在数据库里），只在部署时使用：
- *   1) 初始化凭据：库空且它已配置时，初始化必须同时提供它；
- *   2) 播种（见 `seedAccountsFromConfig`）：与 `bootstrap.user` 一起给出时，启动即建好第一个管理员。
- *
- * 为什么它跟着口令一起放在**文件**里，而不是库、也不是环境变量：
- *   ① 它要在"库里一行都没有"的时刻就可读 —— 存进库是"先有鸡还是先有蛋"；
- *   ② 环境变量会顺着 `docker inspect`、崩溃转储、子进程一路漏出去（见 `core/server-config.ts` 文件头）。
- *
- * `L0_QC_TOKEN` / `L0_CLINICIAN_TOKEN` 不再使用：角色由账号决定，
- * 环境变量表达不了"多个账号同一角色"。
- */
 const BOOTSTRAP = bootstrapOf(SERVER_CONFIG);
 const DEPLOY_TOKEN = BOOTSTRAP.token;
 /** 播种用的用户名（与 `bootstrap.token` 成对出现才播种） */
@@ -488,15 +414,6 @@ const DEPLOY_USER = BOOTSTRAP.user;
 
 /** 会话 cookie。名字是 `session` 而不是 `admin`：它现在承载任意角色的会话 */
 const SESSION_COOKIE = 'l0_session';
-
-/**
- * **鉴权模式、会话寿命、限流阈值、锚定节奏：这些都不在这里定义了。**
- *
- * 它们原先来自 `L0_AUTH_MODE` / `L0_SESSION_TTL_MINUTES` / `L0_RATE_*` / `L0_AUDIT_ANCHOR_EVERY`，
- * 现在落在库里（`storage/system-config.ts` 的 `config.system` 一行）。
- * 因此它们的定义必须**在打开数据库之后**（就在 `CONFIG_KV` 建好那一段，见 `loadSystemConfig` 调用处）——
- * 提前解析只能读到"库还没开"这个事实，而把默认值当结果用，正是"我改了策略却没生效"的来源。
- */
 
 /**
  * 鉴权失败：带 `code` 抛出，由路由（或顶层兜底）转成 `{ok:false, code, message}`。
@@ -523,8 +440,8 @@ const ROUTE_ACTIONS: Record<string, Action> = {
   /* 部署参数：改错会整体不可用或泄数据 */
   '/api/model-config': 'config.write',
   '/api/placement-config': 'config.write',
-  /* 采集配置**在两种模式下都收口**：`asr.endpoint` 是**数据流向变更**
-     （音频将离开本系统），与落位 `external` 同类 —— 它比"改个显示偏好"重得多。 */
+  /* 采集配置在两种模式下都收口：`asr.endpoint` 是数据流向变更
+     （音频将离开本系统），与落位 `external` 同类 —— 它比"改个显示偏好"重得多。  */
   '/api/capture-config': 'config.write',
   /* 预问诊接入：它决定"谁可以往病历里塞患者自述"，改错等于把写入端打开。
      两种模式都收口（演示模式下"从没配过"仍放行 —— 那条判断在 `checkAccess` 里，
@@ -544,15 +461,12 @@ const ROUTE_ACTIONS: Record<string, Action> = {
   '/api/sign-backend/test': 'sign.test',
   /* 知识资产：改的是判定标准，不动病历 */
   '/api/knowledge-pack-toggle': 'pack.toggle',
-  /* 规则条目的编辑（新建 / 修改 / 删除）：走的还是"换一版包内容"那条唯一的写路径
-     （`writePack()`），权限与载入包、开关条目同级 —— 质控员本来就在维护判定标准。
-     判定机制与级别上限不由这里放开（见 `rule-edit.ts` 文件头）。 */
   '/api/rule-item-update': 'pack.toggle',
   '/api/rule-item-create': 'pack.toggle',
   '/api/rule-item-delete': 'pack.toggle',
-  /* 具名条件（条件库）：与规则条目**改的是同一份包内容**，所以权限同级、写路径同一条。
+  /* 具名条件（条件库）：与规则条目改的是同一份包内容，所以权限同级、写路径同一条。
      它们仍各占一条路径，而不是复用规则那三条：改一条条件会影响所有引用它的规则，
-     审计里必须一眼分得出"这次动的是共用资产"还是"这次动的是某一条规则"。 */
+     审计里必须一眼分得出"这次动的是共用资产"还是"这次动的是某一条规则"。  */
   '/api/qc-condition-create': 'pack.toggle',
   '/api/qc-condition-update': 'pack.toggle',
   '/api/qc-condition-delete': 'pack.toggle',
@@ -566,40 +480,20 @@ const ROUTE_ACTIONS: Record<string, Action> = {
   '/api/knowledge-pack-load': 'pack.toggle',
   /* 科室字典：院内主数据（改的是"有哪些科"），按配置写权限判定 */
   '/api/departments': 'config.write',
-  /* 文书类型：与科室字典同类（同为主数据），同一权限。
-     为什么也归 `config.write` 而不是 `pack.toggle`：它不是一个模板的附属物 ——
-     质控规则按类型编码定位文书，改一次影响的是整个部署的判定标准。 */
   '/api/doc-types': 'config.write',
-  /* 改一份文书的名称 / 适用科室 / 状态 / 骨架：走的是同一条 `writePack()`（换一版内容），权限同上 */
   '/api/template-item-update': 'pack.toggle',
-  /* 新建 / 修改 / 删除表达式控件：同样是换一版包内容，权限同上 */
   '/api/expression-item-create': 'pack.toggle',
   '/api/expression-item-update': 'pack.toggle',
   '/api/expression-item-delete': 'pack.toggle',
-  /* 新建 / 修改 / 删除专科控件：同样是换一版包内容，权限同上 */
   '/api/control-item-create': 'pack.toggle',
   '/api/control-item-update': 'pack.toggle',
   '/api/control-item-delete': 'pack.toggle',
-  /* 新建 / 删除一份文书骨架：同样是换一版包内容，权限同上。
-     路径与"按模板开一份病历"（`/api/template-create`，医生端动作）**必须分开**：
-     一个改的是模板本身（部署侧内容），一个改的是病历（文档内容）——
-     混用同一个路径时，先匹配到的那个会静默吞掉另一个。 */
   '/api/template-item-create': 'pack.toggle',
   '/api/template-item-delete': 'pack.toggle',
-  /* **复制一份文书**：同样是换一版包内容（新副本落进本院自建包），权限同上。
-     它与"新建"分开成两条路径的理由是审计：审计里必须一眼分得出
-     "这份文书是照着哪一份复制来的"与"这是从零新建的"。 */
   '/api/template-item-duplicate': 'pack.toggle',
-  /* 章节片段（新建 / 修改 / 删除）：与模板条目**改的是同一份包内容**
-     （片段就装在模板包里，见 `template-pack.ts` 文件头），所以权限同级、写路径同一条。
-     三条路径各占一行而不是复用文书那三条：片段与文书的风险不同 ——
-     改文书骨架会让"当时按哪一版开的"对不上，改片段**不会**（插入是复制不是引用），
-     审计里要能分清这两种改动。 */
   '/api/fragment-item-create': 'pack.toggle',
   '/api/fragment-item-update': 'pack.toggle',
   '/api/fragment-item-delete': 'pack.toggle',
-  /* 后台账号：发钥匙与知道有哪些钥匙是同一件事（见 `principal.ts` 的 `user.write`）。
-     五个写入口 + 读入口都列在这里，一张表可以照着念一遍，而漏掉的方向是"放行"。 */
   '/api/admin/users': 'user.write',
   '/api/admin/users/password': 'user.write',
   '/api/admin/users/role': 'user.write',
@@ -609,18 +503,10 @@ const ROUTE_ACTIONS: Record<string, Action> = {
 };
 
 /**
- * 医生端写路径 → 所需动作（仅 `strict` 模式生效）。
- *
- * 为什么在 `open` 模式下不生效：演示要"打开就能用"，而医生端目前没有登录界面。
- * 但这也意味着 `open` 模式下任何能访问本端口的人都能写病历（身份取病历创建人）。
- * 它只在服务只监听回环地址时成立，见文件末尾的 `HOST` 与启动日志里的警告。
- * 生产部署必须在管理后台「系统信息」里把鉴权模式改成 `strict`（它存在库里，**改完需重启**）。
- */
-/**
- * 文书状态的中文名（**只用于提示语与审计**）。
+ * 文书状态的中文名（只用于提示语与审计）。
  * 判定永远是 `status === 'draft'`，不靠这张表 —— 表漏了一项只会让提示难看，
  * 不会让不该删的病历被删。医生端有同一份 `STATUS_LABEL`（ui.js），两处都只做展示。
- */
+  */
 const DOC_STATUS_TEXT: Record<string, string> = {
   draft: '草稿',
   reviewing: '审核中',
@@ -630,7 +516,6 @@ const DOC_STATUS_TEXT: Record<string, string> = {
 };
 
 const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
-  /* 写病历 */
   '/api/set-field': 'doc.write',
   /* 控件里的一格：与 `/api/set-field` 同级（都是往病历里填值，只是目标是一个控件节点） */
   '/api/set-control-field': 'doc.write',
@@ -640,7 +525,7 @@ const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
      插入会改病历（与 `/api/insert-paragraph` 同级） */
   '/api/image-upload': 'doc.write',
   '/api/insert-image': 'doc.write',
-  /* 空槽贴图 / 换图：改的是**已有**的那个图片节点 */
+  /* 空槽贴图 / 换图：改的是已有的那个图片节点  */
   '/api/set-image': 'doc.write',
   '/api/delete-image': 'doc.write',
   '/api/paste-text': 'doc.write',
@@ -675,19 +560,17 @@ const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
   '/api/suggest': 'doc.write',
   '/api/suggest-batch': 'doc.write',
   '/api/suggest-low': 'doc.write',
-  /* 即时结构化：propose 会把正文逐段读出来产出一份**可落笔的提议**（与 `/api/suggest` 同级），
-     apply 是真正落笔那一步（绑数据元 + 把该段打回待确认）—— 两者都按"写病历"要求权限。 */
+  /* 即时结构化：propose 会把正文逐段读出来产出一份可落笔的提议（与 `/api/suggest` 同级），
+     apply 是真正落笔那一步（绑数据元 + 把该段打回待确认）—— 两者都按"写病历"要求权限。  */
   '/api/structure-propose': 'doc.write',
   '/api/structure-apply': 'doc.write',
   '/api/import': 'doc.write',
-  /* 建议与提示的处置 */
   '/api/accept': 'suggestion.review',
   '/api/reject': 'suggestion.review',
   '/api/accept-group': 'suggestion.review',
   '/api/reject-group': 'suggestion.review',
   '/api/annotate': 'annotation.resolve',
   '/api/resolve-annotation': 'annotation.resolve',
-  /* 签章与导出 */
   '/api/sign': 'doc.sign',
   '/api/unlock': 'doc.sign',
   '/api/export': 'doc.export',
@@ -699,14 +582,12 @@ const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
      （实测：实机点按钮才发现，而用例全绿，因为用例一直带着管理后台的 cookie 发请求。） */
   '/api/qc-form-check': 'qc.run',
   '/api/visit-timeline': 'qc.run',
-  /* 跨次对比：读的是**同一患者**的其他文书（不跨患者）。
+  /* 跨次对比：读的是同一患者的其他文书（不跨患者）。
      这里没有单独的"读病历"能力：能写这一份，就能读同一患者的病史；
      跨患者仍走受控阅读授权（`reading.grant`），两条路不合并。
-     沿用用药只**生成建议**、不落笔，因此与 `/api/suggest` 同级。 */
+     沿用用药只生成建议、不落笔，因此与 `/api/suggest` 同级。  */
   '/api/visit-compare': 'doc.write',
   '/api/compare/carry-over': 'doc.write',
-  /* 内涵类质控：判定在进程之外，所以它是外呼那一类（会把病历内容发到外部地址）。
-     权限与形式类相同（都是"跑质控"），但这条区别要在界面上说清，见 `/api/state.auth` 的口径。 */
   '/api/qc-content-check': 'qc.run',
   '/api/check-consistency': 'consistency.run',
   '/api/apply-consistency': 'consistency.run',
@@ -718,13 +599,6 @@ const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
 const ARTIFACTS = join(ROOT, 'artifacts');
 const PROBE = join(ROOT, 'tools', 'ofd-check', 'ofd-roundtrip-check.mjs');
 
-/**
- * 运行时目录：默认落在仓库之外（理由见 `core/runtime-dir.ts` 文件头）。
- *
- * 一次性迁移放在打开任何文件之前：数据库、审计、凭据此刻都还没被打开，
- * 复制出来的是一份静止的快照。迁移失败不阻断启动，报告，业务继续在旧位置跑
- * （数据还在那儿，旧目录也不删，它是新位置出问题时的回滚凭据）。
- */
 /* `RUNTIME` 已在文件上方解析（服务端配置文件要用它），这里不再重复解析 —— 两处解析迟早会分叉 */
 const RUNTIME_MIGRATION_PLAN = planRuntimeMigration(
   RUNTIME,
@@ -739,13 +613,6 @@ if (RUNTIME_MIGRATION.failed.length > 0) {
   );
 }
 
-/**
- * 归档：把仓库里那份旧运行时数据搬到仓库之外（持续的不变量，不是一次性的）。
- *
- * 与迁移分开，是因为它要处理的正是迁移已经做过的情况，
- * 只测一次的话，"旧凭据还躺在工作树里"这件事会一直留到有人想起来为止。
- * 唯一的安全闸：新位置确实有这份数据才动旧的（见 `planLegacyArchive`）。
- */
 const RUNTIME_ARCHIVE_PLAN = planLegacyArchive(RUNTIME, legacyLayoutInRepo(ROOT), realMigrationProbe(), new Date().toISOString());
 const RUNTIME_ARCHIVE = runLegacyArchive(RUNTIME_ARCHIVE_PLAN);
 if (RUNTIME_ARCHIVE.failed.length > 0) {
@@ -755,19 +622,14 @@ if (RUNTIME_ARCHIVE.failed.length > 0) {
 }
 
 const AI: Actor = { id: 'ai-demo-pipeline', kind: 'ai' };
-/** 规则引擎（形式质控的来源）：`kind: 'system'` 才会被内核的注解来源约束接受 */
 const SYSTEM: Actor = { id: 'rule-engine', kind: 'system' };
-/**
- * 一致性检查等确定性映射用的标识（不是模型产出，故不带模型名）。
- * 模型产出的 `modelId` 一律来自适配器报告，见下面的 `aiAdapter`。
- */
 const MODEL_ID = 'rule:consistency-mapping-v1';
 /**
  * 出院汇总的产出方标识。
  *
- * 它写的是 `rule:` 而不是模型名：内容是**原文搬运**，不是模型生成。
+ * 它写的是 `rule:` 而不是模型名：内容是原文搬运，不是模型生成。
  * 混成模型名会让"这份小结是 AI 写的"变成一句假话，也会把修改率归因到错误的来源上。
- */
+  */
 const DISCHARGE_SUMMARY_MODEL = 'rule:discharge-summary-v1';
 /**
  * 预问诊的产出方标识。
@@ -776,20 +638,16 @@ const DISCHARGE_SUMMARY_MODEL = 'rule:discharge-summary-v1';
  * 登记下来再原样交出去。写成模型名会让"这段是 AI 写的"变成假话。
  */
 const PREVISIT_MODEL = 'rule:previsit-intake-v1';
-/**
- * "弱产出方"模拟：置信度固定（不是请求给的），modelId 也自成一档。
- * 它的唯一用途是让"低置信被门控拦下"这条路径可被演示与回归，见 `/api/suggest-low`。
- */
 const WEAK_SIM_CONFIDENCE = 0.6;
 const WEAK_SIM_MODEL_ID = 'weak-sim:demo-v1';
 /**
- * 模型接入配置：**存在库里**（`config.ai-model` 与 `config.ai-model.apiKey`），由管理后台「能力配置」页写入
+ * 模型接入配置：存在库里（`config.ai-model` 与 `config.ai-model.apiKey`），由管理后台「能力配置」页写入
  * （`/api/model-config`）。本轮取消了 `L0_AI_*` 那一档环境变量：一处配置才有一处答案。
  *
  * 每次取用都重新读，不做缓存，管理员改完配置点"测试连接"就该立刻看到结果，
  * 而"改了要重启才生效"是运维最容易踩空的一类问题。重建适配器很便宜（它无状态），
  * 所以这里用重新读取代了缓存。
- */
+  */
 function modelConfigNow(): LoadedModelConfig {
   return loadModelConfig(CONFIG_KV);
 }
@@ -802,23 +660,10 @@ function placementConfigNow(): LoadedPlacementConfig {
   return loadPlacementConfig(CONFIG_KV);
 }
 
-/**
- * 采集配置：与模型/落位/签名配置同一纪律，每次取用都重新读，不做缓存。
- *
- * 它决定**音频发往哪台服务器**，所以"改完立即生效"在这里尤其重要：
- * 让管理员以为改了却没生效，音频就还在往旧地址走。
- */
 function captureConfigNow(): LoadedCaptureConfig {
   return loadCaptureConfig(CONFIG_KV);
 }
 
-/**
- * 语音建议的置信度上限：**两份配置各有一个上限，取小者**。
- *
- * 为什么要取小而不是二选一：两个上限都 < 0.90（各自都有验收守着一行），取小者**恒不放松门控**；
- * 而"按哪一个生效"如果不定下来，会出现"我改了采集这一格，生效的却是落位那一格" —— 这类现象只能靠猜。
- * 取小者还顺带保证：无论运维只改了哪一格，收紧的那一格一定会生效。
- */
 function dictationCeilingNow(): number {
   return Math.min(placementConfigNow().config.confidenceCeiling, captureConfigNow().config.confidenceCeiling);
 }
@@ -844,8 +689,6 @@ function signConfigNow(): LoadedSignConfig {
  */
 function signerNow(): Signer {
   const loaded = signConfigNow();
-  /* 密钥从库里的 `config.sign.apiKey` 解出来（单独一行、加密），**直接递给适配器**：
-     它不进日志、不进任何返回值（见 `sign/sign-config-store.ts`） */
   return createRemoteSigner(loaded.config, loaded.apiKey === undefined ? {} : { apiKey: loaded.apiKey });
 }
 
@@ -958,14 +801,6 @@ function authMessage(code: string, action: Action): string {
     `管理后台入口 /admin${code === AUTH_ERRORS.E_SESSION_EXPIRED ? `；上一会话已过期（寿命 ${SESSION_TTL_MINUTES} 分钟），请重新登录` : ''}`;
 }
 
-/**
- * 服务端唯一的授权入口。所有需要判断"能不能做这件事"的地方都走这里，
- * 不允许任何路由自己写判断（写两遍迟早漏一处，而漏掉的那一处就是洞）。
- *
- * 判定顺序：① 有没有身份（会话）→ ② 这个角色能不能做这个动作（`authorize`）。
- * 两种失败给不同的错误码与不同的提示："没登录"要照着去登录；"角色不够"要照着去换人，
- * 混成一句"无权限"，运维只能当成系统坏了。
- */
 function guard(req: IncomingMessage, action: Action): Principal {
   const resolved = resolvePrincipal(req);
   if (!resolved.ok) throw new AuthError(resolved.code, authMessage(resolved.code, action));
@@ -974,14 +809,6 @@ function guard(req: IncomingMessage, action: Action): Principal {
   return resolved.principal;
 }
 
-/**
- * 管理动作的入口校验（保留旧签名：调用点只关心"谁在操作"与一条日志）。
- *
- * 操作者取自服务端会话，角色决定能做什么：质控员能开关规则包、不能改模型接入地址。
- * 早期版本读的是请求自报的 `body.adminId`，写进审计的名字因此不可核对，现已移除。
- *
- * 它不是完整的安全边界：无 TLS、无多因素、口令仍是共享口令（见 `SESSION_COOKIE` 上方）。
- */
 function requireAdminSession(
   req: IncomingMessage,
   entry: DocEntry,
@@ -1000,8 +827,6 @@ function requireAdminSession(
   });
   return principal.actorId;
 }
-
-/* --------------------------- 管理动作审计（系统级） --------------------------- */
 
 /**
  * 一次管理动作的审计记录。
@@ -1032,47 +857,15 @@ interface AdminAuditEntry {
   note?: string;
 }
 
-/**
- * 审计落库（`core/admin-audit-store.ts`，表 `admin_audit`）：入库 + SM3 链式摘要。
- *
- * 落库解决了两件在内存态下说不通的事：重启不再清空历史；不再为防膨胀而"丢最旧"
- * （一份会自动丢历史的记录，不能作为审计证据）。链式摘要能指认"改的是第几条"，
- * 但它不防有权限的人（能改库的人也能重算整条链），这条承诺不能给出去。
- *
- * `AUDIT_FILE` 现在只剩一个用途：**旧文件搬家**（见 `storage/audit-files-import.ts`）。
- * 入库之后 `adminAudit` 才能建（它要一个库句柄），所以下面只留常量，
- * 真正的构造与加载挪到开库之后（`STORAGE` 那一段）。
- */
 const AUDIT_FILE = RUNTIME.auditFile;
 /** 单次下发多少条（只是展示窗口，库里是全量） */
 const ADMIN_AUDIT_WINDOW = 500;
 /** 写失败必须能看见：审计没写上，不能变成"没人知道" */
 let AUDIT_WRITE_ERROR: string | null = null;
 
-/* ------------------------------ 链头锚定 ------------------------------ */
-
-/**
- * 锚点与锚点签名者。
- *
- * 锚点回答的是链内校验结构上回答不了的两类：删尾与整链重写
- * （见 `core/admin-audit-anchor.ts` 文件头）。
- *
- * **一条必须说准的边界**：锚点现在与链在**同一个库**里，所以"能改库的人"可以同时改两者 ——
- * 锚点的价值从来不在"同机另一处"（同一台机器上的两个文件、两张表，挡不住同一个人），
- * 而在**把它带出这台机器**（由审计查看方保存）。落库其实让这件事更容易做对：
- * 导出一份锚点从"翻一个文件"变成一条查询。
- * 这条边界与 692 行那句"独立文件"的旧说法冲突，故在此改写 —— 旧说法是错的。
- *
- * 签名种子存在库里（`config.system.anchorSeed`，单独一行、加密、永不回显）；未配时是公开的演示种子，
- * 于是"拿得到代码的人也能重签锚点"，这条边界被写成了用例（`test:audit-anchor` 的 A8），
- * 不能对外说成"防篡改已解决"。生产要防"能改库的人"，需要私钥在受控设备里，
- * 且公钥钉在审计查看方（不在被审的这台机器上）。
- *
- * `ANCHOR_FILE` 同样只剩"旧文件搬家"一个用途。
- */
 const ANCHOR_FILE = RUNTIME.anchorFile;
-/* 锚点签名者与锚定节奏的**定义**在打开数据库之后（"系统策略"那一段）：
-   种子与 `anchorEvery` 都从库里的 `config.system` 读 —— 种子是机密，它单独占一行且永不回显。 */
+/* 锚点签名者与锚定节奏的定义在打开数据库之后（"系统策略"那一段）：
+   种子与 `anchorEvery` 都从库里的 `config.system` 读 —— 种子是机密，它单独占一行且永不回显。  */
 /**
  * 锚定/读锚失败也要看得见（同 `AUDIT_WRITE_ERROR`）：以为锚上了其实没锚，删尾就重新变得不可检出。
  *
@@ -1094,7 +887,7 @@ const AUDIT_FIELDS: Record<string, string[]> = {
     'candidate.withinSections',
     'external.endpoint',
     'external.timeoutMs',
-    /* 密钥只记"有没有"，**不记值** —— 指纹与审计都不该跟着密钥变（有用例守着） */
+    /* 密钥只记"有没有"，不记值 —— 指纹与审计都不该跟着密钥变（有用例守着）  */
     'apiKeyPresent',
     'sectionMap',
     'termMap',
@@ -1105,7 +898,7 @@ const AUDIT_FIELDS: Record<string, string[]> = {
     'expectedFingerprint',
     'publicKeyPresent',
     'publicKeyFingerprint',
-    /* 认证密钥只记"有没有"（**不记值**）：改了值不该让指纹与审计跟着变，但那一步动作要看得见 */
+    /* 认证密钥只记"有没有"（不记值）：改了值不该让指纹与审计跟着变，但那一步动作要看得见  */
     'apiKeyPresent',
     'http.endpoint',
     'http.timeoutMs',
@@ -1132,8 +925,8 @@ const AUDIT_FIELDS: Record<string, string[]> = {
   /* 两份院内主数据（科室字典 / 文书类型）：审计要回答的是"清单从什么变成什么"。
      只记"谁改过"答不出"产科是什么时候没的""出院记录是什么时候没的"，
      而模板的适用科室、质控规则定位文书的依据正挂在它们身上。
-     ⚠️ 这两条的 subject 与保存接口里 `recordAdminAudit` 传的逐字相同，
-     写错一个字的后果是静默的（审计里永远显示"无变化"，且不会有任何地方报错）。 */
+      这两条的 subject 与保存接口里 `recordAdminAudit` 传的逐字相同，
+     写错一个字的后果是静默的（审计里永远显示"无变化"，且不会有任何地方报错）。  */
   '科室字典': ['items'],
   '文书类型': ['items'],
 };
@@ -1242,8 +1035,6 @@ function configFingerprint(subject: string, view: Record<string, unknown>): stri
   return sha256Hex(utf8(canonical)).slice(0, 16);
 }
 
-/* --------------------------- 运行状态（可用性） --------------------------- */
-
 interface ProbeResult {
   at: string;
   ok: boolean;
@@ -1303,8 +1094,6 @@ function buildHealthView(): Record<string, unknown> {
     },
   };
 }
-
-/* ------------------------------- 系统信息 ------------------------------- */
 
 /** package.json 的版本：读一次并缓存（进程内它不会变） */
 let packageVersion: string | null = null;
@@ -1378,8 +1167,8 @@ function buildAdminAuditView(): Record<string, unknown> {
     },
     /* 链校验结果：改过历史就指认断在第几条，绝不"跳过继续读" */
     chain: {
-      /* 库为唯一来源。`legacyFile` 是**旧文件还在哪**（搬家之后它不再被读，只作凭据）——
-         分开报，是因为"账记在哪"与"旧文件在哪"是两个问题，混成一个字段就答不准任一。 */
+      /* 库为唯一来源。`legacyFile` 是旧文件还在哪（搬家之后它不再被读，只作凭据）——
+         分开报，是因为"账记在哪"与"旧文件在哪"是两个问题，混成一个字段就答不准任一。  */
       table: adminAudit.table,
       legacyFile: AUDIT_FILE,
       intact: AUDIT_LOAD.problem === null,
@@ -1499,8 +1288,8 @@ interface ReadingRecord {
   reads: Array<{ at: string; environmentId: string; actorId: string; allowed: boolean; code?: string; reason?: string }>;
   /**
    * 加密交付：该授权对应的密文信封 + 接收方种子。
-   * ⚠️ 种子派生私钥仅用于演示（生产由密码设备生成并保管私钥，服务端不该持有它）。
-   */
+   *  种子派生私钥仅用于演示（生产由密码设备生成并保管私钥，服务端不该持有它）。
+    */
   sealed?: { envelope: Envelope; recipientSeed: string; recipientLabel: string };
 }
 
@@ -1511,13 +1300,6 @@ interface JsonRecord {
   exportedAt: string;
 }
 
-/**
- * 一次采集的**过程**记录（演示采集用：录音指示、计时、逐段进度）。
- *
- * `sourceId` 是关键的一条：它回答"音频从哪来"。演示用的是 `sample`（脚本音频），
- * **界面上必须据此标明"不是麦克风"** —— 与"模拟转写要标成 demo"同一条纪律，
- * 而这一条更重：录音这件事关涉的是"谁在被录"。
- */
 interface CaptureRunRecord {
   sessionId: string;
   phase: CapturePhase;
@@ -1541,19 +1323,19 @@ interface CaptureRunRecord {
 /**
  * 最近一次语音转写（演示用：留转写段与规范化提示，供界面复显）。
  *
- * **名字不能叫 `DictationRecord`**：文件后面另有一个同名的"采集过程记录"
- * （一次采集的时长 / 段数 / 结果，要落盘留存）。两个同名 `interface` 会被 TS **声明合并**
+ * 名字不能叫 `DictationRecord`：文件后面另有一个同名的"采集过程记录"
+ * （一次采集的时长 / 段数 / 结果，要落盘留存）。两个同名 `interface` 会被 TS 声明合并
  * 成一个"两份字段都要有"的类型 —— 于是两处构造都编译不过，而运行时其实一直是分开的。
- */
+  */
 interface DictationResult {
   transcriptionId: string;
   /**
    * 文本从哪来：`capture` = 采集端提交的真实转写；`demo` = 服务端内置的模拟转写。
    *
-   * 必须如实带出去：两者在界面上长得**一模一样**（都是"一段文本 + 时间区间"），
+   * 必须如实带出去：两者在界面上长得一模一样（都是"一段文本 + 时间区间"），
    * 而"这是真识别出来的"与"这是我们写死在仓库里的一段话"信任程度完全不同
    * （与建议卡上标"产出方"同一条理由）。
-   */
+    */
   source: 'capture' | 'demo';
   /** 医生指定落点后重新提交时，要用它重建 `dictate` 参数（内核要求 asrModelId 必填） */
   asrModelId: string;
@@ -1581,31 +1363,18 @@ interface DocEntry {
   /** 最近一次语音转写（把转写段与规范化提示留在服务端，供界面复显） */
   lastDictation: DictationResult | null;
   /**
-   * 最近一次采集的**过程**（演示采集用：录音指示、计时、逐段进度）。
+   * 最近一次采集的过程（演示采集用：录音指示、计时、逐段进度）。
    *
    * 与 `lastDictation` 分开：那个是"结果"（转写段 + 一组建议），这个是"过程"
    * （正在录第几段、已经完成几段）。界面要能显示「转写中 3 段 / 已完成 1 段」，
    * 而这个过程在服务端驱动采集时只存在服务端 —— 于是它必须随 state 下发。
-   */
+    */
   lastCapture: CaptureRunRecord | null;
   /** 最近一次跨文书一致性检查结果（避免重跑：纯函数虽便宜，但问题列表要能被"生成待办"引用） */
   lastConsistency: { issues: ConsistencyIssue[]; scanned: number } | null;
-  /**
-   * 最近一次就诊时间轴的读数。
-   *
-   * 为什么不"每次渲染现算"：它的输入是全就诊的文书正文，而界面上任何一个无关动作
-   * （改一个字、处置一条提示）都会触发整体重渲染 —— 那时算出来的一样，白算一遍；
-   * 而"算"的同时如果顺手把 `now` 重新取一次，同一屏上的时间就会前后不一致。
-   */
   lastVisitTimeline: VisitTimeline | null;
   /** 最近一次跨次对比（属于这份文档） */
   lastVisitCompare: VisitCompareState | null;
-  /**
-   * 最近一次出院汇总（属于这份文档）。
-   *
-   * 为什么存下来而不是每次重算：生成建议时要引用**同一次读出来的那批条目**，
-   * 重算一遍会让"界面上勾的是哪几条"和"实际提交的原文"可能不是同一份数据。
-   */
   lastDischargeSummary: DischargeSummaryPlan | null;
   /** 最近一次受控阅读视图（属于这份文档） */
   lastReadingView: ReadingView | null;
@@ -1613,12 +1382,6 @@ interface DocEntry {
   lastReadingSource: 'plaintext' | 'unsealed' | null;
   /** 最近一次审计报告（只存摘要：完整报告在卡片里给，state 不必背着它） */
   lastAudit: AuditSummary | null;
-  /**
-   * 最近一次质控扫描中适用但判不了的那些（缺入院时间、导入件…）。
-   *
-   * 必须留在 state 里：界面上"共 N 条提示"旁边要能看到"另有 M 条没判成、为什么"。
-   * 少了它，医生会把"这次没报"读成"查过了没问题"。
-   */
   lastQcUnevaluated: QcUnevaluated[];
   /**
    * 最近一次内涵类质控的结果摘要（`null` = 还没跑过）。
@@ -1638,12 +1401,12 @@ interface DocEntry {
     rejected: Array<{ index: number; code: string; message: string }>;
   } | null;
   /**
-   * 最近一次 AI 调用**没产出**的目标节点与原因（`null` = 还没调过）。
+   * 最近一次 AI 调用没产出的目标节点与原因（`null` = 还没调过）。
    *
    * 与上面两个"没判"并列，是同一件事在 AI 侧的第三次修：
    * 质控说"没判"会被读成"没问题"，AI 说"没提示"会被读成"查过了没问题" ——
-   * 医生对 AI 的信任崩塌，多半不是因为写错，而是因为它**不知道它没写**。
-   */
+   * 医生对 AI 的信任崩塌，多半不是因为写错，而是因为它不知道它没写。
+    */
   lastAiSilence: AiSilenceReport | null;
   /**
    * 已落库的文书 rev。`persist` 据此判断"正文有没有变"，
@@ -1717,16 +1480,6 @@ function humanActor(id: string): Actor {
   return { id, kind: 'human' };
 }
 
-/**
- * 公钥目录**落库**（`recipient_keys` 表），不再是一个 JSON 文件。
- *
- * 原先它有一个 `L0_RECIPIENT_KEYS_FILE` 可配置路径（测试要干净起点、部署要把数据与代码目录分开）。
- * 入库之后这两条需求自动满足：测试用临时库（`L0_DB_FILE`），部署的数据本来就在库里；
- * 而"备份一次数据库带走全部收件方"成为事实 —— 原先目录留在磁盘上，恢复后的现场是
- * "归档件还在、却没人能收"。
- *
- * 表里**只有公钥**，因此它是明文表（不密封）：理由见 `storage/recipient-key-store.ts`。
- */
 /** 启动时加载公钥目录：读坏了要显式记录下来，而不是当成"没有接收方" */
 function reloadRecipientKeys(): void {
   try {
@@ -1750,30 +1503,21 @@ function persistRecipientKeys(): { ok: boolean; message?: string } {
 }
 
 /**
- * 受控阅读的授权登记（凭据 + 阅读计数 + 阅读流水）**落库**（`reading_grants` 表）。
+ * 受控阅读的授权登记（凭据 + 阅读计数 + 阅读流水）落库（`reading_grants` 表）。
  *
  * 它与旁挂数据同属"过程性、不进签名"的一类：授权用途、允许的章节范围、接收方种子、
- * 以及"谁在什么时候读了这份病历"的流水，都在里面 —— 因此载荷**加密存**
+ * 以及"谁在什么时候读了这份病历"的流水，都在里面 —— 因此载荷加密存
  * （`storage/sealed.ts` 的同一条信封链路），列上只留 `doc_id` / `revoked` / `read_count`
  * 这几件"不解密就要能答"的事（列表、统计、次数门控）。
  *
  * 不落盘的后果很具体：重启后授权全部消失，而"没有授权"与"授权被清了"在界面上一模一样。
  *
- * ⚠️ 加载动作**必须挪到开库之后**（原先那个整体式文件可以在开库前读）：
+ *  加载动作必须挪到开库之后（原先那个整体式文件可以在开库前读）：
  * 这是本次改造里第二处被迫挪位的启动动作，与公钥目录同一个原因 —— 库句柄与口令就位才能读它。
- */
-/** 旧的整体式文件：**只在一次性导入时读**，不再写（见 `storage/reading-grants-import.ts`） */
+  */
 const READING_GRANTS_FILE = RUNTIME.readingGrantsFile;
 let READING_GRANTS_ERROR: string | null = null;
 
-/**
- * 全量写回（内存里的索引是权威：导入 / 撤销 / 阅读记账都先改它，再整体同步到库）。
- *
- * 为什么要做这层映射而不是把 `ReadingRecord` 直接丢给 store：
- * 库里"可查的四列"是**从记录里抽出来的**（`doc_id` / `revoked` / `read_count`），
- * 抽出规则只此一处 —— 散在写入点里，就会出现"某条路径忘了更新 read_count 列"
- * 而它恰恰是次数门控唯一读的地方。
- */
 function toGrantRecords(): ReadingGrantRecord[] {
   return [...state.readingGrants.values()].map((record) => ({
     grantId: record.credential.grant.grantId,
@@ -1813,25 +1557,10 @@ function restoreReadingGrants(): void {
 
 /* ===================== 工作数据的落盘：数据库（唯一权威） ===================== */
 
-/**
- * 落盘目录（`L0_STATE_DIR` 可覆盖：测试必须能隔离状态，否则持久化会让用例互相污染）
- * 与数据库文件（`L0_DB_FILE`）。
- *
- * 定义在"装载工作区"之前，是因为装载读的就是这个库，顺序反过来会得到
- * "先用出厂数据建好工作区、再打开库"的假象（那样库是不是权威就看不出来了）。
- */
 const STATE_DIR = RUNTIME.stateDir;
 const DB_FILE = RUNTIME.dbFile;
-/** 旧的"每份文书一个密封文件"路径：只在一次性导入时读它，不再写（见 `importLegacySidecarsOnce`） */
 const stateFileOf = (docId: string): string => join(STATE_DIR, `${docId}.json`);
 
-/**
- * 打开数据库；打不开就退出。
- *
- * 为什么不回落到文件存储：那会让"我的数据到底在哪"有两处答案，
- * 而"两处答案"正是本项目一路上在避免的那类模糊（同 `pack-store.ts` 的"磁盘是权威"）。
- * 落库既然成为口径，就必须是唯一口径：打不开就明确不可用，而不是换个地方悄悄存。
- */
 function openStorageOrExit(): OpenDatabaseResult {
   try {
     return openDatabase(DB_FILE, { schemaVersion: STORAGE_SCHEMA_VERSION, migrations: MIGRATIONS });
@@ -1841,13 +1570,6 @@ function openStorageOrExit(): OpenDatabaseResult {
   }
 }
 
-/**
- * 启动期的硬失败：说清两条（发生了什么、该怎么办），然后退出。
- *
- * 为什么不在类型上"凑"一个 return：这几处失败都意味着库不可用，
- * 而"带着空工作区继续跑"是这里最危险的选择，用户会看到一份空白病历，
- * 以为数据没了（实际在库里）。所以它必须停下来。
- */
 function failFast(what: string, advice: string): never {
   console.error(`[存储] ${what}`);
   console.error(`[存储] ${advice}`);
@@ -1858,49 +1580,37 @@ function failFast(what: string, advice: string): never {
 const STORAGE = openStorageOrExit();
 /* 盐跟着口令一起从服务端文件配置来：库里的密文要解得开，两者必须同时正确（见 core/store.ts） */
 const workStore = new WorkStore(STORAGE.db, STATE_PASSPHRASE, STATE_SALT_HEX === undefined ? {} : { salt: STATE_SALT_HEX });
-/* 迁移要出声：库在启动时被改结构是件该被知道的事（否则"为什么今天慢了"没人答得上） */
 if (STORAGE.applied.length > 0) {
   console.log(`[存储] 已把数据库推进到结构版本 ${STORAGE_SCHEMA_VERSION}：执行迁移 ${STORAGE.applied.join('、')}`);
 }
 
-/**
- * **部署参数的键值层**：模型接入 / 落位 / 签名后端 / 授权源都落在 `sealed_kv`（同一个库）。
- *
- * 建在 `WorkStore` 之上而不是自己加密：仓库里只有一处密封实现（见 `storage/config-kv.ts`）。
- * 落库之后，"备份一次数据库"才真的带走了这台机器的**全部**配置 ，
- * 包括质控按什么标准判（包）与模型接哪儿（这四类参数）。
- */
 const CONFIG_KV = createConfigKv(workStore);
-
-/* ------------------------------ 系统策略（库里） ------------------------------ */
 
 /**
  * 系统策略：鉴权模式、会话寿命、限流阈值、锚定节奏、锚点种子 —— 全在 `config.system`。
  *
- * **启动时读一次**，与模型/采集/落位配置（每次请求都重读）刻意不同：这四项落在
- * **内存结构的构造**上（会话表、限流器、签名者），改了要重建它们才生效；
- * 而"改完立即生效"在这里的代价是**每次请求都重建会话表** —— 那会把正在登录的人踢出去。
+ * 启动时读一次，与模型/采集/落位配置（每次请求都重读）刻意不同：这四项落在
+ * 内存结构的构造上（会话表、限流器、签名者），改了要重建它们才生效；
+ * 而"改完立即生效"在这里的代价是每次请求都重建会话表 —— 那会把正在登录的人踢出去。
  *
- * 所以：**改这四项需要重启服务**，这一点在管理后台与启动日志里都要写清楚。
+ * 所以：改这四项需要重启服务，这一点在管理后台与启动日志里都要写清楚。
  * 不说清的话，它的现场表现是"我改了策略、什么都没发生"，而人只会怀疑自己没保存成功。
- */
+  */
 function systemConfigNow(): LoadedSystemConfig {
   return loadSystemConfig(CONFIG_KV);
 }
 
-/* ------------------------------ 科室字典（库里） ------------------------------ */
-
 /**
  * 科室字典：院内有哪些科、编码与显示名。
  *
- * 它**不像**系统策略那样启动时读一次：字典是随时可读的数据，
+ * 它不像系统策略那样启动时读一次：字典是随时可读的数据，
  * 改完就该立刻生效（模板上的科室、就诊科室名的显示都靠它）。
- */
+  */
 function departmentsNow(): LoadedDepartments {
   return loadDepartments(CONFIG_KV);
 }
 
-/** 读科室字典；读不出来时**不当作"没有科室"**：把原因带出来，界面才能区分"没配"与"读不出" */
+/** 读科室字典；读不出来时不当作"没有科室"：把原因带出来，界面才能区分"没配"与"读不出"  */
 function departmentsSafe(): { loaded: LoadedDepartments; error: string | null } {
   try {
     return { loaded: departmentsNow(), error: null };
@@ -1909,19 +1619,17 @@ function departmentsSafe(): { loaded: LoadedDepartments; error: string | null } 
   }
 }
 
-/* ------------------------------ 文书类型（库里） ------------------------------ */
-
 /**
  * 文书类型：院内有哪些类型、各自的体系 / 编码 / 显示名。
  *
- * 与科室字典同一处置：**不像**系统策略那样启动时读一次 —— 改完就该立刻生效
+ * 与科室字典同一处置：不像系统策略那样启动时读一次 —— 改完就该立刻生效
  * （「新建文书」的类型下拉与模板列表的展示都读它）。
- */
+  */
 function docTypesNow(): LoadedDocTypes {
   return loadDocTypes(CONFIG_KV);
 }
 
-/** 读文书类型；读不出来时**不当作"没有类型"**：把原因带出来，界面才能区分"没配"与"读不出" */
+/** 读文书类型；读不出来时不当作"没有类型"：把原因带出来，界面才能区分"没配"与"读不出"  */
 function docTypesSafe(): { loaded: LoadedDocTypes; error: string | null } {
   try {
     return { loaded: docTypesNow(), error: null };
@@ -1930,13 +1638,6 @@ function docTypesSafe(): { loaded: LoadedDocTypes; error: string | null } {
   }
 }
 
-/**
- * 模板上配的科室编码必须是**字典里存在且启用**的。
- *
- * 为什么硬拦、而不是"存着再说"：一个对不上任何人的编码，后果是这份文书
- * **谁都开不出**（现场只看到"限 XX 科"，而那个 XX 是个陌生串），
- * 而配置的人以为它已经生效了。空数组（= 通用）不查字典，那是合法配置。
- */
 function validateTemplateDepartments(codes: string[]): { code: string; message: string } | null {
   if (codes.length === 0) return null;
   const { loaded, error } = departmentsSafe();
@@ -1962,21 +1663,8 @@ function validateTemplateDepartments(codes: string[]): { code: string; message: 
 
 const SYSTEM_CONFIG = systemConfigNow();
 const AUTH_MODE: 'open' | 'strict' = SYSTEM_CONFIG.config.authMode;
-/** 会话寿命（分钟）：默认 8 小时，覆盖一个班次。滑动续期与清理见 `auth/session-store.ts` */
 const SESSION_TTL_MINUTES = SYSTEM_CONFIG.config.sessionTtlMinutes;
 
-/**
- * 登录会话（内存，且只存指纹，进程重启即失效）。
- *
- * 访问控制现状：可挡住误入配置页随手改、无意的脚本调用，以及按角色区分
- * "质控员能改判定标准、不能改数据流向"。
- * 有意冒充不在防护范围内：没有 TLS、没有多因素、会话不落盘（多实例部署时需粘性会话或共享存储）。
- * TLS、统一登录（对接医院 CA/SSO）、多因素不在本次范围内。
- *
- * 身份与会话：
- *   ① 身份只来自服务端会话，会话里的 `actorId` 是库里的用户名，因此审计中的名字指向一个真实账号；
- *   ② 会话可被吊销：改口令、改角色、停用、删除都会踢掉该账号的全部会话（`sessions.revokeAllFor`）。
- */
 const sessions = new SessionStore({ ttlMs: SESSION_TTL_MINUTES * 60_000 });
 
 /**
@@ -1995,8 +1683,8 @@ const limiter = new SlidingWindowLimiter();
 
 /**
  * 锚点签名者：种子来自库里的 `config.system.anchorSeed`（未配时是内置演示种子）。
- * 它是机密，**只在这一处解出来用**，不进日志、不进任何返回值。
- */
+ * 它是机密，只在这一处解出来用，不进日志、不进任何返回值。
+  */
 const anchorSigner = softwareSigner(demoKeyPair(SYSTEM_CONFIG.anchorSeed).privateKey);
 const anchorVerifier = softwareVerifier(anchorSigner.publicKey);
 /**
@@ -2005,12 +1693,12 @@ const anchorVerifier = softwareVerifier(anchorSigner.publicKey);
  */
 const ANCHOR_EVERY = SYSTEM_CONFIG.config.anchorEvery;
 
-/* 公钥目录**落库**（`recipient_keys` 表）：读它要库句柄，所以启动加载只能在这里
-   （原先那个 JSON 文件可以在开库前读，这是本次改造里唯一被迫挪位的启动动作）。 */
+/* 公钥目录落库（`recipient_keys` 表）：读它要库句柄，所以启动加载只能在这里
+   （原先那个 JSON 文件可以在开库前读，这是本次改造里唯一被迫挪位的启动动作）。  */
 reloadRecipientKeys();
 
-/* 授权登记：**先搬家、再加载**（顺序反了的话，导进来的授权要等下次启动才生效 ——
-   而"我搬完之后界面里还是空的"最容易被当成"搬家没成功"）。 */
+/* 授权登记：先搬家、再加载（顺序反了的话，导进来的授权要等下次启动才生效 ——
+   而"我搬完之后界面里还是空的"最容易被当成"搬家没成功"）。  */
 const READING_GRANTS_IMPORT = importReadingGrantsOnce({
   workStore,
   db: STORAGE.db,
@@ -2022,13 +1710,6 @@ console.log(`[受控阅读] ${READING_GRANTS_IMPORT.reason}${
 }`);
 restoreReadingGrants();
 
-/**
- * 把旧的部署参数文件搬进库（**一次性**，见 `storage/config-files-import.ts`）。
- *
- * 记账与否是这一步的要害：不记账，"库里没有就从旧文件导"会每次启动重演 ，
- * 于是管理员在界面上**清除**掉的模型密钥，会被还在状态目录里的旧文件悄悄导回来。
- * 所以：真导入了才记账；有失败就**不记账**（下次启动还得再试，不能让失败的那份永远搬不过来）。
- */
 const CONFIG_IMPORT = importLegacyConfigOnce({
   workStore,
   kv: CONFIG_KV,
@@ -2046,33 +1727,17 @@ if (CONFIG_IMPORT.failed.length > 0) {
     `[部署参数] 已把旧的部署参数文件搬进库 ${CONFIG_IMPORT.imported.length} 条：${CONFIG_IMPORT.imported.join('、')}（旧文件保留，作回滚凭据）`,
   );
 } else {
-  /* **没事也要说一句**：不打印的话，启动日志里就答不出"这几份配置是从哪来的" ——
+  /* 没事也要说一句：不打印的话，启动日志里就答不出"这几份配置是从哪来的" ——
      而"我改了旧文件却没生效"（或反过来"旧文件还在，会不会被读"）正是这里最常被问的一句。
-     代价是一行日志，收益是这个系统少一处"什么都没发生"。 */
+     代价是一行日志，收益是这个系统少一处"什么都没发生"。  */
   console.log(`[部署参数] ${CONFIG_IMPORT.reason}（来源：sealed_kv）`);
 }
 
-/**
- * 把旧的内涵质控规则文件搬进库（**一次性**，带记账闸门）。
- *
- * 路径来自服务端配置文件的 `imports.qcRulesFile`：它不再是运行期配置，
- * 只是这一次搬运的来源（搬完就再也不读，见 `qc/qc-content-store.ts`）。
- * 无论搬没搬都要打一行 —— 否则"规则清单现在到底是不是库里的"在日志里查不到。
- */
 const QC_RULES_IMPORT = importQcRulesOnce({ workStore, kv: CONFIG_KV, file: IMPORTS.qcRulesFile });
 console.log(`[质控规则] ${QC_RULES_IMPORT.reason}`);
 
 /* ------------------------------ 管理审计与链头锚点（库里） ------------------------------ */
 
-/**
- * 审计链与锚点：**都在库里**（`admin_audit` / `admin_audit_anchor`）。
- *
- * 为什么构造放在这里而不是文件顶部：它们要一个**库句柄**，而库是 `openStorageOrExit()` 开的。
- * 旧文件（`AUDIT_FILE` / `ANCHOR_FILE`）此刻只剩一个用途：**下面这一次搬家**。
- *
- * 顺序要紧：**先搬家、再加载**。反过来的话，导进来的记录要等下次启动才看得到 ——
- * 而"我搬完之后日志里还是空的"是最容易被当成"搬家没成功"的一种现场。
- */
 const adminAudit = new AdminAuditLog(STORAGE.db);
 const auditAnchors = new AuditAnchorStore(STORAGE.db);
 
@@ -2119,16 +1784,9 @@ ANCHOR_WRITE_ERROR = ANCHOR_LOAD.error;
  */
 const userStore = new UserStore(STORAGE.db);
 
-/**
- * 从**服务端配置文件**播种第一个管理员：库空 + `bootstrap.user` 与 `bootstrap.token` 都给全时才做。
- *
- * 为什么保留这条路（而不是"一律去页面上点一遍"）：部署时不想在这台机器上再手点一遍；
- * 而它一次性把口令写进数据库，从此账目清楚：口令的真实来源只有一处（库），
- * 那份装机凭据不再参与登录。
- *
- * 播种失败直接拒绝启动（fail-closed）：静默跳过会让现场以为"文件里那份凭据还在生效"，
- * 于是他会继续拿旧口令去登录、失败、然后去怀疑整套东西，那是一次本可以不发生的排查。
- */
+// 而它一次性把口令写进数据库，从此账目清楚：口令的真实来源只有一处（库），
+// 于是他会继续拿旧口令去登录、失败、然后去怀疑整套东西，那是一次本可以不发生的排查。
+
 function seedAccountsFromConfig(): void {
   if (userStore.count() > 0) return;
   if (!DEPLOY_USER || !DEPLOY_TOKEN) return;
@@ -2166,20 +1824,11 @@ function accountStatus(): { initialized: boolean; total: number; admins: number;
   };
 }
 
-/**
- * 建一个会话条目。唯一的构造点：新增字段时漏掉一处会在类型检查时暴露，
- * 而不是等到"某一类文书重启后状态不对"才发现。
- *
- * `fromStore`：这份文书是**从库里装载**的（相对"刚构造出来"的导入/模板文书）。
- * 两者对"机读信息陈旧"的态度不同 —— 刚构造出来就陈旧，说明**构造逻辑有缺陷**，当场拒绝才好查；
- * 而从库里装载的那一份，陈旧只是"改过、还没重算"的正常中间态，拒绝装载会让整台服务起不来
- * （见 `WriteSession.openPersisted` 的说明：此前正是这么栽的）。
- */
 function entryFor(doc: DocumentModel, fromStore = false): DocEntry {
   const session = fromStore ? WriteSession.openPersisted(doc) : WriteSession.open(doc);
   /* 豁免装载 ≠ 当没看见：库里那份的机读信息确实有待重算，就得在启动日志里说出来 ——
      不吭一声的话，"导出怎么被拦了"会成一件没有前因的事。
-     只在**有**机读块且确实陈旧时报（没有块 = 还没派生过，那是另一件事，不必每次都喊）。 */
+     只在有机读块且确实陈旧时报（没有块 = 还没派生过，那是另一件事，不必每次都喊）。  */
   if (fromStore && doc.machineReadable) {
     const status = session.machineReadableStatus();
     if (status.stale) {
@@ -2311,20 +1960,6 @@ function humanOf(entry: DocEntry): Actor {
   return humanActor(entry.session.document.createdBy);
 }
 
-/**
- * 写入者是谁，留痕与 provenance 的归属来源。
- *
- * 两档，严格模式优先会话：
- *   ① `strict`：取服务端会话里的身份。这是必须的，只做门禁不改归属，
- *      就会出现"门禁要求医生会话，留痕却记着病历创建人"的半截工程：
- *      换个人登录写同一份病历，留痕照样显示创建人的名字，等于鉴权只做了一半。
- *   ② `open`：退回病历创建人。演示模式下医生端根本没有会话，"取会话"无从谈起；
- *      这也是本仓库一直以来的口径（"这台机器上只有一个操作者"）。
- *
- * 为什么不两档都取会话：`open` 模式下浏览器可能带着管理后台的会话（同一个 cookie），
- * 于是医生写病历时归属会变成那个管理员的身份，那会让演示的留痕突然换名字，
- * 而这不是本次要改的事。两档的差异写在交付边界里。
- */
 function writeActor(req: IncomingMessage, entry: DocEntry): Actor {
   if (AUTH_MODE === 'strict') {
     const resolved = resolvePrincipal(req);
@@ -2335,16 +1970,15 @@ function writeActor(req: IncomingMessage, entry: DocEntry): Actor {
   return humanOf(entry);
 }
 
-/* 启动即装载工作区：库里有就从库里装，空库才播种（见 `restoreOrSeedWorkspace`） */
 restoreOrSeedWorkspace();
 
 /**
- * 科室字典：**只播一次**。
+ * 科室字典：只播一次。
  *
- * 与工作区的播种口径**刻意不同**：工作区是"空库就播种"，而科室可以被**有意删光** ——
+ * 与工作区的播种口径刻意不同：工作区是"空库就播种"，而科室可以被有意删光 ——
  * 用一条标记记住"播过"，于是"我们把科室清了"与"这个库还没建过科室"分得开，
  * 删掉之后重启也不会自己长回来（长回来又没人知道是谁加的，比没有更糟）。
- */
+  */
 function seedDepartmentsOnce(): void {
   if (departmentsSafe().loaded.source !== 'empty') return;
   if (departmentsSeeded(CONFIG_KV)) return;
@@ -2353,12 +1987,6 @@ function seedDepartmentsOnce(): void {
   console.log(`[科室字典] 已播种 ${DEPARTMENTS.length} 个科室（管理后台「基础数据」可维护；删掉后不会自己回来）`);
 }
 
-/**
- * 文书类型：**只播一次**，口径与科室字典完全相同（见 `seedDepartmentsOnce`）。
- *
- * 它与科室一起构成「基础数据」的两份主数据：一个回答"有哪些科"，
- * 一个回答"能建哪几类文书"。两者共用同一条纪律 —— 可以被有意清空，清空后不会自己回来。
- */
 function seedDocTypesOnce(): void {
   if (docTypesSafe().loaded.source !== 'empty') return;
   if (docTypesSeeded(CONFIG_KV)) return;
@@ -2368,14 +1996,14 @@ function seedDocTypesOnce(): void {
 }
 
 /**
- * 老库迁移：就诊科室从**名称**迁到**编码**。
+ * 老库迁移：就诊科室从名称迁到编码。
  *
  * 科室字典上线前，`visits.dept` 存的是"呼吸内科"这样的名称；现在它必须存编码 ——
  * 判定是拿就诊科室编码与模板上的科室编码对齐的，两边不同源就永远对不上。
  *
  * 幂等：编码不会再匹配到任何名称，跑多少次结果都一样（所以不需要记账闸门）。
- * 字典里查不到的旧名称（历史数据、导入数据）**原样保留**：猜一个编码比留着更糟。
- */
+ * 字典里查不到的旧名称（历史数据、导入数据）原样保留：猜一个编码比留着更糟。
+  */
 function migrateVisitDeptCodes(): void {
   if (!state.workspace) return;
   const { loaded } = departmentsSafe();
@@ -2401,8 +2029,6 @@ seedDepartmentsOnce();
 seedDocTypesOnce();
 migrateVisitDeptCodes();
 
-/* ------------------------- AI 建议模板（本地模拟） ------------------------- */
-
 const TEMPLATES: Array<{ name: string; match: (node: DocNode) => boolean; text: string }> = [
   { name: '主诉规范化', match: (node) => hasTag(node, (tag) => tag.code.endsWith('2.001')), text: '发热3天，伴咳嗽、咳痰。' },
   { name: '诊断建议', match: (node) => hasTag(node, (tag) => tag.system === 'ICD10'), text: '结合症状、体征与辅助检查，建议明确诊断并按指南规范治疗，定期随访。' },
@@ -2420,31 +2046,14 @@ function templateFor(node: DocNode): { name: string; text: string } {
   };
 }
 
-/* ------------------------------- 视图模型 ------------------------------- */
-
 function textOf(node: Extract<DocNode, { type: 'text' }>): string {
   return node.runs.map((run) => run.text).join('');
 }
 
-/**
- * 节点是否由模板实例化而来（证据链里带 `template` 出处）。
- *
- * 为什么要单独把这个判据交给界面：模板产出的节点 `origin` 也是 `system`，
- * 而界面对 `system` 的既有文案是"系统带入"（那是给 HIS/LIS 取数用的）。
- * 一份刚按模板开出来、正文还空着的文书上写着"系统带入"，医生会以为内容已经进来了。
- * 这里是口径问题，不是措辞问题，所以由服务端把判据算好下发，而不是让界面去猜。
- */
 function templateRefOf(node: DocNode): string | undefined {
   return (node.provenance.evidence ?? []).find((evidence) => evidence.kind === 'template')?.ref;
 }
 
-/**
- * "这个值是从哪个**系统字段**带进来的"（模板里配了"从系统带入"的填写项才有）。
- *
- * 为什么必须与 "模板带入" 分开：两者都是 `origin: system`，
- * 但一件事是"模板给了一个空骨架"，另一件是"这一格已经把患者姓名填进去了"。
- * 合成一个名字，医生要么以为姓名没带进来，要么以为骨架就是内容。
- */
 function fromRefOf(node: DocNode): string | undefined {
   const ref = (node.provenance.evidence ?? []).find((evidence) => evidence.kind === 'his')?.ref;
   return ref && ref.startsWith('ctx:') ? ref.slice('ctx:'.length) : undefined;
@@ -2465,10 +2074,10 @@ interface ViewTableCell {
 /**
  * 专科控件里的一格。
  *
- * **键由服务端算好下发**（`model/control.ts` 的 `controlCellsOf`）：界面只负责画。
+ * 键由服务端算好下发（`model/control.ts` 的 `controlCellsOf`）：界面只负责画。
  * 让浏览器自己拼键等于把"哪一格"这条规则复制到第二处，而它一旦漂移，
  * 症状是"医生填进去的值在导出里不见" —— 两端都不报错。
- */
+  */
 interface ViewControlCell {
   key: string;
   label: string;
@@ -2494,35 +2103,22 @@ interface ViewItem {
   /**
    * 图片地址（只有 `kind === 'image'` 才有）。
    *
-   * 它**不是**病历内容，只是一条引用：图的字节在 `state/resources` 下，
-   * 服务端按 `/res/<sha256>.<ext>` 下发。这样做的直接后果是——**没有那个文件，
-   * 这张图就不存在**（不是"显示不出来"），所以导出时会明确报"图片取不到"，
+   * 它不是病历内容，只是一条引用：图的字节在 `state/resources` 下，
+   * 服务端按 `/res/<sha256>.<ext>` 下发。这样做的直接后果是——没有那个文件，
+   * 这张图就不存在（不是"显示不出来"），所以导出时会明确报"图片取不到"，
    * 而不是画一张空框。
-   */
+    */
   resRef?: string;
   /** 图片的替代文字（无障碍 + 纸面上的说明） */
   altText?: string;
   /** 图注（排在图下方） */
   caption?: string;
-  /**
-   * 所在段落节点 id（文本 / 填写项才有）。
-   *
-   * 为什么要下发它：自由流式视图把"一个模型段落"画成一个可编辑区块
-   * （文本 + 夹在里面的填写项同属一行），而平铺的视图项里没有"谁和谁同属一段"的信息。
-   * 界面自己按顺序猜（"下一个 text 之前都算同一段"）在遇到表格 / 控件时会错，
-   * 而错法是"填写项被画到了别的段落里"，看起来像数据被搬了家。
-   */
   paragraphId?: NodeId;
-  /**
-   * run 级内容（**只有带格式或带来源时才下发**，见 `decoratedRunsOf`）。
-   * 缺省 = 一个无标记、无独立来源的纯文本段，界面按节点级来源渲染即可。
-   */
   runs?: TextRun[];
-  /** 专科控件的**形状**（只有 `kind === 'control'` 才有）：渲染器按它分派 */
+  /** 专科控件的形状（只有 `kind === 'control'` 才有）：渲染器按它分派  */
   shape?: string;
   /** 专科控件的语义类型（质控与机读分类按它问） */
   controlKind?: string;
-  /** 专科控件的格清单（见 `ViewControlCell`） */
   cells?: ViewControlCell[];
   /** 表格表头（只有 `kind === 'table'` 才有） */
   columns?: string[];
@@ -2544,13 +2140,6 @@ interface ViewItem {
   paragraphLast?: boolean;
   /** 由模板实例化而来时的出处（`<包>#<模板>@<版本>`）：界面据此把"系统带入"改写成"模板带入" */
   templateRef?: string;
-  /**
-   * 列表项的行首标记（`· ` 或 `1. `），**由服务端算好**（只有 `kind === 'listItem'` 才有）。
-   *
-   * 为什么不让前端按 `index` 自己拼：编号是**位置函数** —— 删掉一项，后面每一项都要变号。
-   * 界面与纸面（`export/ofd.ts`）各算一次，一旦对同一份文档给出不同的号，
-   * 屏幕上与归档件里就会出现两个"第 3 条"，而两边看起来都对。
-   */
   marker?: string;
   /** 列表项里那个文本节点的 id：界面用它走 `data-edit`（与正文同一写路径） */
   textId?: NodeId;
@@ -2562,32 +2151,10 @@ function buildItems(session: WriteSession): ViewItem[] {
   return buildItemsOfDocument(session.document);
 }
 
-/**
- * run 级内容里"有内容可讲"的那些（带格式 `marks`，或带独立 `provenance`）。
- *
- * 为什么只在**有**的时候才把 `runs` 下发：绝大多数段落是"一个无标记、无独立来源的 run"。
- * 把它们的 runs 也带上，等于让每个请求的状态包平白变大（`state` 是每个请求都下发的，
- * 见 `buildState` 附近那条约定的开销纪律）。界面拿不到 `runs` 时按"纯文本 + 节点级来源"
- * 渲染，结果与下发一份无标记 runs 完全一致 —— 所以这个省略不是"少发了数据"。
- */
 function decoratedRunsOf(node: Extract<DocNode, { type: 'text' }>): TextRun[] | undefined {
   return node.runs.some((run) => (run.marks ?? []).length > 0 || run.provenance !== undefined) ? node.runs : undefined;
 }
 
-/**
- * 文档模型 → 界面视图（**医生端正文与管理后台的模板预览共用这一份**）。
- *
- * 为什么参数是 `doc` 而不是 `session`：模板预览要画的正是"医生点开之后那一屏"，
- * 而它手里只有一份试开出来、没落库的文档（见 `previewOfTemplate`）。
- * 两处各画一份的结果就是"预览和正文长得不一样、细节各说各的" —— 那正是这个函数要避免的事。
- */
-/**
- * 表格"吃掉"的后代（行 / 单元格 / 格子里的内容）。
- *
- * 为什么要在正文视图里显式跳掉它们：`orderedNodeIds` 是整篇平铺的，表格的后代也在里面 ——
- * 不跳的话一张表会被画两遍（一次表格、一次散落在下面的格子），
- * 同一个值在屏幕上出现两次，而医生只会以为"它填重了"。
- */
 function tableDescendantIds(doc: DocumentModel, kidsOf: (id: NodeId) => DocNode[]): Set<NodeId> {
   const consumed = new Set<NodeId>();
   for (const node of Object.values(doc.nodes)) {
@@ -2603,14 +2170,6 @@ function tableDescendantIds(doc: DocumentModel, kidsOf: (id: NodeId) => DocNode[
   return consumed;
 }
 
-/**
- * 列表项的顺序信息：父 `listGroup` 是不是有序、自己在其中是第几项。
- *
- * 返回两样东西：
- *   - `marker`：行首标记（`· ` 或 `1. `）—— 由服务端算，界面不拼（理由见 `ViewItem.marker`）；
- *   - `consumed`：列表项里**已被它自己画掉**的子节点。不跳过它们，遍历到 `text` 时
- *     会再画一遍（同一句话在屏幕上出现两次，而医生只会以为它写重了）。
- */
 function listItemMetaOf(
   doc: DocumentModel,
   kidsOf: (id: NodeId) => DocNode[],
@@ -2629,11 +2188,11 @@ function listItemMetaOf(
 }
 
 /**
- * 表头各列的列名：取**第一条表头行**里每个格子的文本。
+ * 表头各列的列名：取第一条表头行里每个格子的文本。
  *
  * 多行表头（合并单元格那种）目前没有来源，所以不去猜 ——
  * 猜错的表头会把数据画到错误的列下面，而那是看表的人唯一能依凭的东西。
- */
+  */
 function tableColumnsOf(table: Extract<DocNode, { type: 'table' }>, kidsOf: (id: NodeId) => DocNode[]): string[] {
   const header = kidsOf(table.id).filter((node) => node.type === 'tableRow')[0];
   if (!header) return [];
@@ -2654,11 +2213,11 @@ function tableRowsOf(table: Extract<DocNode, { type: 'table' }>, kidsOf: (id: No
 /**
  * 一个格子怎么画。
  *
- * 只取**第一个**子节点：一格放两样东西（一句话 + 一个填写项）在表格里没有意义，
+ * 只取第一个子节点：一格放两样东西（一句话 + 一个填写项）在表格里没有意义，
  * 而"把所有子节点拼成一句只读文本"会把填写项吞掉 —— 那才是真正的数据丢失。
  * 文本 → 只读文字；填写项 → 可编辑的格子（带 nodeId，界面按 `data-field` 走
- * 与正文填写项**完全相同**的那条写路径：留痕、索引同步、乐观锁都一样）。
- */
+ * 与正文填写项完全相同的那条写路径：留痕、索引同步、乐观锁都一样）。
+  */
 function cellViewOf(cell: Extract<DocNode, { type: 'tableCell' }>, kidsOf: (id: NodeId) => DocNode[]): ViewTableCell {
   const first = kidsOf(cell.id)[0];
   if (!first) return { text: '' };
@@ -2725,9 +2284,9 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
       continue;
     }
     if (node.type === 'listItem') {
-      /* 一项列表**画成一条**：行首标记 + 那句话 + 夹在里面的那一个填写项。
+      /* 一项列表画成一条：行首标记 + 那句话 + 夹在里面的那一个填写项。
          只取各类型的第一子节点（与表格格子同一取舍）：一项里塞两句话在临床上没有意义，
-         而"把所有子节点拼成一句只读文本"会把填写项吞掉 —— 那才是真的数据丢失。 */
+         而"把所有子节点拼成一句只读文本"会把填写项吞掉 —— 那才是真的数据丢失。  */
       const kids = kidsOf(node.id);
       const textNode = kids.find((child): child is Extract<DocNode, { type: 'text' }> => child.type === 'text');
       const fieldNode = kids.find((child): child is Extract<DocNode, { type: 'field' }> => child.type === 'field');
@@ -2742,8 +2301,8 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
         ...(fieldNode
           ? {
             fieldId: fieldNode.id,
-            /* 格子的名字**不是必填的**：列表项那一行的文字往往已经说清"这是体温"
-               （"体温 ____ ℃"），再挂一个兜底名"字段"只会让医生看见两个标签。 */
+            /* 格子的名字不是必填的：列表项那一行的文字往往已经说清"这是体温"
+               （"体温 ____ ℃"），再挂一个兜底名"字段"只会让医生看见两个标签。  */
             ...(fieldNode.tags?.[0]?.display || fieldNode.sourceKey
               ? { label: fieldNode.tags?.[0]?.display ?? fieldNode.sourceKey }
               : {}),
@@ -2783,9 +2342,6 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
       continue;
     }
     if (node.type === 'control') {
-      /* 专科控件：**格由服务端算好下发**（`controlCellsOf`），界面只负责按形状画。
-         标题取控件名 —— 它存在实例化时写下的证据里（`field === 'control'` 那一条），
-         节点自身不带名字（名字属于定义，见 `ControlNode` 的快照纪律）。 */
       const controlName = (node.provenance.evidence ?? []).find((evidence) => evidence.field === 'control')?.valueText;
       items.push({
         kind: 'control',
@@ -2817,9 +2373,9 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
       continue;
     }
     if (node.type === 'image') {
-      /* 图挂在**段落**里（`parentId` 就是那个段落），所以带 `paragraphId`：
+      /* 图挂在段落里（`parentId` 就是那个段落），所以带 `paragraphId`：
          流式视图要靠它把图放回"这句话后面"的位置。少了它，图会全被挪到篇末，
-         而"图紧跟哪句话"恰恰是检查报告里最要紧的信息之一。 */
+         而"图紧跟哪句话"恰恰是检查报告里最要紧的信息之一。  */
       items.push({
         kind: 'image',
         id: node.id,
@@ -2892,12 +2448,6 @@ function nextOrderAfter(session: WriteSession, parentId: NodeId, order: number):
   return Number.isFinite(next) ? (order + next) / 2 : order + 10;
 }
 
-/**
- * 上下移动后该用的 order（取相邻两段之间的中间值）；已经在边界则返回 `null`。
- *
- * 为什么是"中间值"而不是"两段交换"：交换至少要写两次（两条留痕），而医生只做了一个动作。
- * 代价是同一处反复移动会让间距折半，极端情况需要一次重排序；那个操作目前没有，真到那一步再补。
- */
 function orderForMove(
   session: WriteSession,
   parentId: NodeId,
@@ -2920,22 +2470,6 @@ function orderForMove(
   return afterNext === undefined ? next + 10 : (next + afterNext) / 2;
 }
 
-/**
- * 流式编辑的**单个操作 → 内核写调用**（`/api/apply-edits` 的执行体）。
- *
- * 为什么单独抽出来：入参是请求体里的脏数据（前端交回来的 DOM 快照），每个字段都得先判形状再用。
- * 堆在路由里会让"哪种 op 支持什么"看不清，而这段最需要看清的恰恰是边界：
- * 哪几种 op 存在、各自接受什么、什么一定被拒。
- *
- * 四类 op（与 flow-view.js 的产出严格对应）：
- *   · `edit`   文本变了 → 服务端算最小差异（`minimalEditSpan`）再 `replaceRange`，
- *              于是"改一个标点"不会写成"整段重写"，区间外的格式与来源一个字节不动；
- *   · `runs`   文本没变、只有格式变了（加粗/下划线）→ 全区间换 runs。
- *              为什么这条路只用于"文本一字未动"：一旦文本也变了，位置就对不上，
- *              来源与格式都会错位（见 apply-edits 路由里那段说明）；
- *   · `insert` 多出来一段（回车拆段 / 多行粘贴）→ 建段落 + 文本节点；
- *   · `delete` 少了一段（退格合段 / 选中整段删掉）→ 删段落子树。
- */
 function applyFlowOp(
   kind: string,
   op: Record<string, unknown>,
@@ -2983,10 +2517,6 @@ function applyFlowOp(
       return { ok: false, code: 'E_TYPE_MISMATCH', message: `不支持的来源标记：${origin}` };
     }
     const afterNodeId = typeof op.afterNodeId === 'string' && op.afterNodeId !== '' ? op.afterNodeId : '';
-    /* 锚点两档：显式指名的那一段，或**本批刚建出来的**前一段。
-       为什么需要第二档：连按两次回车时，第二、三个新段落当次才被创建，
-       界面上还没有它们的 id，无法指名，只能表达成"接在刚才那个之后"。
-       缺了这一档，症状是"连按两次回车只多出一段"，而第二段静默消失。 */
     const anchor = afterNodeId !== ''
       ? contentOwnerOf(session, afterNodeId)
       : (ctx.lastCreated ? session.document.nodes[ctx.lastCreated] : undefined);
@@ -3054,18 +2584,7 @@ function paragraphPositionOf(doc: DocumentModel, nodeId: NodeId): { paragraphFir
  * WS/T 500 这类结构化文档天然带嵌套章节，若按 order 扁平排序，
  * 子章节会跑到父章节前面（实测："诊断明细"排到了"初步诊断"之前），看起来像章节乱了。
  */
-/**
- * 会被签章门控挡住的内容判定，必须与内核签名门控同一口径
- * （`src/core/session.ts` 的 ① 关键内容 / ①-2 机器绑的标签未确认 / ② AI 内容 / ③ imported 的 text|field）。
- *
- * 为什么把它单独抽出来：界面上的"待确认"提示与内核的门控若各写一套判断，
- * 就会出现"点了确认还签不了"或"看着全绿却被拒"，那种不一致比没有提示更让人失去信任。
- * 实测踩到过：章节摘要原先只统计 keyContent 未确认，AI 与导入内容被漏掉，
- * 于是左栏显示"全部已确认"，点签章却被拒。
- */
 function blocksSigning(node: DocNode): boolean {
-  /* 机器绑的标签**独立于内容确认状态**，所以放在这行早退之前 ——
-     "内容已确认"与"标签已确认"是两件事，内核签章门控也是分档判的（①-2）。 */
   if ((node.unconfirmedTags ?? []).length > 0) return true;
   if (node.humanConfirmed === true) return false;
   if (node.keyContent === true) return true;
@@ -3074,13 +2593,6 @@ function blocksSigning(node: DocNode): boolean {
   return false;
 }
 
-/**
- * 从 `promptId` 反解出产出方式，供界面在建议卡片上标注。
- *
- * 为什么必须有这个标注：医生面对的是一片建议，但"顺着我写的（续写）"与
- * "模型自己写的（草稿）"信任程度不一样，不区分会让人要么全信、要么全不信。
- * 语音同理（`dictation:` 前缀）。
- */
 function modeOf(promptId: string | undefined): string {
   if (!promptId) return 'unknown';
   if (promptId.startsWith('dictation:')) return 'voice';
@@ -3092,11 +2604,11 @@ function modeOf(promptId: string | undefined): string {
 /**
  * 章节摘要（左栏导航的那一行）。
  *
- * `requiredEmpty` = **必备章节还没有内容**。它**不进签章门控** —— 口径见
+ * `requiredEmpty` = 必备章节还没有内容。它不进签章门控 —— 口径见
  * `template/types.ts` 的 `TemplateSection.required`：必备管"这一章在不在"，
  * 不管"写得够不够"（刚开出来的草稿必然还是空的，把它算成"不能签"会让门控变成噪声）。
- * 但必须**看得见**：否则"这一章是必备的"这句话在医生面前从头到尾不出现。
- */
+ * 但必须看得见：否则"这一章是必备的"这句话在医生面前从头到尾不出现。
+  */
 interface SectionSummaryItem {
   id: string;
   title: string;
@@ -3107,24 +2619,16 @@ interface SectionSummaryItem {
   required: boolean;
   requiredEmpty: boolean;
   /**
-   * **章节说明**（模板里写的"这一章要写清什么"）。
+   * 章节说明（模板里写的"这一章要写清什么"）。
    *
-   * 它**不来自文档**，而是每次现查当前那一份模板 —— 因为它是**提示**，不是病历内容：
+   * 它不来自文档，而是每次现查当前那一份模板 —— 因为它是提示，不是病历内容：
    * 提示的权威版本永远是"现在这份模板怎么说的"。这一点与 `required` / `keyContent`
    * 刚好相反（那两个在开文书那一刻就抄进文档、之后与模板再无联系）：责任与结构不能事后被改，
    * 而"该写清什么"改了就该立刻照新的写。
-   */
+    */
   description?: string;
 }
 
-/**
- * 从文档反查"它是按哪一份模板开的"，再取那一份的章节说明。
- *
- * 为什么不另存一处映射：文档的**出处本身就在证据链里**（每个节点带着
- * `template` 证据，`ref` 形如 `<包 id>#<模板 id>@<包指纹>`，见 `engine.ts` 的 `provenanceOf`）——
- * 再造一份"文档 → 模板"的登记表，只会多出一处会与它不一致的地方。
- * 模板已经不在了（被删）就给不出说明：那是对的，提示只能来自存在的东西。
- */
 function sectionHintsOf(doc: DocumentModel): Map<string, string> {
   const hints = new Map<string, string>();
   const sectionNode = Object.values(doc.nodes).find((node) => node.type === 'section');
@@ -3163,8 +2667,8 @@ function sectionSummary(doc: DocumentModel, hints: Map<string, string> = new Map
     const children = (childrenOf.get(parentId) ?? []).filter((node) => node.type === 'section').sort((a, b) => a.order - b.order);
     for (const node of children) {
       const inner = subtree(node.id);
-      /* "这一章有没有内容"只看**承载内容**的节点（text/field）：段落、嵌套章节一个都不算 ——
-         看结构的话，一个空章节会因为"里面有个段落"而显得像写了东西。 */
+      /* "这一章有没有内容"只看承载内容的节点（text/field）：段落、嵌套章节一个都不算 ——
+         看结构的话，一个空章节会因为"里面有个段落"而显得像写了东西。  */
       const hasContent = inner.some((item) => {
         if (item.type === 'text') return (item.runs ?? []).some((run) => run.text.trim() !== '');
         if (item.type === 'field') return item.value !== null && item.value !== undefined && item.value !== '';
@@ -3192,18 +2696,6 @@ function sectionSummary(doc: DocumentModel, hints: Map<string, string> = new Map
   return out;
 }
 
-/**
- * 在整个注册表里找一个控件定义（表达式控件或**专科控件**，不问它在哪个包）。
- *
- * 存在的理由只有一个：界面上「把这一章存成片段」时，那一章可能来自**交付方包**，
- * 而片段要存进本院自建包 —— 片段必须自足（`useExpression` / `useControl` 只允许同包引用，
- * 见 `template-pack.ts` 的 `carryControlsInto`）。控件 id 在同类别里**全局唯一**
- * （`PackRegistry.load` 的 `E_PACK_ITEM_CONFLICT`），所以这个查找没有歧义：
- * 调用方不必告诉"这一章是从哪儿来的"。
- *
- * 两类都认：专科控件的字段可以引用表达式控件，所以"把这一个带过来"之后
- * 还会再问一次"它引用的那个表达式在哪"。
- */
 function controlLookupAcrossPacks(): (controlId: string) => ExpressionDefinition | ControlDefinition | undefined {
   return (controlId) => {
     for (const summary of packRegistry.list('template')) {
@@ -3220,9 +2712,6 @@ function controlLookupAcrossPacks(): (controlId: string) => ExpressionDefinition
 /** 病历树：患者 → 就诊 → 病历（附状态徽标）；活动病历额外展开章节叶子 */
 function buildTree(): unknown[] {
   if (!state.workspace) return [];
-  /* 就诊存的是科室编码，这里是唯一把它翻成名称给人看的地方。
-     字典里查不到的编码（历史数据、导入数据）按编码原样显示 —— 不显示成空白，
-     那样就没人知道"这一行为什么没有科室"。 */
   const { loaded } = departmentsSafe();
   return state.workspace.patients.map((patient) => ({
     patientId: patient.patientId,
@@ -3285,10 +2774,10 @@ function placementCandidatesOf(session: WriteSession, limit = 200): Array<{ node
 /**
  * 把请求里的"数据元标签"解析成内核认的标签（合法则返回，否则 `null`）。
  *
- * 与配置层（`validatePlacementConfig` 里 structureMap 的校验）用**同一份清单**（`TAG_SYSTEMS`）：
+ * 与配置层（`validatePlacementConfig` 里 structureMap 的校验）用同一份清单（`TAG_SYSTEMS`）：
  * 两处各写一份，就会出现"配置存得进去、采纳时却被拒"或反过来的分歧，
  * 而那种分歧只有医生点到那一条时才会暴露。
- */
+  */
 function dataElementTagOf(value: unknown): DataElementTag | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const tag = value as { system?: unknown; code?: unknown; display?: unknown };
@@ -3307,45 +2796,23 @@ function sameDataElement(a: DataElementTag, b: DataElementTag): boolean {
   return a.system === b.system && a.code === b.code;
 }
 
-/**
- * 状态投影：**同一份快照，两种"投给谁看"的口径**。
- *
- * 为什么需要它：`/api/state` 与**每一个写响应**都把这份状态发给页面，而两个页面要的
- * 不是同一批字段 —— 医生端读其中 41 个，管理端只读 12 个。于是"每次响应都顺手下发
- * 一遍对方要的数据"成了一种默认，而默认值决定"忘了声明"会怎样。
- *
- * 参数**默认取医生端**（fail-closed 方向，与 `authorize()` 同一取舍）：新增一处响应
- * 忘了写口径时，它只下发医生端投影，而不会顺手把管理侧数据发出去；管理端必须走到
- * `stateFor()` 判定为管理端的那条路（身份具备 `config.read`）。
- *
- * `scope` 随响应下发：形状自我声明，界面与用例据此判定"我拿到的是哪一份"，
- * 而不是靠"某个字段在不在"去反推。
- */
 const DOCTOR_HIDDEN_STATE_KEYS = [
-  /* ① 管理端专有：医生端一次都不读，却每次响应都跟着走 */
   'templateCatalog', 'contextFields', 'expressionFunctions', 'departments', 'docTypes',
-  /* ② 诊断用：两侧界面都不读。`invariants` 尤其在这里 —— 它是 cloneDoc + 全量
-     文档校验（见 `session.verifyInvariants`），今天在**每一个响应**里都算一遍，
-     而医生端拿到它一次都没读过；移出医生端投影等于顺手修掉这条热路径开销。 */
   'expressionControls', 'database', 'invariants',
-  /* ③ 部署参数镜像：**整块**不进医生端（医生端只有死代码读过它们，见 ui.js 的
-     `renderPlacementPanel` / `renderSignPanel`，两者都不在 `renderAll()` 的调用链上）。
-     落位策略与签名后端都是"这台机器怎么接"，不是"医生此刻要做什么"；
-     签章能不能用由内核在按下那一刻判（`E_SIGN_NOT_CONFIGURED`），不靠前端预告。 */
   'placement', 'signBackend',
   /* `activeDocId` 曾经也在这一列里，被用例挡了回来（B1 断言"默认打开第一份病历"，
-     它读到 undefined）。这条纠正值得留在这里：`activeDocId` 是**工作区当前打开哪份
-     文书**，属共用口径 —— 医生端只是恰好从 `doc.docId` 读它，不代表它不是医生端的事。
-     投影表的判据是"这一格是谁的事"，不是"今天有没有人读它"。 */
+     它读到 undefined）。这条纠正值得留在这里：`activeDocId` 是工作区当前打开哪份
+     文书，属共用口径 —— 医生端只是恰好从 `doc.docId` 读它，不代表它不是医生端的事。
+     投影表的判据是"这一格是谁的事"，不是"今天有没有人读它"。  */
 ] as const;
 
 /**
- * 响应体里的状态：**按调用者身份给投影**。
+ * 响应体里的状态：按调用者身份给投影。
  *
  * 判据只有一条：这个身份能不能读部署参数（`config.read`：管理员与质控员可以）。
  * "你看见什么取决于你是谁"与本仓库 `authorize()` 的取舍一致；不按路由判，是因为
  * `/api/reset`（管理端权限、医生端触发）这类路由会立刻把按路由判的口径打破。
- */
+  */
 function stateFor(req: IncomingMessage): Record<string, unknown> {
   const resolved = resolvePrincipal(req);
   const admin = resolved.ok && can(resolved.principal.role, 'config.read');
@@ -3372,7 +2839,7 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
   /* 文书类型同理读一次：「新建文书」的类型下拉要用它，模板列表将来也要显示类型名 */
   const docTypes = docTypesSafe();
   /* 四个配置视图各算一次：同一个字段在一次响应里出现两个口径，是"同一份配置读两遍"
-     最常见的后果。管理端拿全量，医生端只拿其中的**可用性**（见下面各字段处的说明）。 */
+     最常见的后果。管理端拿全量，医生端只拿其中的可用性（见下面各字段处的说明）。  */
   const modelView = describeModelConfig(modelConfigNow());
   const captureView = describeCaptureConfig(captureConfigNow());
   const signView = describeSignConfig(signConfigNow());
@@ -3387,8 +2854,6 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
     previsitAccessView = { error: (err as Error).message };
   }
 
-  /* 先整份算出来（`full`），末尾再按 `scope` 投影：投影是**一份**纪律，
-     写在返回处比散在 49 个字段上各自判断更难写错。 */
   const full: Record<string, unknown> = {
     activeDocId: doc.docId,
     patient: {
@@ -3401,10 +2866,10 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
     encounter: {
       visitId: doc.encounter?.visitId ?? '',
       visitType: doc.encounter?.visitType ?? '',
-      /* 就诊科室：**编码给判定、名称给人看**。
+      /* 就诊科室：编码给判定、名称给人看。
          这里要归一：字典上线前病历里存的可能是名称（"呼吸内科"），而那些病历
          不会因为写法改了就被回写（改病历要留 rev 与审计）。归一只发生在读取时。
-         字典里查不到的值按原样给：不拿别的名称顶上 —— "字典里没这个科室"必须看得见。 */
+         字典里查不到的值按原样给：不拿别的名称顶上 —— "字典里没这个科室"必须看得见。  */
       dept: normalizeDepartmentCode(departments.loaded, doc.encounter?.deptCode) ?? '',
       deptName: departmentNameOf(departments.loaded, normalizeDepartmentCode(departments.loaded, doc.encounter?.deptCode))
         ?? doc.encounter?.deptCode
@@ -3420,10 +2885,8 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
     },
     /* 预问诊（患者候诊时自填）：只下发"有没有、几条、每条有没有落点"。
        原文不进 state 的理由不是省流量，而是口径：state 只装"当前这一屏要渲染的东西"；
-       而且预问诊**不属于这份文书**，把它挂进文书的 state 会让人以为它已经是病历的一部分。 */
+       而且预问诊不属于这份文书，把它挂进文书的 state 会让人以为它已经是病历的一部分。  */
     previsit: (() => {
-      /* 接诊时读一次，之后走缓存（见 `previsitOfPatient`）：
-         这一屏每次刷新都读库，等于把一份敏感内容反复解密几十次，而它在一整次接诊里不会变。 */
       const read = previsitOfPatient(doc.patient.patientId);
       if (!read.ok) return { ok: false, code: read.code, message: read.message, record: null, items: [] };
       const record = read.record;
@@ -3474,11 +2937,6 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
       mode: modeOf(suggestion.promptId),
       status: suggestion.status,
       modified: suggestion.modified === true,
-      /* 改动幅度（0~1）与它的**分档**：把三级归因落到**每一条**上 ——
-         指标面板回答"整体改得轻还是重"，这两格回答"这一条被改成了什么样"。
-         `null` = 未采纳 / 无记录，界面据此不显示标签（**不显示 ≠ 原样采纳**，
-         见 `SuggestionAttribution` 第 2 条边界）。
-         分档在**服务端**算（`editBandOf`）：阈值只在内核一处，前端不另定一份 */
       editRatio: suggestion.editRatio ?? null,
       editBand: suggestion.editRatio === undefined ? null : editBandOf(suggestion.editRatio),
       threshold: session.document.nodes[suggestion.targetNodeId]?.keyContent === true ? THRESHOLDS.key : THRESHOLDS.general,
@@ -3501,21 +2959,17 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
       createdAt: item.createdAt,
     })),
     annotationCounts: session.annotationCounts(),
-    /* 形式类质控规则清单：界面要能展示"内置了哪些规则"，而不是让医生猜为什么弹了这条。
-       现在按已装载并启用的规则下发，关掉一条，这里与其后的扫描同时少一条，
-       而不是"界面还列着、实际已经不跑了"。 */
     formRules: listFormRules(rulesFromRegistry(packRegistry, conditionLibrary())),
     /* 知识资产包：载的是哪一版（内容指纹）、实际生效的是什么（生效指纹）。
        两个指纹分开报，否则"换了包"与"只是关了条规则"在界面上长得一样。
        它不进文档、不进签名：与任何一份病历无关，是部署参数。 */
     knowledgePacks: {
       packs: packRegistry.list(),
-      /* 规则目录带上标题与级别（通用层不认识这些字段，见 `qcRuleCatalog`） */
       rules: qcRuleCatalog(),
-      /* **本院自建包**：界面上新建的规则与判定方式都落这一份（`addRule` 的 `?? customRulePackBase()`）。
+      /* 本院自建包：界面上新建的规则与判定方式都落这一份（`addRule` 的 `?? customRulePackBase()`）。
          界面需要它才能回答"这条规则能引用哪几条判定方式" —— 引用只在本包内解析，
          而下拉必须只列本包的那几条，否则会摆出一堆"选了存不下"的选项。
-         由服务端下发（界面不写死包 id：那是部署事实，不是界面约定）。 */
+         由服务端下发（界面不写死包 id：那是部署事实，不是界面约定）。  */
       customPackId: CUSTOM_RULE_PACK_ID,
       contentFingerprint: packRegistry.contentFingerprint(),
       effectiveFingerprint: packRegistry.effectiveFingerprint(),
@@ -3528,24 +2982,18 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
         error: packStoreError,
       },
     },
-    /* 能编辑哪些"判定方式"、各自能配什么参数：管理后台「规则库」照它生成下拉与参数表单。
-       **前端不手抄一份谓词清单** —— 参数规格只在上游写一次（见 `predicates.ts`），
-       两边各写一份的后果是"界面能选、引擎不认"，而它只会在有人真的点了它的时候才暴露。 */
     qcPredicates: qcPredicateCatalog(),
     /* 自定义条件（`field-condition`）的构造器规格：可用的字段、算子与取值形态。
-       与 `qcPredicates` 同一条纪律 —— **前端不手抄一份字段表或算子表**，
-       抄来的那份与内核不一致时，表现是"界面能拼、引擎不认"，而它只会在有人真的点了它的时候才暴露。 */
+       与 `qcPredicates` 同一条纪律 —— 前端不手抄一份字段表或算子表，
+       抄来的那份与内核不一致时，表现是"界面能拼、引擎不认"，而它只会在有人真的点了它的时候才暴露。  */
     qcCondition: conditionCatalog(),
-    /* 判定方式（具名条件）：哪几条、各自判什么、**被哪几条规则引用**（跨包）。
+    /* 判定方式（具名条件）：哪几条、各自判什么、被哪几条规则引用（跨包）。
        引用面必须在保存前就摆在人面前 —— 改一条判定方式会让所有引用它的规则一起变，
-       而"一起变"这件事只能在事后从规则的行为上被发现的话，它就成了一次静默改动。 */
+       而"一起变"这件事只能在事后从规则的行为上被发现的话，它就成了一次静默改动。  */
     qcConditions: qcConditionCatalog(),
     /* 库那一侧的状态（库里有没有、最近谁改的）：界面据此说"空就是空"还是"读不出来" ——
        两件事长得一样、但一件要人去建、另一件要人去查。 */
     qcConditionLibrary: describeConditions(conditionState),
-    /* 算子插件（T3）：这台机器上装了哪些、各自的算子、以及**装不上的那些为什么**。
-       下发（而不是只打日志）的理由：插件带来的是算子，界面必须能回答
-       "这台机器上为什么没有那个算子" —— 只打日志的话，答案躺在没人看的启动输出里。 */
     qcPlugins: {
       root: QC_PLUGIN_ROOT,
       loaded: QC_PLUGIN_REPORT.loaded,
@@ -3556,15 +3004,15 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
        模板同样是部署参数（装在同一个注册表里）：换模板不改任何已有病历。 */
     templates: listTemplates(packRegistry, { deptCode: doc.encounter?.deptCode ?? '' }),
     expressionControls: listExpressionControls(packRegistry),
-    /* 模板条目目录（**含已停用的**）：管理后台「模板」页据此管控哪份文书能开，
-       与 `knowledgePacks.rules` 是同一口径 —— 只列启用中的话，"没装"与"被停用"分不开。 */
+    /* 模板条目目录（含已停用的）：管理后台「模板」页据此管控哪份文书能开，
+       与 `knowledgePacks.rules` 是同一口径 —— 只列启用中的话，"没装"与"被停用"分不开。  */
     templateCatalog: templateCatalogOf(packRegistry).map((item) => ({
       ...item,
       /* 科室同时给编码与名称：界面显示名称、保存传编码，两件事都不需要前端再查一次字典 */
       departmentNames: item.departments.map((code) => departmentNameOf(departments.loaded, code) ?? code),
     })),
-    /* 章节片段的"能插哪几段"清单（**只列启用中的**：这是给"插进一份新文书"用的，
-       与 `templateCatalog` 那份管控视图的分工一样 —— 管控要看得见被停用的，使用侧只看能用的） */
+    /* 章节片段的"能插哪几段"清单（只列启用中的：这是给"插进一份新文书"用的，
+       与 `templateCatalog` 那份管控视图的分工一样 —— 管控要看得见被停用的，使用侧只看能用的）  */
     fragments: listFragments(packRegistry),
     /* 科室字典：模板配科室、就诊科室名的显示都靠它；`source: 'empty'` 要如实显示
        —— "还没建科室"与"建了但没有产科"在界面上必须长得不一样 */
@@ -3573,7 +3021,7 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
        医生端不读，已列进 `DOCTOR_HIDDEN_STATE_KEYS`（否则每次响应都白带一份）。 */
     docTypes: { ...describeDocTypes(docTypes.loaded), error: docTypes.error },
     /* 模板能"从系统带入"哪些字段：填写项取值路径的下拉与表达式构造器的 `ctx` 选项
-       共用这一份（**只有一处**，三处各写一份中文名迟早对不上） */
+       共用这一份（只有一处，三处各写一份中文名迟早对不上）  */
     contextFields: CONTEXT_FIELDS.map((field) => ({ path: field.path, label: field.label, group: field.group })),
     /* 表达式构造器的"积木"：封闭函数表（含参数个数与人话说明）。
        函数表在核心里只有一份，界面据此生成参数槽 —— 前端不再手抄一份函数清单，
@@ -3590,20 +3038,15 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
     derivedCount: Object.values(doc.nodes).filter((node) => node.type === 'field' && node.dataType === 'expression').length,
     /* 模型接入现状。
        管理端：全量（脱敏后的配置视图，密钥只报"是否就位"，见 ai/model-config.ts）。
-       医生端：**只留产出方** —— `modelId` 要写进留痕、`format` 决定显示"离线模板"
+       医生端：只留产出方 —— `modelId` 要写进留痕、`format` 决定显示"离线模板"
        还是"在线模型"，两者都属于"这条建议是谁产的"。服务地址与配置来源属部署参数：
        画在医生页面上没有任何用途，却扩大了暴露面（原实现就把 `endpoint` 打印在
-       AI 助手面板的"产出方"那一行上）。 */
+       AI 助手面板的"产出方"那一行上）。  */
     model: wantAdmin
       ? modelView
       : { modelId: modelView.modelId, format: modelView.format },
-    /* 落位接入现状（**仅管理端**）：策略、候选范围、规则表与上限 */
+    /* 落位接入现状（仅管理端）：策略、候选范围、规则表与上限  */
     placement: placementView,
-    /* 采集接入现状。
-       管理端：全量（地址 / 超时预算 / 分片参数 / 厂商表 / 凭据就位状态）。
-       医生端：**可用性与告知义务** —— `configured` + `missing` 让"入口为什么不能用"
-       说得出来（「未配置」与「配了但不通」必须长得不一样），`retainAudio` 回答"音频会不会
-       留存"（病房里的人有权知道），`segment` 是采集过程本身要用的分片参数。 */
     capture: wantAdmin
       ? captureView
       : {
@@ -3614,31 +3057,31 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
       },
     /* 落位候选节点：语音页签据此为每段渲染"落点"下拉 */
     placementCandidates: placementCandidatesOf(session),
-    /* 电子签名后端配置视图（**仅管理端**，不含密钥值）。
+    /* 电子签名后端配置视图（仅管理端，不含密钥值）。
        与 `sign`（签名状态：算法/指纹/验签结论）区分：那个是"这份病历签了没有"，
        这个是"用谁来签"。医生端不需要它 —— 签章能不能用，由内核在按下那一刻判
-       （`E_SIGN_NOT_CONFIGURED`），不靠前端预告。 */
+       （`E_SIGN_NOT_CONFIGURED`），不靠前端预告。  */
     signBackend: signView,
-    /* 预问诊接入（机对机密钥）：**只给管理端**。
+    /* 预问诊接入（机对机密钥）：只给管理端。
        医生端不需要它 —— 密钥对不对得上与"看这份表单"无关，而"有没有配密钥"
-       本身是攻击面信息（知道没配，就知道可以随便写）。 */
+       本身是攻击面信息（知道没配，就知道可以随便写）。  */
     previsitAccess: wantAdmin ? previsitAccessView : null,
     /* 受控阅读的授权源（demo 替身 / 院内平台公钥）。
        管理端：全量（授权源地址 / 公钥是否已配 / 期望指纹 / 配置来源）。
        医生端：`configured`（区分"未配置 = 拒绝一切凭据"与"配了但不匹配"，两者排查
-       方向完全不同）+ `trustedFingerprints`（**当前生效的信任集**，核对凭据身份要用）。
-       与 `reading`（授权清单与阅读记录）分开：那是"有哪些授权、读了什么"，这是"谁有权发授权"。 */
+       方向完全不同）+ `trustedFingerprints`（当前生效的信任集，核对凭据身份要用）。
+       与 `reading`（授权清单与阅读记录）分开：那是"有哪些授权、读了什么"，这是"谁有权发授权"。  */
     readingAuthority: wantAdmin
       ? readingView
       : { configured: readingView.configured, trustedFingerprints: readingView.trustedFingerprints },
     /* 语音转写：只留"最近一次"用于界面复显；转写本身不是文档内容 */
     dictation: entry.lastDictation,
-    /* 采集的**过程**（录音指示 / 计时 / 逐段进度）：演示采集由服务端驱动，过程只存在服务端 */
+    /* 采集的过程（录音指示 / 计时 / 逐段进度）：演示采集由服务端驱动，过程只存在服务端  */
     captureRun: entry.lastCapture,
     /* 跨文书一致性：只留最近一次结果（纯函数可随时重算，但"生成待办"要引用同一批问题） */
     consistency: entry.lastConsistency,
-    /* 就诊时间轴：与一致性检查同一处置 —— 只留"最近一次"，因为它是**读**出来的结论，
-       重算只是再算一遍同一件事（数据没变结果不会变） */
+    /* 就诊时间轴：与一致性检查同一处置 —— 只留"最近一次"，因为它是读出来的结论，
+       重算只是再算一遍同一件事（数据没变结果不会变）  */
     visitTimeline: entry.lastVisitTimeline,
     visitCompare: entry.lastVisitCompare,
     /* 出院汇总：最近一次读出来的派生计划（含缺口）。界面据此渲染，生成建议时也按它提交 */
@@ -3654,10 +3097,10 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
       rejected: group.rejected,
     })),
     metrics,
-    /* 三级归因（原样 / 微改 / 大改）与 `metrics` **并列**下发，界面不自己算：
+    /* 三级归因（原样 / 微改 / 大改）与 `metrics` 并列下发，界面不自己算：
        "改了多少"的口径只在内核一处（`editRatioOf`）——
        前端另算一份的表现是"同一份数据在两张报表上不一样"，而报表正是拿来比版本好坏的。
-       它单独一栏而不是并进 `metrics`：两者回答不同问题（有没有被采纳 / 采纳后改了多少）。 */
+       它单独一栏而不是并进 `metrics`：两者回答不同问题（有没有被采纳 / 采纳后改了多少）。  */
     attribution: session.getSuggestionAttribution(),
     machine: {
       stale: status.stale,
@@ -3743,7 +3186,6 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
       destructiveGuarded: ['workspace.reset'],
       loginEndpoint: '/api/session',
     },
-    /* 旁挂数据落盘状态：冲突时界面必须给出出路（见 `/api/reload-sidecars`） */
     sidecar: {
       conflict: entry.sidecarConflict === true,
       persisted: entry.sidecarBaseline !== 'unknown' && entry.sidecarBaseline !== undefined,
@@ -3757,8 +3199,8 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
        界面上只列属于当前这份文档的授权；全局索引仍保留全部（跨文档也能正确判"串档"）。 */
     reading: {
       /* 落库现状：授权登记重启后还在不在，是能被验证的事实，不该靠"我以为它会存"。
-         `total` 直接问库（而不是数内存 Map）：两者不一致时，界面必须显示**库里的数**，
-         否则"登记没写进去"会被内存里那份索引盖住 —— 那正是这条视图存在的意义。 */
+         `total` 直接问库（而不是数内存 Map）：两者不一致时，界面必须显示库里的数，
+         否则"登记没写进去"会被内存里那份索引盖住 —— 那正是这条视图存在的意义。  */
       persistence: (() => {
         const counts = countReadingGrants(STORAGE.db);
         return { table: 'reading_grants', error: READING_GRANTS_ERROR, total: counts.total, revoked: counts.revoked };
@@ -3799,8 +3241,6 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
     },
     /* 最近一次审计报告摘要（完整报告在卡片里给：state 不必背着整份报告） */
     lastAudit: entry.lastAudit,
-    /* 不变量自检只在管理端投影里算：它是 cloneDoc + 全量文档校验，而医生端不读它
-       （见 `DOCTOR_HIDDEN_STATE_KEYS` 第 ② 条） */
     invariants: wantAdmin ? session.verifyInvariants() : null,
   };
 
@@ -3812,15 +3252,8 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
   return { ...projected, scope: 'doctor' };
 }
 
-/* --------------------------------- 动作 --------------------------------- */
-
 /* ------------------- 旁挂数据的持久化（AI 建议 / 质控注解） ------------------- */
 
-/**
- * 部署参数类文件：重置工作区时不清掉它们（见 `clearPersistedState`）。
- * 它们是配置而不是工作区数据，理由是 `ai/model-config-store.ts` 文件头那一条：
- * 混在一起，"重置工作区"会把配置一起清掉，现场表现是"重置后模型/落位悄悄变了"。
- */
 const CONFIG_FILES = new Set<string>([
   MODEL_CONFIG_FILE,
   MODEL_KEY_FILE,
@@ -3830,24 +3263,7 @@ const CONFIG_FILES = new Set<string>([
   READING_AUTHORITY_FILE,
 ]);
 
-/**
- * 知识资产包注册表（出厂装配：内置规则包）。
- *
- * 它是部署参数，不是工作区数据，换包不该改动任何一份病历（见 `knowledge/pack.ts` 文件头），
- * 所以它既不进工作区快照、也不随"重置工作区"清空。
- *
- * 装载与开关都走 `PackRegistry` 的校验路径（通用校验 → 类别专有校验 → 冲突判定 → 入库）：
- * 内置包不享受任何后门，否则"包是数据"这条纪律就只剩一半。
- */
 const packRegistry = createEmptyPackRegistry();
-/**
- * 样例包目录：`samples/packs/*.json`。
- *
- * 它不是一个"隐式出厂包"，服务不会自动装载它；只有人点了「载入示例包」
- * （`POST /api/knowledge-pack-load` 带 `{ sample: true }`）才会读。
- * 差别很重要：自动装载会让"库是空的"这个事实永远看不见，
- * 而空库意味着模板与质控规则都不可用（见 `default-registry.ts` 文件头）。
- */
 const SAMPLE_PACK_DIR = join(ROOT, 'samples', 'packs');
 
 /**
@@ -3880,13 +3296,13 @@ function readSamplePacks(): unknown[] {
  */
 /* ------------------------------ 判定方式库（库级资产） ------------------------------
 
-   判定方式**不属于任何包**：全院一份，存在 `config.qc-conditions`（`condition-store.ts`）。
+   判定方式不属于任何包：全院一份，存在 `config.qc-conditions`（`condition-store.ts`）。
    任何包的规则都能引用它，改一处、所有引用它的规则一起变 —— 这是它从"包内容"搬出来的原因
    （早先那个模型里，交付方包里的规则永远用不上具名判定方式）。
 
-   读的顺序有讲究：**必须在打开包存储之前**。装包时校验规则引用，用的就是这份库
+   读的顺序有讲究：必须在打开包存储之前。装包时校验规则引用，用的就是这份库
    （`packValidatorForWithConditions`）—— 反过来的话，第一次装载会按"库里一条判定方式都没有"
-   判一遍，引用库里的规则会被误拒。 */
+   判一遍，引用库里的规则会被误拒。  */
 
 /** 库读不起来时它抛错、进程起不来：那比"当成空库继续"安全（后者会让引用它的规则集体悬空） */
 let conditionState: LoadedConditions = loadConditions(CONFIG_KV);
@@ -3897,12 +3313,12 @@ function conditionLibrary(): ConditionLibrary {
 }
 
 /**
- * 包校验器：**带上判定方式库**。
+ * 包校验器：带上判定方式库。
  *
  * `packValidatorFor` 是纯函数（只看包自己），而规则可以引用库里任何一条 ——
  * 所以这里把它包一层，把"当前库"带进去。写包、装载、自测走的是同一个内核函数
  * （`validateRulePack`），差别只在这份表。
- */
+  */
 function packValidatorForWithConditions(kind: PackKind): ((pack: Pack) => void) | undefined {
   const base = packValidatorFor(kind);
   if (!base || kind !== 'rule') return base;
@@ -3929,22 +3345,10 @@ if (packStoreError) {
       `${packStoreReport?.packs.map((pack) => `${pack.packId}（${pack.kind}·${pack.itemCount} 条）`).join('、') || '—'}（表 ${packStoreReport?.tables.join('/')}）`,
   );
   if (packStoreReport?.source === 'empty') {
-    /* 空库必须说清后果：没有包 = 没有模板、没有质控规则。
-       不说的话，现场会把"质控跑了但是 0 命中"当成"没问题"。 */
     console.log('              → 包只有一条进来的路：`POST /api/knowledge-pack-load`（管理后台「质控」页有「载入示例包」按钮）。');
   }
 }
 
-/**
- * 出厂种子判定方式：**只播一次**，播进判定方式库。
- *
- * 与科室字典 / 文书类型同一条纪律（见 `seedDepartmentsOnce`）：用一条记账标记记住"播过",
- * 于是"我们把出厂那几条删了"与"这个库还没播过"分得开 —— 删掉之后重启不会自己长回来
- * （长回来又没人知道是谁加的，比没有更糟）。
- *
- * 播完之后它们与界面上新建的判定方式**完全同级**：可改可删（被规则引用时拒删），
- * 改了就是改了。出厂口径要更新，只能由部署方自己动手（这正是"判定方式归本院维护"的代价）。
- */
 function seedConditionsOnce(): void {
   if (conditionsSeeded(CONFIG_KV)) return;
   const present = new Set(conditionState.items.map((item) => String(item.itemId)));
@@ -3953,8 +3357,8 @@ function seedConditionsOnce(): void {
     try {
       conditionState = saveConditions(CONFIG_KV, [...conditionState.items, ...missing], 'demo-seed');
     } catch (err) {
-      /* 失败就**不落标记**：下次启动会再试一次，而原因在这里看得见。
-         反过来（先落标记再写库）会让一次失败变成"这几条永远不出现"，且没有任何痕迹。 */
+      /* 失败就不落标记：下次启动会再试一次，而原因在这里看得见。
+         反过来（先落标记再写库）会让一次失败变成"这几条永远不出现"，且没有任何痕迹。  */
       console.error(`[判定方式] 出厂种子未能写进判定方式库（下次启动会再试）：${(err as Error).message}`);
       return;
     }
@@ -3967,17 +3371,6 @@ function seedConditionsOnce(): void {
 
 seedConditionsOnce();
 
-/**
- * 一次性迁移：把**还留在包里**的判定方式搬进判定方式库。
- *
- * 为什么需要它：判定方式曾经是包内容（出厂种子那时写进自建包 `doc.rule.custom` 那一版）。
- * 定义留在包里也仍然能跑（`resolvedConditionsOf` 是"库优先、包内兜底"），
- * 但那样会出现"同一个编码在库与包里各有一份定义"，而界面上、编译时说话的是**库里的那一份**
- * —— 于是"我改了口径怎么没生效"会变成一个查不出来的问题。搬完包里就不再有它。
- *
- * 搬运口径：**库里的那份为准**（同码时包内那份被丢弃并报出来）。删包内条目走 `writePack()`：
- * 与界面上"删一条判定方式"同一条写路径、同一条审计、同样的校验。
- */
 function migratePackConditionsOnce(): void {
   if (CONFIG_KV.read<boolean>(CONDITION_MIGRATION_KEY) === true) return;
   const libraryIds = new Set(conditionState.items.map((item) => String(item.itemId)));
@@ -4002,7 +3395,7 @@ function migratePackConditionsOnce(): void {
       try {
         conditionState = saveConditions(CONFIG_KV, [...conditionState.items, ...fresh], 'demo-migrate');
       } catch (err) {
-        /* 搬不进库就**不动包**：定义至少要留下一份（包内那份继续生效，库优先不会遮住它） */
+        /* 搬不进库就不动包：定义至少要留下一份（包内那份继续生效，库优先不会遮住它）  */
         console.error(`[判定方式] 包「${pack.packId}」里的判定方式搬进库失败（这次不删包里那份）：${(err as Error).message}`);
         continue;
       }
@@ -4010,9 +3403,9 @@ function migratePackConditionsOnce(): void {
     }
     const rest = pack.items.filter((item) => (item as { itemType?: unknown }).itemType !== 'condition');
     if (rest.length === 0) {
-      /* 这个包里**只有判定方式**（方案 B 时代自建包就是这样）：摘完之后它没有条目了。
+      /* 这个包里只有判定方式（方案 B 时代自建包就是这样）：摘完之后它没有条目了。
          空包过不了校验（`E_PACK_STORE_BAD_CONTENT`：空包几乎总是导出/拼装出错），
-         所以这里不是"写一个空包"，而是**把空包删掉** —— 与界面上删掉最后一条时同一处置。 */
+         所以这里不是"写一个空包"，而是把空包删掉 —— 与界面上删掉最后一条时同一处置。  */
       const removed = deletePack({ registry: packRegistry, db: STORAGE.db, packId: pack.packId });
       packStoreReport = removed.report;
       if (!removed.ok) {
@@ -4051,23 +3444,23 @@ migratePackConditionsOnce();
 /* ---------------- 内涵类质控：规则清单与引擎（都在库里） ---------------- */
 
 /**
- * 规则清单与引擎配置**落库**（`config.qc-content.rules` / `.engine` / `.token`），
- * 不再由环境变量给（原先：`L0_QC_CONTENT_RULES_FILE` 指向一个**库外的** JSON 文件，
+ * 规则清单与引擎配置落库（`config.qc-content.rules` / `.engine` / `.token`），
+ * 不再由环境变量给（原先：`L0_QC_CONTENT_RULES_FILE` 指向一个库外的 JSON 文件，
  * 以及 `L0_QC_CONTENT_ENGINE` / `_URL` / `_TOKEN` / `_ID`）。
  *
  * 前三条坏处与其它部署参数相同（备份带不走、改了没重启看不出来、凭据漏进进程环境），
- * 这里另有**一条只有它有**的：判定标准原先在库外的某个路径上，于是
+ * 这里另有一条只有它有的：判定标准原先在库外的某个路径上，于是
  * "质控在跑、库里一条规则都没有"与"质控跑了、0 命中"在界面上长得一模一样。
- * 落库之后，规则清单成了**备份的一部分** —— 恢复一份数据库就是恢复一整套质控能力。
+ * 落库之后，规则清单成了备份的一部分 —— 恢复一份数据库就是恢复一整套质控能力。
  *
- * 规则清单**不放在代码里、也不给默认清单**：它们来自临床标准 / 专科共识，本程序一条都不发明。
+ * 规则清单不放在代码里、也不给默认清单：它们来自临床标准 / 专科共识，本程序一条都不发明。
  * 清单为空是合法状态，那时接口报"无规则/未接入"，而不是假装跑过。
- */
+  */
 function qcContentNow(): LoadedQcContentConfig {
   return loadQcContentConfig(CONFIG_KV);
 }
 
-/** 读质控配置；读不出来时**不当作"未接入"**：把原因带出来，界面才能区分"没配"与"读不出" */
+/** 读质控配置；读不出来时不当作"未接入"：把原因带出来，界面才能区分"没配"与"读不出"  */
 function qcContentSafe(): { content: LoadedQcContentConfig | null; error: string | null } {
   try {
     return { content: qcContentNow(), error: null };
@@ -4093,12 +3486,12 @@ function contentEngineOf(content: LoadedQcContentConfig): { engine: ContentQcEng
     };
   }
   if (kind === 'model') {
-    /* **模型形态**：接的就是管理后台「能力配置」里那一个模型 —— 不需要第二份凭据、第二个地址。
-       代价是同一份配置既用于写病历、也用于内涵质控，所以在状态里两者**分开显示**
+    /* 模型形态：接的就是管理后台「能力配置」里那一个模型 —— 不需要第二份凭据、第二个地址。
+       代价是同一份配置既用于写病历、也用于内涵质控，所以在状态里两者分开显示
        （引擎自报的 id 是 `qc-content-model`，与写病历那条路区分得开）。
 
-       模型没接入（offline / 无地址）时**不构造它**，而是明确报"不可用"：
-       构造一个跑起来什么都不判的引擎，会让"内涵质控 0 命中"把"根本没接"顶替掉。 */
+       模型没接入（offline / 无地址）时不构造它，而是明确报"不可用"：
+       构造一个跑起来什么都不判的引擎，会让"内涵质控 0 命中"把"根本没接"顶替掉。  */
     const loaded = modelConfigNow();
     if (loaded.config.format !== 'openai-compatible' || !loaded.config.endpoint) {
       return {
@@ -4130,17 +3523,6 @@ function contentEngineOf(content: LoadedQcContentConfig): { engine: ContentQcEng
   }
 }
 
-/**
- * 某份文书所在就诊的全部文书（类型 + 成文时刻），供跨文书质控使用。
- *
- * 为什么由服务端补：一份文书从自己身上看不到别的文书，这是本次质控里唯一
- * 需要"文书之外、但仍在系统之内"的事实。拿不到就返回空数组会让频次类规则静默通过，
- * 所以调用点传的是 `visitDocsOf(...)` 的结果（空数组 = 明确"这次就诊只有自己"
- * 或"取不到"，两种都会让规则报"未判定"而不是"没问题"）。
- *
- * 只统计已加载的文书：未加载的文书读不到 `docType.code` 与 `createdAt`，
- * 与其猜，不如让它不出现在清单里，界面上的"未判定"会把这件事说出来。
- */
 function visitDocsOf(docId: string): QcVisitDoc[] | undefined {
   const workspace = state.workspace;
   if (!workspace) return undefined;
@@ -4166,20 +3548,13 @@ function visitDocsOf(docId: string): QcVisitDoc[] | undefined {
 }
 
 /**
- * 某份文书所在就诊的**整条线**：就诊本身（就诊号 / 类型）+ 该就诊下的全部文书。
+ * 某份文书所在就诊的整条线：就诊本身（就诊号 / 类型）+ 该就诊下的全部文书。
  *
  * 与 `visitDocsOf` 的差别在"缺东西时怎么办"：
- *   · `visitDocsOf` 服务的是**判定**，缺一份就整份清单都不给（否则会把"没加载"算成"没写"）；
- *   · 这里服务的是**呈现**，读不到的那一份仍要出现在轴上（标成"时间无法解析"），
+ *   · `visitDocsOf` 服务的是判定，缺一份就整份清单都不给（否则会把"没加载"算成"没写"）；
+ *   · 这里服务的是呈现，读不到的那一份仍要出现在轴上（标成"时间无法解析"），
  *     否则轴上会凭空少一个点 —— 而"少一个点"看上去就是"这条线本来就是连的"。
- */
-/**
- * 同一份文书所属的**患者**及其全部就诊。
- *
- * 为什么单独写一个：跨次对比的边界是"同一位患者"，而 `visitLineOf` 只到"这次就诊"。
- * 拿就诊边界去做跨次，等于把"同患者另一次就诊"当成别人 —— 对比永远空着，
- * 而且从界面上看像是"没有历史"，不像"查错了范围"。
- */
+  */
 function patientLineOf(docId: string): { patientId: string; patient: WorkspacePatient } | undefined {
   for (const patient of state.workspace?.patients ?? []) {
     for (const visit of patient.visits) {
@@ -4214,13 +3589,6 @@ function sectionIdOf(doc: DocumentModel, nodeId: NodeId): string | null {
   return null;
 }
 
-/**
- * 把一份已装载的文书摊平成汇总模块认识的形状：章节 → 文本段落（带节点 id）。
- *
- * 为什么在这里摊平、而不是让 `summary/discharge-summary.ts` 认识文档模型：
- * 那个模块要能被穷举单测（合成输入、离线跑），一旦它 import 文档结构，
- * 用例就得连带造一棵节点树 —— 测的就不再是"搬运与缺口"这件事了。
- */
 function summaryDocOf(docId: string, fallbackTitle: string): SummaryDoc | undefined {
   const entry = state.entries.get(docId);
   if (!entry) return undefined;
@@ -4248,24 +3616,6 @@ function summaryDocOf(docId: string, fallbackTitle: string): SummaryDoc | undefi
   };
 }
 
-/* --------------------------------- 预问诊 ---------------------------------
- *
- * 数据来自"候诊时患者自己填"（由 HIS 预问诊端 / 患者端经接口写入），
- * 医生接诊后看到的是**候选建议**，不是已经写进病历的正文。
- *
- * ## 为什么按 patientId 一行，而不是一张总表
- *
- * 总表的写路径是"读全量 → 改数组 → 写回去"，两位患者同时提交时后写的会盖掉先写的
- * （丢一份表单，而现场只看到"某人填的东西不见了"）。按患者存一行之后，写只碰自己那一行，
- * 读也只解自己那一行。
- *
- * ## 为什么读要缓存
- *
- * `stateFor` 每次刷新都会走一遍（切页签、改一个字都算）。不缓存的话，一次接诊会把这行
- * 反复解密几十次；而预问诊**在一次接诊里不会变**（变的是患者的病程，不是候诊时填的表）。
- * 缓存只在两处失效：写入这位患者的表单时、医生点「读取预问诊」时。
- */
-
 /** 一位患者一行 */
 const PREVISIT_KEY_PREFIX = 'previsit.rec:';
 
@@ -4280,9 +3630,9 @@ interface PrevisitStore {
 /**
  * 本次接诊的预问诊缓存。
  *
- * 只留**一条**：同一时刻只有一个人在接诊。留一张 Map 的话，长期运行会把每位患者的
+ * 只留一条：同一时刻只有一个人在接诊。留一张 Map 的话，长期运行会把每位患者的
  * 主诉（敏感信息）攒在进程里 —— 而它们早就没有用处了。
- */
+  */
 let previsitCache: { patientId: string; record: PrevisitRecord | null; readAt: string } | null = null;
 
 interface PrevisitRead {
@@ -4297,9 +3647,9 @@ interface PrevisitRead {
  *
  * `force = true` 绕过缓存：医生点「读取预问诊」时用，因为候诊到接诊之间患者可能刚提交。
  *
- * **解不开不等于没有**：把"解不开"当成"没提交过"，现场表现是"患者填的东西不见了"，
+ * 解不开不等于没有：把"解不开"当成"没提交过"，现场表现是"患者填的东西不见了"，
  * 而两件事的处置完全不同（一个要排查数据，一个什么都不用做）。
- */
+  */
 function previsitOfPatient(patientId: string, force = false): PrevisitRead | { ok: false; code: string; message: string } {
   if (!force && previsitCache !== null && previsitCache.patientId === patientId) {
     return { ok: true, record: previsitCache.record, readAt: previsitCache.readAt, cached: true };
@@ -4334,9 +3684,9 @@ function previsitOfPatient(patientId: string, force = false): PrevisitRead | { o
 /**
  * 写一位患者的表单（整行替换）。
  *
- * 这一行解不开时**拒绝写入**：否则就是把这一位患者唯一的一份记录，用一份新表单盖掉 ——
+ * 这一行解不开时拒绝写入：否则就是把这一位患者唯一的一份记录，用一份新表单盖掉 ——
  * 而现场只会看到"数据变了"。宁可这次写不进去（接口如实报错），也不能悄悄覆盖。
- */
+  */
 function savePrevisitOfPatient(patientId: string, record: PrevisitRecord): { ok: true } | { ok: false; code: string; message: string } {
   const key = `${PREVISIT_KEY_PREFIX}${patientId}`;
   const got = workStore.getSealed<PrevisitStore>(key);
@@ -4367,15 +3717,15 @@ function sectionAnchorsOf(doc: DocumentModel): SectionAnchor[] {
 }
 
 /**
- * 规则目录的一项（含**未启用**的）。
+ * 规则目录的一项（含未启用的）。
  *
  * 下发的字段分两类，两类都要带全：
  *   - "跑不跑"：`enabled` —— 它落在库里的 `disabled` 列，不在包内容里；
  *   - "按什么判"：`predicate` / `params` / `detail` / `suggestion` ——
- *     编辑抽屉要把当前这一条**原样回显**出来。编辑是一条"读回 → 改 → 写回"的回路，
+ *     编辑抽屉要把当前这一条原样回显出来。编辑是一条"读回 → 改 → 写回"的回路，
  *     读不全就等于写不全：少回显一个字段，那一次保存就会把它静默清掉，
  *     而且没有任何地方会报错（包写得进去、校验也过得去）。
- */
+  */
 interface QcRuleCatalogEntry {
   packId: string;
   itemId: string;
@@ -4386,13 +3736,6 @@ interface QcRuleCatalogEntry {
   params: Record<string, unknown>;
   detail: string | null;
   suggestion: string | null;
-  /**
-   * 自定义条件的**人话回读**（不是自定义条件时为 `null`）。
-   *
-   * 为什么由服务端算好再下发、而不是让界面照着 `params.when` 自己拼一句话：
-   * "这条规则到底判什么"是判定机制的一部分，措辞只该有一处。
-   * 界面上另写一份的后果是——两家说的话慢慢不一致，而两边看上去都对。
-   */
   conditionSummary: string | null;
 }
 
@@ -4402,16 +3745,16 @@ interface QcRuleCatalogEntry {
  * 通用层（`knowledge/pack.ts`）只知道 `itemId / enabled`，它不该认识 `title / severity`
  * 这类规则专有字段。所以这份目录在这里补上，而不是把规则字段硬塞进通用层的清单结构里。
  *
- * 只列**规则**条目：判定方式有自己的目录（`qcConditionCatalog`），
+ * 只列规则条目：判定方式有自己的目录（`qcConditionCatalog`），
  * 混进这张表会让判定方式以"没有判定方式的规则"的样子出现。
- */
+  */
 function qcRuleCatalog(): QcRuleCatalogEntry[] {
   const out: QcRuleCatalogEntry[] = [];
   for (const summary of packRegistry.list('rule')) {
     const pack = packRegistry.get(summary.packId) as QcRulePack | null;
     if (!pack) continue;
-    /* 带上"这个包能引用到的判定方式"（**库里的 + 包自带的**）：
-       "这条规则按什么判"的人话回读必须把引用解开（否则界面只会显示一个孤零零的编码） */
+    /* 带上"这个包能引用到的判定方式"（库里的 + 包自带的）：
+       "这条规则按什么判"的人话回读必须把引用解开（否则界面只会显示一个孤零零的编码）  */
     const conditions = resolvedConditionsOf(pack, conditionLibrary());
     for (const descriptor of ruleItemsOf(pack)) {
       out.push({
@@ -4432,29 +3775,19 @@ function qcRuleCatalog(): QcRuleCatalogEntry[] {
 }
 
 /**
- * 判定方式目录：给界面看的（哪一条、叫什么、判什么、**谁在用它**）。
+ * 判定方式目录：给界面看的（哪一条、叫什么、判什么、谁在用它）。
  *
- * 判定方式是**库级资产**（`condition-store.ts`）：全院一份、不属于任何包，
+ * 判定方式是库级资产（`condition-store.ts`）：全院一份、不属于任何包，
  * 所以这份目录就是库里的那一份，不按包拉平 —— 引用它的规则可能分布在好几个包里，
  * 那些在 `usedBy[].packId` 上（界面照它说"会影响哪个包的哪几条"）。
  *
- * `usedBy` 由内核的 `conditionCatalogOf` 算出，删除保护读的是**同一个函数** ——
+ * `usedBy` 由内核的 `conditionCatalogOf` 算出，删除保护读的是同一个函数 ——
  * 两处各算一遍的后果不是多打几个字，而是"界面说没人用、删除却被拒"这种对不上的话。
- */
+  */
 function qcConditionCatalog(): QcConditionCatalogEntry[] {
   return conditionCatalogOf(conditionState.items, packRegistry);
 }
 
-/**
- * 落库判定方式库：**先试算、再写、再换内存，最后记一条留痕**。
- *
- * 为什么要有这一步（改规则与改包都直接走 `writePack()`）：判定方式是**库级资产**，
- * 改它**不改任何包的内容指纹** —— 于是"包指纹变了"那个天然痕迹没有了，
- * 留痕必须自己记；而"这次改动会不会把引用它的规则改坏"也必须自己试算一遍
- * （原先由 `writePack` 的整包校验顺带兜住，见 `condition-store.ts` 文件头）。
- *
- * 失败时内存与库**都不动**（`assertLibraryChangeIsSafe` 在写库之前、写库在换内存之前）。
- */
 function writeConditions(nextItems: QcConditionDefinition[], actor: string, note: string): LoadedConditions {
   assertLibraryChangeIsSafe(packRegistry, nextItems);
   const beforeIds = conditionState.items.map((item) => String(item.itemId));
@@ -4504,19 +3837,12 @@ function persist(entry: DocEntry): PersistStatus {
   }
 
   try {
-    /* ① 正文：rev 变了才写。旁挂操作（处置提示、采纳建议）不改 rev，
-       没有这一步判断就会每次都重存一遍正文，加密几 KB 虽快，但白做的写入会掩盖真正的写入。 */
     const rev = entry.session.docRev;
     if (entry.storedRev !== rev) {
       workStore.saveDocument(entry.session.document, metaFromTreeOf(entry.docId));
       entry.storedRev = rev;
     }
 
-    /* ② 旁挂数据：带前置条件写入。
-       内容仍是加密落库（含 nodeId / ruleId，足以指回患者），
-       换数据库不改变"这些字段不该明文可读"这个理由（备份、只读副本、误拷的库文件都还在）。
-       `expectDigest` 是原子的比较与写入：数据库比文件时代的"读-比-写"更强，
-       中间没有窗口。 */
     const snapshot = entry.session.sidecarSnapshot();
     const meta = workStore.saveSidecars(entry.docId, snapshot, { expectDigest: baseline });
     entry.sidecarBaseline = meta.digest;
@@ -4526,9 +3852,6 @@ function persist(entry: DocEntry): PersistStatus {
     const code = (err as { code?: string }).code ?? 'E_PERSIST_FAILED';
     const message = (err as Error).message;
     if (code === SNAPSHOT_CONFLICT_CODE) {
-      /* 必须留下一条看得见的记录：内存里改成功了、库里没写进去，
-         如果只是"没落盘"，医生下次打开会发现改动不见，而没人知道为什么。
-         注意：不改基线，改了就等于把这次冲突洗白了，下一次陈旧写入会被放行。 */
       entry.sidecarConflict = true;
       entry.log.push({
         at: new Date().toISOString(),
@@ -4622,14 +3945,6 @@ function clearPersistedState(): void {
   }
 }
 
-/**
- * 幂等命中时补一句留痕（建议通道的幂等规则见 `SuggestionBook.add`）。
- *
- * 为什么值得单独留一句：医生点了"生成"，界面上没有多出一条，
- * 只有在日志里说清"与待处理建议 sg_0007 内容相同，未重复生成"，这件事才不会被当成系统坏了。
- * 与"失败不落笔、不留痕"不冲突：这里确实发生了一次产出（真模型环境下它就是一次计费调用），
- * 只是产出被判定为与已有待处理内容重复。
- */
 function noteReuse(entry: DocEntry, label: string, reusedIds: string[]): void {
   if (reusedIds.length === 0) return;
   entry.log.push({
@@ -4665,13 +3980,6 @@ function act<T>(
   }
 }
 
-/**
- * 异步版 `act`：给需要等外部系统的写操作（签章、导出，签名后端可能是网络服务或密码设备）。
- *
- * 为什么另起一个而不是把 `act` 改成异步：`act` 有几十个同步调用点，
- * 把它们统统改成 `await` 只是在传播一个与它们无关的复杂度。
- * 两者的日志、留痕与落盘语义完全一致，差别只在"等不等回调"。
- */
 async function actAsync<T>(
   entry: DocEntry,
   action: string,
@@ -4708,8 +4016,6 @@ function runProbe(file: string, docId: string): { report: ProbeReport | null; ex
   }
 }
 
-/* --------------------------------- 路由 --------------------------------- */
-
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.statusCode = status;
@@ -4721,10 +4027,10 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 /**
  * 读原始请求体。
  *
- * 拆成"原始字节"与"按 JSON 解"两步，是因为采集路由收的是 **multipart 二进制**：
+ * 拆成"原始字节"与"按 JSON 解"两步，是因为采集路由收的是 multipart 二进制：
  * 先按 JSON 解一次会把它毁掉（解析失败 → 空对象，音频就没了），
  * 而"顺手两种都试一下"的做法在现场表现为"音频偶尔提交成功、偶尔说没音频"。
- */
+  */
 async function readRawBody(req: IncomingMessage): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   await new Promise<void>((resolve) => {
@@ -4734,7 +4040,7 @@ async function readRawBody(req: IncomingMessage): Promise<Uint8Array> {
   return concat(chunks);
 }
 
-/** JSON 体（绝大多数路由）：**解不开就是空对象**，缺字段由各 case 自己判并给出明确错误码 */
+/** JSON 体（绝大多数路由）：解不开就是空对象，缺字段由各 case 自己判并给出明确错误码  */
 function jsonBodyOf(raw: Uint8Array): Record<string, unknown> {
   const text = new TextDecoder('utf-8').decode(raw).trim();
   if (!text) return {};
@@ -4745,20 +4051,8 @@ function jsonBodyOf(raw: Uint8Array): Record<string, unknown> {
   }
 }
 
-/* ------------------------------- 图片资源 ------------------------------- */
-
-/**
- * 图片字节的落盘目录。**与数据库同在 state 目录**：图跟着病历走。
- *
- * 为什么不放 `artifacts/`：那是演示产物目录，清一次产物就成了"病历还在、图没了"；
- * 而影像属于病历内容，备份、迁移、换机器时必须一起带走。
- *
- * 文件名用**内容哈希**（`<sha256>.<ext>`）：同一张图贴两次只存一份；
- * 也让"这张图是不是被换过"变成一次字节比对就能回答的问题
- * （归档件里图片进签名覆盖，见 `export/ofd.ts` 的 `containerSignature`）。
- */
 const RESOURCE_DIR = join(STATE_DIR, 'resources');
-/** 资源文件名白名单：只认内容哈希 + 三种扩展名。**不要**相信 URL 里的任何其它形状 */
+/** 资源文件名白名单：只认内容哈希 + 三种扩展名。不要相信 URL 里的任何其它形状  */
 const RESOURCE_NAME = /^[0-9a-f]{64}\.(png|jpg|webp)$/;
 
 function ensureResourceDir(): void {
@@ -4786,21 +4080,10 @@ function readResourceBytes(resRef: string): Uint8Array | null {
   }
 }
 
-/**
- * 已经记过"开始采集"的会话。
- *
- * 为什么单独记这件事：设计文档第九节要求审计能回答"**谁在什么时候开了采集**"，
- * 而采集会话没有"开始"这个接口（前端一按录音就可能连发若干段）。
- * 于是把"这个会话的第一段到达"当作开始 —— 每段都记会把这本账淹掉，
- * 而**一个都不记**会让"音频什么时候开始往外发的"彻底查不到。
- *
- * 只存最近若干条（内存态）：它是"刚发生过什么"的线索，不是长期账本 ——
- * 长期审计由 `recordAdminAudit` 落库那份承担。
- */
 const CAPTURE_SESSIONS = new Set<string>();
 const CAPTURE_SESSION_WINDOW = 500;
 
-/** 本会话第一次出现 → 记一笔管理审计（**不记音频内容、不记文件名**）；返回是否记了 */
+/** 本会话第一次出现 → 记一笔管理审计（不记音频内容、不记文件名）；返回是否记了  */
 function noteCaptureSession(sessionId: string, endpoint: string, actor: string): boolean {
   if (CAPTURE_SESSIONS.has(sessionId)) return false;
   CAPTURE_SESSIONS.add(sessionId);
@@ -4825,17 +4108,6 @@ function noteCaptureSession(sessionId: string, endpoint: string, actor: string):
 
 /* ===================== 采集记录：只记元数据，不留音频 ===================== */
 
-/**
- * 一次采集的"账"：什么时候、用哪块设备、录了多久、几段成功几段失败、挂在哪份病历上。
- *
- * 为什么只有元数据：录音是 PHI，比转写文本敏感得多 —— 文本能脱敏、能检索、能审计，
- * 音频不能。这一档要回答的是现场最常问的那句"这次到底录成了没有"，
- * 而不是"把当时的声音留一份"。所以这份记录里**没有文本、没有音频、也没有文件名**。
- *
- * 为什么用惰性清理而不是定时器：定时器会把"过期"变成"取决于进程有没有活到那个点"，
- * 而这里要给的是一句确定的话 —— **超过 7 天，下一次任何人读或写时它就不在了**。
- * 也没进数据库：这是"最近发生了什么"的线索（上限 200 条），不值得为它加一次结构迁移。
- */
 const DICTATION_RECORDS_FILE = join(STATE_DIR, 'dictation-records.json');
 const DICTATION_RETENTION_DAYS = 7;
 const DICTATION_RECORD_LIMIT = 200;
@@ -4872,7 +4144,7 @@ function dictationRecordsWrite(records: DictationRecord[]): void {
   }
 }
 
-/** 读：**顺便真的丢掉过期项**（不是"看不见"，是移除了，落盘也一并更新） */
+/** 读：顺便真的丢掉过期项（不是"看不见"，是移除了，落盘也一并更新）  */
 function dictationRecordsLoad(): DictationRecord[] {
   let all: DictationRecord[] = [];
   try {
@@ -4900,19 +4172,6 @@ function dictationRecordsAppend(record: DictationRecord): DictationRecord[] {
   return kept;
 }
 
-/**
- * 清掉**某一份病历**的采集记录，返回"清掉几条、还剩几条"。
- *
- * 为什么按病历清而不是清空全部：这份记录回答的是"这份病历刚才到底录成了没有"，
- * 一次误点清掉全科室的线索，代价和收益完全不对等。"全清"仍然可以直接删那个文件，
- * 那是运维动作，不该长在医生端的一颗按钮上。
- *
- * **删的只是线索，不是证据**：开始一次采集那一条已经落在管理审计里
- * （`noteCaptureSession`），审计链可复算，不能跟着病历一起删。
- *
- * 写完要**再读一次**：`dictationRecordsWrite` 故意吞掉写盘错误（采集不能因为记账失败而失败），
- * 于是"已清空"这句话只有复查过才成立 —— 否则下一次刷新记录又会回来。
- */
 function dictationRecordsClear(docId: string): { removed: number; remaining: number } {
   const all = dictationRecordsLoad();
   const before = all.filter((record) => record.docId === docId).length;
@@ -4941,13 +4200,13 @@ function boundedText(value: unknown, max: number): string {
 }
 
 /**
- * 一组转写段 → 一组建议。**`/api/dictate` 与"演示采集"共用这一份实现。**
+ * 一组转写段 → 一组建议。`/api/dictate` 与"演示采集"共用这一份实现。
  *
  * 抽出来的理由与"`suggestBatch` 之后不再造第二套"完全一致：两处各写一遍，
  * "演示里能跑通、真机上跑不通"就是迟早的事 —— 而那正是最贵的一类问题。
  *
- * 失败一律**返回**而不是抛：调用方要把它连同 `state` 一起回给界面。
- */
+ * 失败一律返回而不是抛：调用方要把它连同 `state` 一起回给界面。
+  */
 async function dictateFromSegments(
   entry: DocEntry,
   input: DictationInput,
@@ -5025,18 +4284,18 @@ async function dictateFromSegments(
     data: {
       ...entry.lastDictation,
       strategy: placement.config.strategy,
-      /* 上限**回报给界面**：建议卡上的"0.85"从哪来要能被回答（两份配置取小者的结果） */
+      /* 上限回报给界面：建议卡上的"0.85"从哪来要能被回答（两份配置取小者的结果）  */
       confidenceCeiling: ceiling,
     },
   };
 }
 
 /**
- * 把一段音频透传给 ASR。**C2 路由与"演示采集"共用这一份实现**（理由同 `dictateFromSegments`）。
+ * 把一段音频透传给 ASR。C2 路由与"演示采集"共用这一份实现（理由同 `dictateFromSegments`）。
  *
  * 每次现建客户端：配置改完立即生效（不能缓存住地址，否则"我改了却没生效"）。
  * 密钥只在内存里过一次，不进日志、不进响应。
- */
+  */
 async function transcribeSegmentViaAsr(
   config: LoadedCaptureConfig,
   params: { sessionId: string; index: number; audio: Uint8Array },
@@ -5052,9 +4311,9 @@ async function transcribeSegmentViaAsr(
 /**
  * 演示采集的默认脚本：两段人声各 2s，中间静音 1.2s（> `silenceMs` 默认 800ms）。
  *
- * 于是它会切成 2 段、产出 2 条建议，**边界可预期**（用例据此断言）。
- * 总时长约 5s：演示要能当场看完，而计时是**真的在走**（不加速、不假装）。
- */
+ * 于是它会切成 2 段、产出 2 条建议，边界可预期（用例据此断言）。
+ * 总时长约 5s：演示要能当场看完，而计时是真的在走（不加速、不假装）。
+  */
 const DEFAULT_CAPTURE_DEMO_TIMELINE: Array<{ seconds: number; voiced: boolean }> = [
   { seconds: 2, voiced: true },
   { seconds: 1.2, voiced: false },
@@ -5067,9 +4326,9 @@ let captureStop: (() => Promise<void>) | null = null;
 /**
  * 校验请求体里的演示脚本。
  *
- * **不校验长度就等于开了一个"让服务端录上一整天"的口子**：脚本是在服务端
+ * 不校验长度就等于开了一个"让服务端录上一整天"的口子：脚本是在服务端
  * 按真实时间一帧帧走完的，`seconds: 1e9` 会让这个请求永远不返回。
- */
+  */
 function parseDemoTimeline(raw: unknown[]): Array<{ seconds: number; voiced: boolean }> {
   if (raw.length > 50) {
     throw new CaptureError('E_CAPTURE_BAD_TIMELINE', `演示脚本最多 50 段，实际 ${raw.length}`);
@@ -5103,20 +4362,6 @@ function concat(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/**
- * 模板预览：**按当前患者与就诊的上下文真的开一遍**，但一个字都不落库。
- *
- * 为什么不满足于"把骨架画出来"：章节与槽位在管理后台本来就看得见（`templateCatalog`），
- * 管理员真正要问的是"医生点开之后面前是什么" —— 系统带入的值填上没有、派生值算没算出来、
- * 还缺哪几格。这三件事只有真跑一遍 `instantiateTemplate()` 才答得出来。
- *
- * 三点取舍：
- *   ① **草稿与停用的文书照样能预览**：预览恰恰是"发布之前先看一眼"的地方，
- *      所以这里不走 `findTemplate()`（它的口径是"能不能开"），而是按 itemId 直接找那一条；
- *   ② **科室不匹配不拦、只如实标注**：那是"能不能开"的判定（在 `/api/template-create` 里），
- *      在这里拦下来，反而让人没法提前发现自己把科室配错了；
- *   ③ **零副作用**：不落库、不建结构条目、不改 rev、不进审计 —— 它是读视图，不是一次开具。
- */
 function previewOfTemplate(
   templateId: string,
   createdBy: string,
@@ -5137,14 +4382,14 @@ function previewOfTemplate(
   const entry = current();
   const source = entry.session.document;
   const deptList = departmentsSafe().loaded;
-  /* 科室与开具时同一口径：**归一后再判**（老病历里的"呼吸内科"与模板上的 `DEPT_RESP` 是同一个科） */
+  /* 科室与开具时同一口径：归一后再判（老病历里的"呼吸内科"与模板上的 `DEPT_RESP` 是同一个科）  */
   const deptCode = normalizeDepartmentCode(deptList, source.encounter?.deptCode);
 
   let created: ReturnType<typeof instantiateTemplate>;
   try {
     created = instantiateTemplate(pack, {
       templateId,
-      /* 这份文档**只活在这一次响应里**：它不进工作区、不落库，docId 只是个占位 */
+      /* 这份文档只活在这一次响应里：它不进工作区、不落库，docId 只是个占位  */
       docId: 'doc_preview',
       createdBy,
       patient: source.patient,
@@ -5210,27 +4455,15 @@ function previewOfTemplate(
       source: created.result.source,
       warnings: created.result.warnings,
       sections,
-      /* 正文视图：与医生端 `/api/state` 的 `items` **同一次组装**（`buildItemsOfDocument`）。
+      /* 正文视图：与医生端 `/api/state` 的 `items` 同一次组装（`buildItemsOfDocument`）。
          预览要画的正是"医生点开之后那一屏"，各画一份必然分叉：今天差一个 chip、
          明天差一处只读态，而"预览与正文不一样"是最难被发现的错（两边都"看起来对"）。
-         字段名、单位、数据元标签、系统带入的出处、待确认状态都在这里，前端只负责画。 */
+         字段名、单位、数据元标签、系统带入的出处、待确认状态都在这里，前端只负责画。  */
       items: buildItemsOfDocument(created.doc),
     },
   };
 }
 
-/**
- * 专科控件预览：**临时造一份只含这一个控件的文书**，真的实例化一遍，再把正文视图交出去。
- *
- * 为什么不手搓一个假节点：形状决定画法，而画法要吃实例化时写进节点的快照
- * （`shape` / `fields` / `rows` / `columns` / `rowCount`）—— 手搓等于把这些规则抄第二遍，
- * 而"预览与正文不一样"是最难被发现的错（两边都"看起来对"）。
- * 走真的 `instantiateTemplate()` 还顺带回答了另一个问题：这个控件的**格清单**长什么样
- * （页面上的每一格都由它生成，与医生端**同一段代码**）。
- *
- * 与模板预览同一条纪律：**一个字都不落库** —— 临时包、临时文书，只活在这一次响应里。
- * 它也因此不进 `ROUTE_ACTIONS`（读视图不需要动作级授权），也不写审计。
- */
 function previewOfControl(
   itemId: string,
   createdBy: string,
@@ -5248,9 +4481,9 @@ function previewOfControl(
     return { ok: false, code: 'E_CTRL_UNKNOWN', message: `包「${catalogEntry.packId}」里找不到控件「${itemId}」` };
   }
 
-  /* 临时模板：**只含这一个控件**。它不进注册表，只是给 `instantiateTemplate` 一个入口 ——
-     控件槽位那条链（校验 → 实例化 → 快照 → 落位）因此走的是与真实开文书**同一段代码**。
-     章节标题用控件名：预览屏上那行标题就是医生看到的那一行。 */
+  /* 临时模板：只含这一个控件。它不进注册表，只是给 `instantiateTemplate` 一个入口 ——
+     控件槽位那条链（校验 → 实例化 → 快照 → 落位）因此走的是与真实开文书同一段代码。
+     章节标题用控件名：预览屏上那行标题就是医生看到的那一行。  */
   const previewTemplate: TemplateDefinition = {
     itemType: 'template',
     itemId: `tpl.preview.${itemId}`,
@@ -5351,9 +4584,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   /* 图片字节（`/res/<sha256>.<ext>`）。
-     **只从 resources 目录读、文件名过白名单** —— 少了这一道，一条 `/res/..%2f..%2fconfig`
+     只从 resources 目录读、文件名过白名单 —— 少了这一道，一条 `/res/..%2f..%2fconfig`
      就是任意文件读取；而字符串前缀判断（`startsWith`）挡不住 `..`。
-     内容寻址 ⇒ 同一个地址的字节永不改变，所以可以长缓存。 */
+     内容寻址 ⇒ 同一个地址的字节永不改变，所以可以长缓存。  */
   if (req.method === 'GET' && path.startsWith('/res/')) {
     const name = path.slice('/res/'.length);
     const file = resourceFilePathOf(name);
@@ -5513,8 +4746,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         local: (() => {
           const qc = qcContentSafe();
           if (qc.content === null) {
-            /* 读不出来**不报成"未接入"**：那会让"配置读坏了"看起来像"还没配"，
-               而前者要排查数据、后者什么都不用做 */
+            /* 读不出来不报成"未接入"：那会让"配置读坏了"看起来像"还没配"，
+               而前者要排查数据、后者什么都不用做  */
             return { engine: null, configured: false, rules: 0, source: 'unreadable', problem: qc.error };
           }
           return {
@@ -5591,9 +4824,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     '/api/placement-config': () => describePlacementConfig(placementConfigNow()),
     '/api/capture-config': () => describeCaptureConfig(captureConfigNow()),
     '/api/sign-backend-config': () => describeSignConfig(signConfigNow()),
-    /* 预问诊接入：只报"密钥在不在"，**不回显值**（它只存哈希，本来也取不回原文）。
+    /* 预问诊接入：只报"密钥在不在"，不回显值（它只存哈希，本来也取不回原文）。
        解不开时如实回 error，而不是返回一份默认值 —— 那样界面会显示"未配置"，
-       事实上是"配过但解不开"，两者的处置完全不同。 */
+       事实上是"配过但解不开"，两者的处置完全不同。  */
     '/api/previsit-config': () => {
       try {
         return describeAccess(loadAccess(CONFIG_KV), AUTH_MODE);
@@ -5649,17 +4882,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return;
   }
 
-  /* 账号清单（GET）：读它要 `user.write`（只给管理员），比上面三份视图更严。
-     理由见 `principal.ts` 的 `user.write`：它回答的是"谁能进来"，
-     而"有哪几个账号、各自什么角色"本身就是一份攻击面清单。
-     GET 必须放在这里而不是 switch 里，那道"非 POST 一律 405"就在下面几行，
-     放进 switch 的代码永远到不了（这个坑上面四份配置视图已经踩过一次）。 */
-  /* 采集记录（GET）：只回元数据。**必须放在这里**——"非 POST 一律 405"就在下面几行，
-     写进 switch 的 GET 永远到不了（上面五份配置视图已经踩过这个坑一次）。 */
+  /* 采集记录（GET）：只回元数据。必须放在这里——"非 POST 一律 405"就在下面几行，
+     写进 switch 的 GET 永远到不了（上面五份配置视图已经踩过这个坑一次）。  */
   if (req.method === 'GET' && path === '/api/dictation/capture/records') {
-    /* `docId` 有值时**只回该病历的记录**：列表长在语音面板里，而"上一份病历录了几段、
+    /* `docId` 有值时只回该病历的记录：列表长在语音面板里，而"上一份病历录了几段、
        用什么设备录的"不该跟着人走到下一个患者 —— 那既是串档，也是隐私。
-       不带它时仍返回全部：文件本身是运维排查用的台账，口径不变。 */
+       不带它时仍返回全部：文件本身是运维排查用的台账，口径不变。  */
     const query = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
     const docId = boundedText(query.get('docId'), 80);
     const all = dictationRecordsLoad();
@@ -5732,11 +4960,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
        同一个块、同一个限流桶、同一份审计：不可能出现"从医生端登录就能绕过限流"。 */
     case '/api/session':
     case '/api/admin/session': {
-      /* 登录：用户名 + 口令，验的是数据库里的账号。
-         角色不再由"匹配到哪条口令"决定，而是账号自己的属性，于是"同一个角色两个人"
-         与"一个人换角色"都成了可以表达的事（共享口令模型下这两件都表达不出来）。
-         字段名只有 `username` / `password`：不再接受 `actorId` / `adminId`
-         （那是自报的展示名，与"账号"是两件事；留着它等于给每个调用方一个误会的机会）。 */
       const username = String(body.username ?? '').trim();
       const password = String(body.password ?? '');
       const source = requestSourceOf(req);
@@ -5834,10 +5057,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return;
     }
 
-    /* 首次运行：创建第一个管理员账号。
-       它只在库空时可用，一旦有账号就永久关闭（连入口都不再下发，见 `renderLoginPage`）。
-       为什么必须是"一次性"：留着它就等于留了一个"谁先来谁当管理员"的后门，
-       而那种后门在部署完的第一天之后没有任何正当用途。 */
     case '/api/admin/bootstrap': {
       if (userStore.count() > 0) {
         recordAdminAudit({ actor: actorLabelOf(req), subject: '初始化', kind: '动作', note: '拒绝：本机已有账号，初始化入口已关闭' });
@@ -5897,7 +5116,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return;
     }
 
-    /* 退出：同上，两个名字一个实现 */
     case '/api/session/logout':
     case '/api/admin/logout': {
       const sid = cookieOf(req, SESSION_COOKIE);
@@ -5912,18 +5130,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return;
     }
 
-        /* ------------------------------ 后台账号管理 ------------------------------
-     *
-     * 五个写入口 + 一个读入口，全部走 `user.write`（只给管理员，见 `auth/principal.ts`）。
-     *
-     * 三件事在这一层完成：
-     *   1) 踢会话：改口令 / 改角色 / 停用 / 删除之后，该账号手上的旧会话立即失效
-     *      （会话是内存中的独立副本，不随库改动更新）；
-     *   2) 审计：账号变更记录字段前后值，口令不进入审计（审计会被导出、会被贴进工单）；
-     *   3) 认领：操作者取自服务端会话（`principal.actorId`），不接受请求自报。
-     *
-     * 改自己的口令：踢掉该账号的全部会话，再给当前浏览器换发一张新会话。
-     */
     case '/api/admin/users':
     case '/api/admin/users/password':
     case '/api/admin/users/role':
@@ -5955,7 +5161,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           after = userStore.setPassword({ username: target, password: String(body.password ?? ''), by: operator.actorId });
           what = `重设「${after.username}」的口令`;
           if (after.username.toLowerCase() === operator.actorId.toLowerCase()) {
-            /* 见上方"改自己的口令要特殊处理"：全踢掉 + 给当前浏览器换发一张 */
             sessions.revokeAllFor(operator.actorId);
             const fresh = sessions.issue({
               actorId: operator.actorId,
@@ -6011,11 +5216,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/reset': {
-      /* 授权已由授权门（`ROUTE_ACTIONS['/api/reset'] = 'workspace.reset'`）在进入这个
-         switch 之前判定过：两种模式一致，只有管理员能做。这里只补"成功之后要留下什么"。
-         为什么破坏性动作必须留痕到管理审计（而不仅是医生端的门控日志）：
-         门控日志会跟着工作区一起被重置清掉，只有管理审计是跨重置留存的，
-         "谁在什么时候清空了这台机器"恰恰是重置之后唯一还查得到的东西。 */
       const whoReset = actorLabelOf(req);
       recordAdminAudit({
         actor: whoReset,
@@ -6030,13 +5230,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
          重置就成了假的（实测发现：B6"重置回初始态"失败）。 */
       clearPersistedState();
       resetWorkspace();
-      /* 重置之后的工作区里补一条日志：新工作区的第一行就该说明它为什么是空的 */
       current().log.push({ at: new Date().toISOString(), action: `工作区已重置（操作者 ${whoReset}）`, ok: true });
-      /* 阅读授权登记属于工作区数据（它们绑定的是某一份文档的内容指纹）：
-         重置之后文档被重建，旧授权只会得到 E_DOCUMENT_CHANGED，留着它们不是"保留配置"，
-         而是留一堆必然失败的凭据。**库里的行由 `clearWorkData()` 一起清掉**
-         （`reading_grants` 已列入工作数据表，见 `storage/work-store.ts`），
-         这里只需清内存索引与错误状态 —— 原先那个"删文件"的动作连同一个 try 一起消失了。 */
       state.readingGrants.clear();
       READING_GRANTS_ERROR = null;
       /* 预问诊缓存同理：`sealed_kv` 已被一起清掉，缓存里那份（同 patientId、同一位患者）
@@ -6059,15 +5253,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/delete-document': {
-      /* 删除一份**草稿**病历。三件刻意不做的事：
-         ① 不做回收站/软删除：草稿没有法律效力，留一份看不见的空壳只会让树里多出
-            没人能解释的项；
-         ② 不删已离开草稿的文书（审核中 / 已签章 / 已归档）：签章之后它是医疗记录，
-            要改必须走「解锁修改」并留痕，而不是在这里消失；
-         ③ 不删最后一份：一批路径默认"总有一份活动病历"（`current()`），删到空会让
-            下一个请求 500，而那个错与"用户删了东西"毫无关联。要清空请走「重置工作区」。
-         删除不可恢复（正文、留痕、旁挂数据一起没），所以管理审计留一条：
-         文档自己的留痕随它一起消失，这是重置之外唯一还查得到"谁删了它"的地方。 */
       const docId = String(body.docId ?? '');
       const entry = state.entries.get(docId);
       if (!entry) {
@@ -6114,8 +5299,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           : ([...state.entries.keys()][0] ?? '');
       }
 
-      /* 落库：结构表里那一行必须**显式**删（`saveStructure` 只增不删，不会替我们带走它）；
-         正文、留痕与旁挂数据由仓储在同一个事务里删掉。 */
+      /* 落库：结构表里那一行必须显式删（`saveStructure` 只增不删，不会替我们带走它）；
+         正文、留痕与旁挂数据由仓储在同一个事务里删掉。  */
       const removedFromStore = workStore.deleteDocument(docId);
 
       /* 阅读授权绑定的是这份文档的内容指纹：文档没了，它们就是一堆必然失败的凭据
@@ -6269,10 +5454,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         });
         return;
       }
-      /* **沉默报告**：本次范围里哪些目标没被产出、为什么。它**无条件**算并存下来 ——
-         包括"一条都没产出"那种情况，因为那正是最需要解释的情形（医生看到的只是一个空列表）。
-         组装放在这里而不是适配器内：适配器可以自报理由，但"报告完不完整"必须由拿着范围的
-         这一侧裁决（产出方不说，就补记成"未说明"，见 `resolveSilenceReport`）。 */
       const silence = resolveSilenceReport({ request, items: response.items, declared: response.skipped });
       entry.lastAiSilence = silence;
       const draft = response.items.find((item) => item.nodeId === nodeId) ?? response.items[0];
@@ -6349,9 +5530,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/placement-config': {
       /* 落位配置：与模型配置同一形态（GET 视图 / POST 保存，需管理员）。
-         **落库**（`config.placement`，外部落位的密钥单独一行 `config.placement.apiKey`），
+         落库（`config.placement`，外部落位的密钥单独一行 `config.placement.apiKey`），
          不进工作区快照，它是部署参数：混进快照，"重置工作区"会把它清掉，
-         "备份工作区"会把落点映射带到另一套环境（那些节点 id 在另一套环境里根本不存在）。 */
+         "备份工作区"会把落点映射带到另一套环境（那些节点 id 在另一套环境里根本不存在）。  */
       const entry = current();
       /* GET 视图已在 handle() 顶部统一处理，写在这里会排在 405 guard 之后，永远到不了 */
       try {
@@ -6378,7 +5559,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
             ...(body.structureMap && typeof body.structureMap === 'object' && !Array.isArray(body.structureMap)
               ? { structureMap: body.structureMap as Record<string, DataElementTag> }
               : {}),
-            /* 外部落位服务：只存地址 / 超时。**密钥值单独走 `apiKey`**（单独一行加密落库、永不回显） */
+            /* 外部落位服务：只存地址 / 超时。密钥值单独走 `apiKey`（单独一行加密落库、永不回显）  */
             ...(body.external && typeof body.external === 'object' && !Array.isArray(body.external)
               ? { external: body.external as { endpoint?: string; timeoutMs?: number } }
               : {}),
@@ -6388,7 +5569,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           by,
         );
         const after = describePlacementConfig(loaded);
-        /* 审计只记"谁把哪一格从什么改成什么" + 密钥动作，**不记密钥值** */
+        /* 审计只记"谁把哪一格从什么改成什么" + 密钥动作，不记密钥值  */
         recordAdminAudit({ actor: by, subject: '落位配置', kind: '变更', before, after: { ...after, apiKeyAction } });
         json(res, 200, { ok: true, data: { ...after, apiKeyAction }, state: stateFor(req) });
       } catch (err) {
@@ -6404,9 +5585,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/capture-config': {
       /* 采集配置：与模型/落位配置同一形态（GET 视图 / POST 保存，需管理员）。
-         它与落位配置的**关键差别**：这一项决定音频发往哪台服务器（数据流向变更），
+         它与落位配置的关键差别：这一项决定音频发往哪台服务器（数据流向变更），
          因此它列在 `ROUTE_ACTIONS` 里 —— 两种模式下都要求管理员，不像医生端写路径那样
-         在演示模式下敞开（见 ROUTE_ACTIONS 上方那段"新增写路由必须在这里加一行"）。 */
+         在演示模式下敞开（见 ROUTE_ACTIONS 上方那段"新增写路由必须在这里加一行"）。  */
       const entry = current();
       /* GET 视图已在 handle() 顶部统一处理，写在这里会排在 405 guard 之后，永远到不了 */
       try {
@@ -6417,13 +5598,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           {
             /* 字段逐个显式转换：`Number(undefined)` 是 NaN，而 NaN 会被校验拒掉 ——
                但那会把"这一格没填"报成"这一格填错了"，现场看不出是哪件事。
-               所以缺这一格时**不传**，让校验去填默认值。 */
+               所以缺这一格时不传，让校验去填默认值。  */
             ...(body.kind === undefined ? {} : { kind: String(body.kind) }),
             ...(body.endpoint === undefined ? {} : { endpoint: String(body.endpoint) }),
             ...(body.appKey === undefined ? {} : { appKey: String(body.appKey) }),
-            /* 公有云确认：**只认真正的 true**（`"true"` 也认，因为表单可能给字符串）。
+            /* 公有云确认：只认真正的 true（`"true"` 也认，因为表单可能给字符串）。
                这一格的语义是"人显式确认过一次"，所以任何"看起来像真"的模糊值都不该通过 ——
-               传别的（`"1"` / `"yes"` / `1`）一律当假，让守卫去拒绝，而不是在这里替它放宽。 */
+               传别的（`"1"` / `"yes"` / `1`）一律当假，让守卫去拒绝，而不是在这里替它放宽。  */
             ...(body.acknowledgePublicCloud === undefined
               ? {}
               : { acknowledgePublicCloud: body.acknowledgePublicCloud === true || body.acknowledgePublicCloud === 'true' }),
@@ -6443,9 +5624,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           by,
         );
         const after = describeCaptureConfig(loaded);
-        /* 审计只记"谁在何时把哪一格从什么改成什么" + 密钥动作，**不记密钥值、不记音频**。
+        /* 审计只记"谁在何时把哪一格从什么改成什么" + 密钥动作，不记密钥值、不记音频。
            公有云的 `leavesIntranet` 与 `kind` 都在 `after` 里 —— 于是"哪天有人把音频发去院外"
-           在审计里是一条可查的记录，而不是只能靠翻代码才知道。 */
+           在审计里是一条可查的记录，而不是只能靠翻代码才知道。  */
         recordAdminAudit({
           actor: by,
           subject: '采集配置',
@@ -6466,13 +5647,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/departments': {
-      /* 科室字典：院内有哪些科、各自的编码与显示名。
-         为什么归 `config.write` 而不是 `pack.toggle`：它不是知识内容（模板 / 规则），
-         而是**整个部署共用的主数据** —— 模板的"适用科室"、就诊科室的显示、
-         将来的统计都读它。把它塞进包权限里，等于说"科室是模板的附属物"。
-
-         审计记**前后两份清单**：只记"谁改过"答不出"产科是什么时候被去掉的"，
-         而模板上那些科室编码会因此全部失效。 */
       const entry = current();
       try {
         const by = requireAdminSession(req, entry, '科室字典');
@@ -6480,8 +5654,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         const loaded = saveDepartments(CONFIG_KV, body.items, by);
         const after = describeDepartments(loaded);
         recordAdminAudit({ actor: by, subject: '科室字典', kind: '变更', before, after });
-        /* 被删掉的科室要如实点名：模板上配着它的文书**立刻开不出**（编码对不上任何人），
-           而这件事只看"保存成功"是看不出来的 */
+        /* 被删掉的科室要如实点名：模板上配着它的文书立刻开不出（编码对不上任何人），
+           而这件事只看"保存成功"是看不出来的  */
         const beforeCodes = new Set((before.items as Array<{ code: string }>).map((item) => item.code));
         const afterCodes = new Set((after.items as Array<{ code: string }>).map((item) => item.code));
         const removed = [...beforeCodes].filter((code) => !afterCodes.has(code));
@@ -6503,11 +5677,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/doc-types': {
       /* 文书类型：院内能建哪几类文书。与上面科室那个 case 同一处置：
-         权限归 `config.write`，审计记**前后两份清单** —— 只记"谁改过"答不出
+         权限归 `config.write`，审计记前后两份清单 —— 只记"谁改过"答不出
          "出院记录是什么时候没的"，而质控规则正按类型编码定位文书。
 
-         删掉一个类型的后果**比删科室更隐蔽**：模板照样开得出（类型只是文档上的一个字段），
-         所以没有一处会报错，表现是"那条规则怎么不报了" —— 于是被删掉的名字必须点名。 */
+         删掉一个类型的后果比删科室更隐蔽：模板照样开得出（类型只是文档上的一个字段），
+         所以没有一处会报错，表现是"那条规则怎么不报了" —— 于是被删掉的名字必须点名。  */
       const entry = current();
       try {
         const by = requireAdminSession(req, entry, '文书类型');
@@ -6536,10 +5710,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/system-config': {
       /* 系统策略：鉴权模式 / 会话寿命 / 限流阈值 / 锚定节奏 / 锚点种子。
-         **与其它配置的关键差别：这几项改完要重启服务** —— 它们落在会话表、限流器、
-         签名者这三个**进程内结构**的构造上（见"系统策略（库里）"那一段的说明）。
+         与其它配置的关键差别：这几项改完要重启服务 —— 它们落在会话表、限流器、
+         签名者这三个进程内结构的构造上（见"系统策略（库里）"那一段的说明）。
          因此响应里带 `restartRequired`，界面必须显示它：不带的话，现场的表象是
-         "我改了、什么都没发生"，而人只会怀疑自己没保存成功。 */
+         "我改了、什么都没发生"，而人只会怀疑自己没保存成功。  */
       const entry = current();
       try {
         const by = requireAdminSession(req, entry, '系统策略');
@@ -6547,7 +5721,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         const { loaded, anchorSeedAction } = saveSystemConfig(
           CONFIG_KV,
           {
-            /* 非法值**不在这里兜底**：原样交给校验去抛（静默转成 open 会让"改错了"变成"改成功了"） */
+            /* 非法值不在这里兜底：原样交给校验去抛（静默转成 open 会让"改错了"变成"改成功了"）  */
             ...(body.authMode === undefined ? {} : { authMode: String(body.authMode) as AuthMode }),
             ...(body.sessionTtlMinutes === undefined ? {} : { sessionTtlMinutes: Number(body.sessionTtlMinutes) }),
             ...(body.anchorEvery === undefined ? {} : { anchorEvery: Number(body.anchorEvery) }),
@@ -6558,7 +5732,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           by,
         );
         const after = describeSystemConfig(loaded);
-        /* 审计只记"谁把哪一格从什么改成什么" + 种子的动作，**不记种子值** */
+        /* 审计只记"谁把哪一格从什么改成什么" + 种子的动作，不记种子值  */
         recordAdminAudit({ actor: by, subject: '系统策略', kind: '变更', before, after: { ...after, anchorSeedAction } });
         console.log(
           `[系统策略] ${by} 改了策略（鉴权 ${loaded.config.authMode} / 会话 ${loaded.config.sessionTtlMinutes} 分钟）：**重启服务后生效**`,
@@ -6576,9 +5750,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/qc-content-config': {
-      /* 内涵质控配置：引擎形态 / 地址 / 凭据 / 规则清单。
-         与其它配置的差别：**规则清单是"判定标准"本体**（一次整份替换、逐条校验），
-         被丢弃的条目**一并回传** —— 不静默丢（静默丢等于替它美化，见 `parseContentRules` 的注释）。 */
       const entry = current();
       try {
         const by = requireAdminSession(req, entry, '内涵质控配置');
@@ -6635,7 +5806,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           by,
         );
         const after = describeSignConfig(loaded);
-        /* 审计只记"谁把哪一格从什么改成什么" + 密钥动作，**不记密钥值** */
+        /* 审计只记"谁把哪一格从什么改成什么" + 密钥动作，不记密钥值  */
         recordAdminAudit({ actor: by, subject: '签名后端配置', kind: '变更', before, after: { ...after, apiKeyAction } });
         json(res, 200, { ok: true, data: { ...after, apiKeyAction }, state: stateFor(req) });
       } catch (err) {
@@ -6747,16 +5918,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/suggest-low': {
-      /* 模拟一个"自知不可靠的产出方"，专门用来演示与回归门控路径。
-       *
-       * 与 `/api/suggest` 的区别不在内容，而在置信度的来源：
-       * 这里没有"让界面调置信度"这回事，界面能选的是"谁来产出"，
-       * 不是"这条内容有多可信"。这条路由代表的是另一个产出方（听写引擎 / 弱模型），
-       * 它自报 0.6，于是关键内容（阈值 0.9）上必然被拦。
-       *
-       * 为什么要单独一条：置信度不再由请求指定之后，低置信建议就失去了构造手段，
-       * 而"低置信被门控拦下"正是最不能失去回归保护的一条性质。
-       */
       const entry = current();
       const session = entry.session;
       const nodeId = String(body.nodeId ?? '');
@@ -6834,8 +5995,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/apply-consistency': {
-      /* 把一条一致性问题的提示草稿变成建议，落到涉及的每一份文书。
-         为什么不直接改内容：系统并不知道哪一份是对的（见 consistency.ts）。 */
       const entry = current();
       const key = String(body.key ?? '');
       const issue = (entry.lastConsistency?.issues ?? []).find((item) => `${item.tag.system}|${item.tag.code}` === key);
@@ -6848,8 +6007,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         return;
       }
       const created: Array<{ docId: string; groupId: string; suggestionIds: string[] }> = [];
-      /* 幂等命中的分列出来（见 `SuggestionBook.addBatch`）：同一份文书上已有同文本且仍待处理的
-         核对建议时，不新建、不建空组，第 2 次点"生成核对待办"不该多出一批一模一样的待办。 */
       const reused: Array<{ docId: string; suggestionIds: string[] }> = [];
       for (const draft of toSuggestionDrafts(issue)) {
         const target = state.entries.get(draft.docId);
@@ -6883,24 +6040,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/dictate': {
-      /* 语音转写 → 一组建议。**两条来源，纪律完全相同**：
-           - 请求里给了 `segments` → 用**采集端提交的真实转写**（C1 组装、C2 拿回文本的产物）；
-           - 没给 → 用内置模拟转写（演示用，响应里 `source:'demo'` 如实标明它不是真实识别）。
-         为什么两条都要留在同一个入口：它们在内核里**完全同构**（都走 `dictate` → `suggestBatch`），
-         差别只在文本从哪来。为真实的单开一条路由，等于暗示存在第二套建议通道 —— 那是最不该给的暗示。
-
-         三条纪律：
-           - 落位只决定建议的初始落点，采纳时照样逐条过门控；
-           - 有段落未落位时不提交（内核不接受"半落位"），回报让医生指定；
-           - 置信度**不由请求指定**：一律按两份配置里更小的那个上限压住（恒 < 0.90），
-             关键内容上仍必须"改后采纳"。 */
       const entry = current();
       const ceiling = dictationCeilingNow();
       const submitted = body.segments;
       let input: DictationInput;
       if (submitted !== undefined) {
-        /* 先校验，再干活：下一步可能**外呼落位服务**（把这次转写的文本发出去），
-           一个连出处都不全的请求不该走到那一步。 */
+        /* 先校验，再干活：下一步可能外呼落位服务（把这次转写的文本发出去），
+           一个连出处都不全的请求不该走到那一步。  */
         const transcriptionId = String(body.transcriptionId ?? '').trim();
         const asrModelId = String(body.asrModelId ?? '').trim();
         if (transcriptionId === '' || asrModelId === '') {
@@ -6916,7 +6062,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         try {
           segments = validateSubmittedSegments(submitted, { confidenceCeiling: ceiling });
         } catch (err) {
-          /* 形状不合法就到此为止：**不代编、不静默忽略**（消息里说清是哪一项） */
+          /* 形状不合法就到此为止：不代编、不静默忽略（消息里说清是哪一项）  */
           json(res, 200, {
             ok: false,
             code: (err as { code?: string }).code ?? 'E_CAPTURE_BAD_SEGMENTS',
@@ -6938,20 +6084,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         input = demoTranscript(`audio-demo-${Date.now()}`, new Date().toISOString());
       }
       const source: 'capture' | 'demo' = submitted === undefined ? 'demo' : 'capture';
-      /* 落位 → 建议这一段**与"演示采集"共用**（`dictateFromSegments`）：
-         两条来源在内核里完全同构，差别只在文本从哪来。 */
+      /* 落位 → 建议这一段与"演示采集"共用（`dictateFromSegments`）：
+         两条来源在内核里完全同构，差别只在文本从哪来。  */
       const payload = await dictateFromSegments(entry, input, source);
       json(res, 200, { ...payload, state: stateFor(req) });
       return;
     }
 
     case '/api/dictate-commit': {
-      /* 医生指定落点后提交：把"未落位交人工指定"真正闭环的那一步。
-         三条纪律：
-           - 只认最近一次转写（`transcriptionId` 必须对上），否则会把落点装到另一次录音上；
-           - 每段都必须有落点（内核不接受"半落位"）；
-           - 落点虽然由医生给出，但内容来源仍是 ASR，所以仍以 AI 身份走建议通道，
-             门控一行没松（关键内容照样要"改后采纳"）。 */
       const entry = current();
       const session = entry.session;
       const record = entry.lastDictation;
@@ -7027,20 +6167,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/dictation/capture/segment': {
-      /* 采集转发：浏览器 → **同源服务端** → ASR。
-         对前端只暴露"提交一段音频，返回这段的文本或失败原因"，
-         `task_id` / `pending|processing|done` 这些细节**全在服务端内部走完** ——
-         于是换 ASR 厂商前端无感，也把"内网服务拓扑"挡在了前端之外
-         （见 docs/L2-语音采集设计.md 第二节）。
-
-         三条纪律：
-           ① 未配置端点 → 明确报 `E_CAPTURE_NOT_CONFIGURED`（不是 500，也**不静默退回"模拟转写"**）；
-           ② 音频只在内存里过一趟：**不进正文、不进留痕、不进管理审计**（调用方拿了文本自己去组装建议）；
-           ③ 错误信息**不带响应体** —— ASR 的错误响应可能回显音频侧内容。
-
-         失败**刻意不写 `entry.log`**：那份是"这份病历的门控日志"，而一次转发失败
-         没有改动文档里的任何东西，混进去只会让"rev 变化 ⇒ 文档变了"这类判读变难。
-         失败以响应码 + 界面提示呈现（设计文档第六节逐条列了现场表现）。 */
       const entry = current();
       const config = captureConfigNow();
       const query = new URLSearchParams((req.url ?? '').split('?')[1] ?? '');
@@ -7054,12 +6180,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         if (!Number.isInteger(index) || index < 1) {
           throw new CaptureError('E_CAPTURE_UPLOAD_INVALID', `缺少合法的段号 index，实际 ${JSON.stringify(indexRaw)}：段号是时间区间的锚`);
         }
-        /* `headers['content-type']` 的类型是 `string | string[] | undefined`（HTTP 允许重复头）：
-           重复的 Content-Type 本身就是畸形请求，取第一个之后交给解析器去拒。 */
         const contentType = req.headers['content-type'];
         const { filename, bytes } = parseMultipartAudio(Array.isArray(contentType) ? contentType[0] : contentType, rawBody);
-        /* `task_id` **不回给前端**：它是 ASR 的内部标识，前端拿到它就想自己轮询，
-           而"前端看不到 ASR 协议"正是这条路线选同源转发的原因（第二节）。 */
+        /* `task_id` 不回给前端：它是 ASR 的内部标识，前端拿到它就想自己轮询，
+           而"前端看不到 ASR 协议"正是这条路线选同源转发的原因（第二节）。  */
         const { text, modelId, confidenceNote } = await transcribeSegmentViaAsr(config, { index, audio: bytes, sessionId });
         noteCaptureSession(sessionId, config.config.asr.endpoint, actorLabelOf(req));
         json(res, 200, {
@@ -7070,11 +6194,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
             filename,
             text,
             audioBytes: bytes.byteLength,
-            /* 模型标识由**部署声明**（该接口不返回模型信息）：前端把它写进 `asrModelId`，
-               留痕里那句"哪个模型听写的"才有出处 */
+            /* 模型标识由部署声明（该接口不返回模型信息）：前端把它写进 `asrModelId`，
+               留痕里那句"哪个模型听写的"才有出处  */
             modelId,
-            /* "ASR 未提供置信度"这句标注**由服务端给出**（界面照抄，不自己编）：
-               它是同一条纪律的一部分（未知按上限处理），两处各写一句迟早会不一致。 */
+            /* "ASR 未提供置信度"这句标注由服务端给出（界面照抄，不自己编）：
+               它是同一条纪律的一部分（未知按上限处理），两处各写一句迟早会不一致。  */
             confidenceNote,
           },
           state: stateFor(req),
@@ -7091,10 +6215,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/dictation/capture/records/clear': {
-      /* 清掉**当前这份病历**的采集记录。
-         为什么必须带 `docId` 且必须等于当前病历：不带就当成"清空全部"的话，
-         一次误点会清掉全科室的线索；而"全清"是运维动作（直接删记录文件即可），
-         不该长在医生端这一颗按钮上。服务端再核一次，是因为前端传什么都不该被信任。 */
       const entry = current();
       const docId = boundedText(body.docId, 80);
       if (docId === '' || docId !== entry.docId) {
@@ -7127,9 +6247,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/dictation/capture/session': {
-      /* 一次采集结束时的汇总。字段表刻意**不收文本、不收音频**：
+      /* 一次采集结束时的汇总。字段表刻意不收文本、不收音频：
          文本已经作为建议走 `/api/dictate`（有来源、有留痕），再抄一份到这里
-         就成了第二份病历内容副本，而它的生命周期与门控和正文完全不是一回事。 */
+         就成了第二份病历内容副本，而它的生命周期与门控和正文完全不是一回事。  */
       const entry = current();
       const total = boundedInt(body.total, 10000);
       const failed = boundedInt(body.failed, 10000);
@@ -7169,23 +6289,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/dictation/capture/demo-run': {
-      /* 演示采集：**用脚本音频把整条链真的跑一遍**（采集源 → 流式分片 → 逐段转发 → 提交成建议）。
-         它不需要麦克风、不需要 HTTPS，存在的理由与"靶子 ASR"完全一样：
-         让"采集 → 建议"今天就能被真的走一遍，而不是只能靠读代码相信它。
-
-         界面必须标明**这是脚本音频、不是麦克风**（`sourceId: 'sample'` 随 state 下发）：
-         与"模拟转写标成 demo"同一条纪律，而这一条更重 —— 录音关涉的是"谁在被录"。
-
-         真实采集（浏览器麦克风 / 桌面壳）走的是**同一个编排** `runDictationCapture`，
-         差别只在采集源那一个槽位（见 docs/L2-语音采集设计.md 第九之二节）。 */
       const entry = current();
       const config = captureConfigNow();
       if (!config.configured) {
         json(res, 200, {
           ok: false,
           code: 'E_CAPTURE_NOT_CONFIGURED',
-          /* 文案里**不许出现 Markdown 语法**：它会原样进 toast（`A14` 的纪律，但那条只扫前端文件，
-             扫不到服务端文案 —— 实测就是靠真实渲染发现的）。 */
+          /* 文案里不许出现 Markdown 语法：它会原样进 toast（`A14` 的纪律，但那条只扫前端文件，
+             扫不到服务端文案 —— 实测就是靠真实渲染发现的）。  */
           message: '未配置语音识别服务：演示采集也要真的走一遍转发，不会退回模拟转写',
           state: stateFor(req),
         });
@@ -7245,9 +6356,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           {
             transcriber: (params) => transcribeSegmentViaAsr(config, params),
             submitter: async (params) => {
-              /* **即便这段数据是进程内来的，也走同一份校验**：置信度必须由服务端按上限填，
+              /* 即便这段数据是进程内来的，也走同一份校验：置信度必须由服务端按上限填，
                  而"服务端填置信度"这条规则一旦有两条实现（一条给 HTTP、一条给进程内），
-                 它们迟早会不一致 —— 那正是这一层最不该出的事。 */
+                 它们迟早会不一致 —— 那正是这一层最不该出的事。  */
               let segments: TranscriptSegment[];
               try {
                 segments = validateSubmittedSegments(params.segments, { confidenceCeiling: dictationCeilingNow() });
@@ -7286,8 +6397,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/dictation/capture/demo-stop': {
-      /* 医生按停：采集源立即收尾，**当前那一段立刻定稿**（设计第四节）。
-         停止本身不该失败 —— 它被按停时抛错，只会让人以为出了别的问题。 */
+      /* 医生按停：采集源立即收尾，当前那一段立刻定稿（设计第四节）。
+         停止本身不该失败 —— 它被按停时抛错，只会让人以为出了别的问题。  */
       if (captureStop === null) {
         json(res, 200, { ok: false, code: 'E_NO_CAPTURE_RUN', message: '当前没有正在进行的采集', state: stateFor(req) });
         return;
@@ -7356,7 +6467,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           hits: scan.hits.length,
           created,
           already,
-          /* 未判定的原因一并回传：界面要能说清"哪些没判、为什么" */
           unevaluated: scan.unevaluated,
         },
         state: stateFor(req),
@@ -7365,11 +6475,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/visit-timeline': {
-      /* 就诊时间轴：把**一次就诊的全部文书**摊在一条轴上，让跨文书结论看得见落点。
-         判定不在这里（跨文书谓词与 `/api/qc-form-check` 是同一批已编译规则，
-         连措辞都是同一句），这里只凑两样东西：这条线上有哪几份文书、以及本次就诊的起止。
-         为什么"起止"要从文档上取：一份文书自己就知道 `encounter`（入院/出院时刻），
-         而工作区的就诊结构里不存它 —— 两处各存一份迟早会不一致。 */
       const entry = current();
       const line = visitLineOf(entry.docId);
       /* 不在任何就诊下（如导入的孤立文书）时，它自己就是这条线：轴不能是空的 */
@@ -7419,9 +6524,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/visit-compare': {
       /* 跨次就诊对比：同一患者、按成文时刻倒序列出其他文书，默认挑"同诊断且最近"的一份并排对照。
-         边界只到**同一位患者**：不跨患者、不跨租户 —— 跨患者读数据走受控阅读授权
+         边界只到同一位患者：不跨患者、不跨租户 —— 跨患者读数据走受控阅读授权
          （申请—授权—留痕），不能被这里顺手绕过。
-         每次读取都进日志：看别人的历史文书是敏感动作，日志要能回答"谁在什么时候看了谁"。 */
+         每次读取都进日志：看别人的历史文书是敏感动作，日志要能回答"谁在什么时候看了谁"。  */
       const entry = current();
       const currentDoc = entry.session.document;
       const line = patientLineOf(entry.docId);
@@ -7443,7 +6548,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       for (const visit of line.patient.visits) {
         for (const item of visit.docs) {
           if (item.docId === entry.docId) continue;
-          /* 只在**已装载**的文书里找：历史文书在启动时整库装载，这里不该再去解密读盘 */
+          /* 只在已装载的文书里找：历史文书在启动时整库装载，这里不该再去解密读盘  */
           const other = state.entries.get(item.docId);
           if (!other) continue;
           const doc = other.session.document;
@@ -7464,9 +6569,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       candidates.sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
 
       const requested = String(body.previousDocId ?? '');
-      /* 默认基线必须是**更早**的文书："上次怎么写的"里那个"上次"是时间意义上的。
+      /* 默认基线必须是更早的文书："上次怎么写的"里那个"上次"是时间意义上的。
          后面的文书照样列在候选里（医生可能想对照出院记录），但不做默认 ——
-         把"下一次"当成"上一次"，会让"沿用上次医嘱"变成"沿用未来的医嘱"。 */
+         把"下一次"当成"上一次"，会让"沿用上次医嘱"变成"沿用未来的医嘱"。  */
       const earlier = candidates.filter((item) => String(item.createdAt) < String(currentDoc.createdAt));
       const pool = earlier.length > 0 ? earlier : candidates;
       const chosen = (requested !== '' ? candidates.find((item) => item.docId === requested) : undefined)
@@ -7475,9 +6580,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const previousDoc = chosen ? state.entries.get(chosen.docId)?.session.document : undefined;
       const compare = previousDoc ? compareVisits(previousDoc, currentDoc) : null;
 
-      /* 沿用用药建议要落在**本次**文书的对应章节上。章节本身不承载文字，
+      /* 沿用用药建议要落在本次文书的对应章节上。章节本身不承载文字，
          所以落到它下面的第一个文本节点；本次没有对应章节就如实不给按钮
-         —— 让医生先建章节，比把医嘱塞进"主诉"下面要好。 */
+         —— 让医生先建章节，比把医嘱塞进"主诉"下面要好。  */
       let medicationTarget: { nodeId: string; title: string } | null = null;
       if (compare && compare.medication.paragraphs.length > 0) {
         const sections = Object.values(currentDoc.nodes).filter((node) => node.type === 'section');
@@ -7517,9 +6622,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/discharge-summary': {
-      /* 出院汇总：把本次住院**其他文书的原文**按出院小结的目标章节搬过来，并列出缺口。
-         只算不写（口径见 `summary/discharge-summary.ts` 文件头）：
-         这一路径一个字节都不落进正文，正文的变化只能来自医生采纳建议。 */
       const entry = current();
       const line = visitLineOf(entry.docId);
       if (!line) {
@@ -7553,9 +6655,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/discharge-summary/apply': {
-      /* 生成建议 = 把原文送进建议通道，**不落笔**。
+      /* 生成建议 = 把原文送进建议通道，不落笔。
          出院诊断是 `keyContent`，置信度给 0.99 也仍然要人工确认 ——
-         门控在落笔这一步，原文搬运不构成例外（与「沿用上次医嘱」同一口径）。 */
+         门控在落笔这一步，原文搬运不构成例外（与「沿用上次医嘱」同一口径）。  */
       const entry = current();
       const applyLine = visitLineOf(entry.docId);
       const applyApplicability = dischargeSummaryApplicability({
@@ -7653,7 +6755,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         );
         const after = describeAccess(record, AUTH_MODE);
         /* 审计只记"从什么状态到什么状态"+ 密钥动作。
-           **不记密钥值，连哈希也不记** —— 哈希在审计里没有用处，只会让人以为能从它反推。 */
+           不记密钥值，连哈希也不记 —— 哈希在审计里没有用处，只会让人以为能从它反推。  */
         recordAdminAudit({
           actor: by,
           subject: '预问诊接入',
@@ -7695,11 +6797,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/previsit/intake': {
-      /* **外部写入**：候诊时患者自填（或 HIS 预问诊端代传）的内容从这里进来。
+      /* 外部写入：候诊时患者自填（或 HIS 预问诊端代传）的内容从这里进来。
          它不碰任何文书：预问诊发生在接诊之前，那时门诊病历可能还不存在；
          更要紧的是，`status:draft` 的文书有 `createdBy`，系统不能替医生预建一份病历。
 
-         这里只登记，不判断：不识别症状、不推断诊断、不给建议。 */
+         这里只登记，不判断：不识别症状、不推断诊断、不给建议。  */
       /* 准入先于解析：未通过的调用方不该拿到"你第 2 条写得不对"这种校验反馈 */
       let accessRecord;
       try {
@@ -7761,9 +6863,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/previsit/take': {
-      /* 生成建议 = 把患者写的原文交进建议通道，**不落笔**。
+      /* 生成建议 = 把患者写的原文交进建议通道，不落笔。
          置信度给 0.99 是"门控口径"（内容是他自己写的，不是模型推测），
-         但采纳仍必须由医生逐条点 —— 患者自述进入病历这件事本身就要人负责。 */
+         但采纳仍必须由医生逐条点 —— 患者自述进入病历这件事本身就要人负责。  */
       const entry = current();
       const patientId = entry.session.document.patient.patientId;
       const read = previsitOfPatient(patientId);
@@ -7816,11 +6918,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/compare/carry-over': {
-      /* 沿用上次医嘱 = **生成一条建议**，不是落笔。
-         为什么必须走建议通道：这段文字来自上一次就诊，是否适用于这一次是临床判断，
-         由人在这份文书上确认；直接写进正文等于让"上次的方案"替医生签字。
-         置信度 0.99 在这里是"门控口径"（内容是原文摘录，不是模型推测），
-         但采纳后仍需人工确认（`humanConfirmed` 不会因此变成 true）。 */
       const entry = current();
       const session = entry.session;
       const nodeId = String(body.targetNodeId ?? '');
@@ -7852,15 +6949,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/qc-content-check': {
-      /* 内涵类质控：判定不在这里，而在外部引擎（形式类是 `/api/qc-form-check`，纯本地）。
-         所以这条路径每一步都在处理"别人的产出"：构造最小请求 → 交给引擎 →
-         逐条校验（契约版本 / 禁用字段 / 规则越权 / 引文幻觉…）→ 只把通过校验的落成旁挂注解。
-
-         本轮引擎未接入：它不是"没跑"，而是"跑不了"。两者在数据上必须分得开，
-         所以产出走既有的未判定通道逐条说明原因，而不是让"0 命中"顶替它
-         （在界面上那两者长得一模一样）。 */
-      /* 配置**每次调用都重新读**：管理后台改完规则，下一次质控就按新规则判（不必重启）。
-         读不出来时**不当作"未接入"**：那会让"我配好了却没生效"无从察觉（见 `qc-content-store.ts`）。 */
       const qc = qcContentSafe();
       const qcContent = qc.content;
       const setup =
@@ -7888,8 +6976,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           })),
       });
 
-      /* 引擎抛错/超时一律当"未判定"，绝不当"没问题"：一个静默失败的外部引擎
-         会让整批规则看起来是干净的（见 `content-engine.ts` 文件头）。 */
       let produced: unknown;
       let engineCallError: string | null = null;
       const callStartedAt = Date.now();
@@ -8063,11 +7149,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/template-create': {
-      /* 从模板新建一份文书。三点的取舍：
-         ① 挂在当前患者、当前就诊下，不做"凭空造患者"，否则树里会出现无主的孤儿卷；
-         ② 模板只给骨架，正文空着等医生写（模板不塞内容，见 `src/template/types.ts` 文件头）；
-         ③ 派生值算不出来时照实告警，绝不编一个数字填进去（假数会被当成测量结果）。
-         它不写任何已有病历，所以不走 `act()`，它新建的是一份新文档。 */
       const entry = current();
       const source = entry.session.document;
       const templateId = String(body.templateId ?? '');
@@ -8082,12 +7163,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         return;
       }
 
-      /* 适用科室：**真的判定**，不再是标注。
-         为什么在这里再判一次（医生端「新建」列表已经按科室筛过）：
-         列表是"当时那一刻"的；请求可能是任何来源（脚本、旧页面），
-         而这条口子的后果是"开出一份本不该在这个科开的文书"。 */
       /* 归一后再判：老病历里的"呼吸内科"与模板上的 `DEPT_RESP` 说的是同一个科 ——
-         不归一的话，限科室的文书在这些病历上会被**无理由**拦下来 */
+         不归一的话，限科室的文书在这些病历上会被无理由拦下来  */
       const deptCode = normalizeDepartmentCode(departmentsSafe().loaded, source.encounter?.deptCode);
       if (!deptAllowsTemplate(found.definition, deptCode)) {
         const names = found.definition.departments ?? [];
@@ -8106,7 +7183,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const at = new Date().toISOString();
       const docId = `doc_tpl_${state.entries.size + 1}`;
       /* 上下文：患者 / 就诊 / 时间 / 开单医生由引擎从参数派生；
-         科室**名称**由这里补 —— 引擎不认识字典，也不该认识（它只管把给它的值填进去）。 */
+         科室名称由这里补 —— 引擎不认识字典，也不该认识（它只管把给它的值填进去）。  */
       const deptList = departmentsSafe().loaded;
       let created: ReturnType<typeof instantiateTemplate>;
       try {
@@ -8115,8 +7192,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           docId,
           createdBy: writeActor(req, entry).id,
           patient: source.patient,
-          /* 新开的文书里存**归一后的编码**（而不是把老病历里的旧写法继续抄下去）：
-             否则每开一次就把"名称写法"往后传一代，永远清不干净 */
+          /* 新开的文书里存归一后的编码（而不是把老病历里的旧写法继续抄下去）：
+             否则每开一次就把"名称写法"往后传一代，永远清不干净  */
           ...(source.encounter
             ? { encounter: { ...source.encounter, ...(deptCode ? { deptCode } : {}) } }
             : {}),
@@ -8192,9 +7269,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
               /* `valueText` 必须一起给：`applyExternalData` 只在显式提供时才覆盖它，
                  而界面与机读都优先读 valueText，漏了他就会出现"节点值是 4、界面显示空"。 */
               valueText: String(change.next),
-              /* ⚠️ 必须传节点原有的证据：`applyExternalData` 会把 `provenance` 整体替换，
+              /*  必须传节点原有的证据：`applyExternalData` 会把 `provenance` 整体替换，
                  换成一条临时证据就等于抹掉依赖边与控件出处，表现是"重算一次之后就再也算不出来"。
-                 实测踩到过，故在此写明。重算不改变"这个值是怎么来的"，证据也不该变。 */
+                 实测踩到过，故在此写明。重算不改变"这个值是怎么来的"，证据也不该变。  */
               evidence: (doc.nodes[change.nodeId]?.provenance.evidence ?? []).map((item) => ({ ...item })),
             })),
           },
@@ -8220,16 +7297,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/rule-item-update': {
-      /* 改一条规则：标题 / 级别 / 判定方式与参数 / 判定依据 / 建议动作。
-         它走的是 `writePack()` —— 包内容的唯一写路径，于是后果与"换一份新包"同类：
-           - **内容指纹会变**（判定标准确实换了一版），前后指纹进系统审计；
-           - **生效指纹跟着变**：生效指纹是"内容 + 开关"的合成，内容换了它必换 ——
-             "只动生效指纹、不动内容指纹"是**开关条目**那一侧的特权，不是这里；
-           - 条目开关本身按 `packId` 保留（停用着的规则不会因为改了个标题被顺手启用）；
-           - 校验失败则库与注册表都不动。
-         **判定机制不在这次编辑的范围里**：谓词只能从封闭注册表里挑（见 `predicates.ts`），
-         级别上限是 warn（`block` 走 `E_RULE_SEVERITY_EDIT_LIMIT`）——
-         要新造一种判定逻辑，得改代码并加用例。 */
       const entry = current();
       let adminId: string;
       try {
@@ -8263,8 +7330,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         suggestion?: string | null;
       } = {};
       if (body.title !== undefined) patch.title = typeof body.title === 'string' ? body.title : '';
-      /* 级别原样交给内核判：**只开放 info / warn** 这条界线只该有一处（`rule-edit.ts`），
-         在这里再写一遍"哪些级别可以"迟早会与它漂移 */
+      /* 级别原样交给内核判：只开放 info / warn 这条界线只该有一处（`rule-edit.ts`），
+         在这里再写一遍"哪些级别可以"迟早会与它漂移  */
       if (body.severity !== undefined) patch.severity = body.severity as AnnotationSeverity;
       if (body.predicate !== undefined) {
         const raw = body.predicate;
@@ -8337,8 +7404,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
             kind: '变更',
             before: { 包指纹: result.fingerprintBefore ?? '（原先没有这个包）' },
             after: { 包指纹: result.fingerprintAfter },
-            /* 审计的 `note` 要说清**改了哪几项**：光有"内容指纹变了"，
-               事后只能知道"换过一版"，答不出"换的是判法还是只是个标题" */
+            /* 审计的 `note` 要说清改了哪几项：光有"内容指纹变了"，
+               事后只能知道"换过一版"，答不出"换的是判法还是只是个标题"  */
             note: `改规则 ${packId} / ${itemId}：${[
               patch.title !== undefined ? `标题 →「${String(patch.title)}」` : '',
               patch.severity !== undefined ? `级别 → ${String(patch.severity)}` : '',
@@ -8379,12 +7446,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/rule-item-create': {
       /* 新建一条规则（判定方式从封闭的谓词表里挑，参数照其规格填）。
-         放进**自建包**（`doc.rule.custom`）：哪些是本院自己维护的必须一眼分得出来，
+         放进自建包（`doc.rule.custom`）：哪些是本院自己维护的必须一眼分得出来，
          否则下次有人载入一份交付方的包，本院这几条会被整体覆盖而没人知道。
 
-         新建出来**先停用** —— 判定标准不该"随保存悄悄上线"。
+         新建出来先停用 —— 判定标准不该"随保存悄悄上线"。
          模板侧表达同一件事用的是"新建即草稿（医生端开不出）"；规则这里没有那两态，
-         条目开关就是它的那一态：库里看得见、下一轮质控不跑它，启用是一次显式动作。 */
+         条目开关就是它的那一态：库里看得见、下一轮质控不跑它，启用是一次显式动作。  */
       const entry = current();
       let adminId: string;
       try {
@@ -8484,15 +7551,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return;
     }
 
-    /* ---------------------------- 判定方式库（具名条件） ----------------------------
-       它是**库级资产**（`config.qc-conditions` 一行），不属于任何包，改它**不改包内容**。
-
-       为什么单开三条路径、而不是复用规则那三条：改一条判定方式的后果与改一条规则不是一件事
-       —— 它会让**所有引用它的规则一起变，而且可能跨好几个包**。所以：
-         - 写入前一律 `assertLibraryChangeIsSafe()` 试算（`writeConditions`）；
-         - 审计 subject 写成「判定方式库」而不是「内容包」：这次动的不是哪个包；
-         - 界面在提交前要把"会影响哪几条（在哪个包）"摆在人面前（`state.qcConditions[].usedBy`）。 */
-
     case '/api/qc-condition-create': {
       const entry = current();
       let adminId: string;
@@ -8556,13 +7614,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/qc-condition-update': {
-      /* 改一条条件（名称 / 说明 / 条件本身）。
-         **编码不给改**：编码是引用键，改了它，引用它的规则会立刻变成悬空引用 ——
-         "换一条新条件"是新建 + 改引用，不是改编码。
-
-         这次改动会影响所有引用它的规则，所以：
-           - 提交前的确认由界面把 `usedBy` 摆出来（同一份数据，见 `state.qcConditions`）；
-           - 审计的 note 里**记下影响面**（事后只看"指纹变了"答不出"坏了哪几条规则"）。 */
       const entry = current();
       let adminId: string;
       try {
@@ -8639,13 +7690,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/qc-condition-delete': {
-      /* 删一条判定方式：**被任何包的规则引用时拒绝**（内核 `removeCondition`），
-         并把引用它的规则（连在哪个包）列出来。
-         为什么不让它"顺手把那几条规则也删掉"：删规则是另一个决定，而且那几条规则里
-         可能有早已生效的判定 —— 一次"删判定方式"不该悄悄决定一批规则的存亡。
-
-         与从前（判定方式是包内容）的一点不同：**不存在的"包里最后一条就把包删掉"**。
-         判定方式库不是包，删空它就是"库里一条都没有"，库本身还在（与科室字典一致）。 */
       const entry = current();
       let adminId: string;
       try {
@@ -8701,9 +7745,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/rule-item-delete': {
       /* 删一条规则：包里少一条内容。
-         它**不动任何病历**：质控提示是旁挂注解（带着当时的规则号与依据文案），
+         它不动任何病历：质控提示是旁挂注解（带着当时的规则号与依据文案），
          规则不在了，注解还在、还读得出来 —— 只是"出自哪一条规则"再也追不到内容了。
-         这句话必须说在界面上，否则"删掉一条规则"听起来像"删掉一批质控结论"。 */
+         这句话必须说在界面上，否则"删掉一条规则"听起来像"删掉一批质控结论"。  */
       const entry = current();
       let adminId: string;
       try {
@@ -8734,13 +7778,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         return;
       }
       try {
-        /* 只找**规则**条目：同一个包里还有具名条件（`C-CUSTOM-N`），
-           它们没有 title，混进来会让审计里的名字变成一个编码 */
+        /* 只找规则条目：同一个包里还有具名条件（`C-CUSTOM-N`），
+           它们没有 title，混进来会让审计里的名字变成一个编码  */
         const descriptor = ruleItemsOf(pack as QcRulePack).find((item) => item.itemId === itemId);
         const title = descriptor?.title ?? itemId;
         const after = removeRule(pack as QcRulePack, itemId);
-        /* 删到最后一条：**连包一起删**，而不是留一个空包 —— 空包通不过校验
-           （"空包几乎总是导出出错"），而这里是人有意为之（见 `deletePack`）。 */
         if (after.items.length === 0) {
           const removed = deletePack({ registry: packRegistry, db: STORAGE.db, packId });
           packStoreReport = removed.report;
@@ -8807,11 +7849,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/knowledge-pack-toggle': {
       /* 包条目开关 = 部署策略（本专科跑哪些规则、开哪几份文书），与模型地址同类：改它要管理员身份。
-         规则条目与模板条目走的是**同一个接口**（通用层不区分条目形状），
+         规则条目与模板条目走的是同一个接口（通用层不区分条目形状），
          所以这里的措辞不再写"规则包"，写错会把模板开关记成改了判定标准。
          关键是它不碰任何病历，所以这里不走 `act()`（那是"写文档"的入口，
          会落文档留痕、会改 rev），只记一条系统级审计。
-         这条边界正是"包不是文档内容"在代码上的样子。 */
+         这条边界正是"包不是文档内容"在代码上的样子。  */
       const entry = current();
       let adminId: string;
       try {
@@ -8842,8 +7884,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
            内存态时它一重启就回出厂，而界面上看不出任何异常。 */
         let persisted: { ok: boolean; message?: string };
         try {
-          /* 只改 `disabled` 列，内容列一个字节都不碰：否则"关掉一条规则"会连带改变内容指纹，
-             "换了包"与"只是关了条规则"就又混成一件事了（见 `saveDisabledItems`）。 */
           saveDisabledItems(packRegistry, STORAGE.db);
           persisted = { ok: true };
         } catch (err) {
@@ -8876,14 +7916,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/template-item-update': {
-      /* 改一份文书：名称 / 适用科室 / 状态 / **骨架（仅草稿可改）**。
+      /* 改一份文书：名称 / 适用科室 / 状态 / 骨架（仅草稿可改）。
          它走的是 `writePack()` —— 包内容的唯一写路径，于是后果与"换一份新包"同类：
-           - **内容指纹会变**（这份模板确实换了一版内容），前后指纹进系统审计；
+           - 内容指纹会变（这份模板确实换了一版内容），前后指纹进系统审计；
            - 条目开关按 `packId` 保留（关着的文书不会因为改了个名字就被顺手打开）；
            - 校验失败则库与注册表都不动。
-         骨架只对**草稿**开：已发布的文书可能已经开出过病历，改骨架会让"当时按哪一版开的"
+         骨架只对草稿开：已发布的文书可能已经开出过病历，改骨架会让"当时按哪一版开的"
          对不上 —— 要先改就先撤稿（撤稿后医生端立刻开不出它），代价由人显式承担。
-         它同样不碰任何病历，所以不走 `act()`。 */
+         它同样不碰任何病历，所以不走 `act()`。  */
       const entry = current();
       let adminId: string;
       try {
@@ -8910,9 +7950,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         });
         return;
       }
-      /* 科室在界面上是**从字典里勾选**（所以这里是编码数组），
+      /* 科室在界面上是从字典里勾选（所以这里是编码数组），
          但字符串形式仍然收：脚本与旧页面按"产科、妇科"发过来时，
-         切成数组这件事只该有一处，放在界面里会让"多一个空格"变成两个不同科室。 */
+         切成数组这件事只该有一处，放在界面里会让"多一个空格"变成两个不同科室。  */
       const patch: {
         name?: string;
         departments?: string[];
@@ -8924,8 +7964,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       if (body.name !== undefined) patch.name = typeof body.name === 'string' ? body.name : '';
       if (body.departments !== undefined) {
         if (typeof body.departments === 'string') {
-          /* 空串要切成**空数组**而不是 `['']`：后者会被当成"填了一个空科室"而拒绝，
-             而界面上留空的意思恰恰是"通用（不限科室）" */
+          /* 空串要切成空数组而不是 `['']`：后者会被当成"填了一个空科室"而拒绝，
+             而界面上留空的意思恰恰是"通用（不限科室）"  */
           patch.departments = body.departments.split(/[,，、;；]/).map((value) => value.trim()).filter((value) => value !== '');
         } else if (Array.isArray(body.departments)) {
           patch.departments = body.departments.map((value) => String(value));
@@ -8957,8 +7997,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         }
       }
       if (body.sections !== undefined) {
-        /* 骨架原样交给内核校验：写包时也会校验整包，但那时报的是"整包不通过"，
-           而人要知道的是"第几章第几个槽位不对"（见 `patchTemplateMeta`）。 */
         if (Array.isArray(body.sections)) patch.sections = body.sections as unknown as TemplateSection[];
         else {
           json(res, 200, {
@@ -8971,11 +8009,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         }
       }
       if (body.slotMeta !== undefined) {
-        /* 槽位元数据（显示名 / 从系统带入 / 必填 / 单位 / 关键内容 / 默认值 / 参考范围 / 另起一段）：
-           **已发布的文书也收** —— 这一族在开文书那一刻才起作用，不进任何已开出的病历
-           （见 `SlotMetaPatch`）。
-           形状只在这里挡一层（是不是数组），定位与逐项判定交给内核：
-           界面上那一格到底能不能改，规则只该有一处。 */
         if (!Array.isArray(body.slotMeta)) {
           json(res, 200, {
             ok: false,
@@ -8988,12 +8021,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         patch.slotMeta = body.slotMeta as SlotMetaPatch[];
       }
       if (body.sectionMeta !== undefined) {
-        /* 章节自身属性（必备章节 / 关键内容 / 章节说明）：与槽位元数据**同一档** ——
-           **已发布的文书也收**，因为它们在开文书那一刻才被抄进章节节点，不进任何已开出的病历
-           （见 `SectionMetaPatch`）。而"哪几章算必备、哪几章整章算关键内容"恰恰是
-           上线之后随着质控反馈反复调的东西，逼人为此撤稿（医生端立刻开不出它）代价太大。
-
-           注意它**不改骨架**：章节的增删与顺序、章节编码、标题仍然只有草稿能改。 */
         if (!Array.isArray(body.sectionMeta)) {
           json(res, 200, {
             ok: false,
@@ -9050,8 +8077,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
             kind: '变更',
             before: { 包指纹: result.fingerprintBefore ?? '（原先没有这个包）' },
             after: { 包指纹: result.fingerprintAfter },
-            /* 审计的 `note` 要说出**改了哪几项**：光有"内容指纹变了"，
-               事后只能知道"换过一版"，答不出"换的是章节还是只是个名字" */
+            /* 审计的 `note` 要说出改了哪几项：光有"内容指纹变了"，
+               事后只能知道"换过一版"，答不出"换的是章节还是只是个名字"  */
             note: `改文书 ${packId} / ${itemId}：${[
               patch.name !== undefined ? `名称 →「${String(patch.name)}」` : '',
               patch.departments !== undefined ? `适用科室 → ${patch.departments.length === 0 ? '通用' : patch.departments.join('、')}` : '',
@@ -9090,14 +8117,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/template-item-create': {
-      /* 新建一份**文书骨架**（`/api/template-create` 是医生端"照着模板开一份病历"，两回事）。
-         默认状态是**草稿**。
-         为什么默认草稿而不是"建好就能开"：新建的骨架必然还不完整，让它当场可开，
-         医生就会照着它开出结构残缺的病历 —— 而"这份病历为什么少一章"事后无从解释。
-         发布是**一次显式动作**（`PATCH status`，见 `/api/template-item-update`）。
-         新建的文书放进自建包（`doc.template.custom`）而不是塞进交付方的包里：
-         "哪些是本院自己维护的"必须一眼分得出来，否则下次有人载入一份新包，
-         本院改过的东西被整体覆盖，而没人知道覆盖掉了什么。 */
       const entry = current();
       let adminId: string;
       try {
@@ -9141,8 +8160,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
       const existing = packRegistry.get(CUSTOM_TEMPLATE_PACK_ID) as TemplatePack | undefined;
       try {
-        /* **总是草稿**：新建这条路不提供"一步建好就上线"的入口 ——
-           那等于把"发布"这个动作藏进"保存"里 */
+        /* 总是草稿：新建这条路不提供"一步建好就上线"的入口 ——
+           那等于把"发布"这个动作藏进"保存"里  */
         const created = addTemplate(existing ?? null, {
           name,
           docType: docType as unknown as DocTypeRef,
@@ -9194,14 +8213,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/expression-item-create': {
-      /* 新建一个**医学表达式控件**：一份公式，被多份文书引用，改一处处处生效。
-         为什么要让人在界面上建它（而不是只能随包提供）：
-         临床上"本院要按自己那版公式算"是常态，而把公式写死在交付方的包里，
-         等于每次调整都要等一次交付。
-
-         公式是**结构**（AST）而不是文本：界面上的构造器是"选函数 / 选填写项 / 填数字"，
-         与 AST 一一对应，所以不会出现"界面上写得出来、引擎读不懂"这种最难查的错。
-         控件与文书一样落**自建包**，走同一条 `writePack()`（换一版内容、前后指纹进审计）。 */
       const entry = current();
       let adminId: string;
       try {
@@ -9280,10 +8291,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/expression-item-update': {
-      /* 改一个表达式控件：名称 / 单位 / 说明 / **公式**。
-         公式改动**不回写任何已开出的病历**（派生值不会自己变），
-         但医生下次点「重算派生值」会按新公式算 —— 所以界面必须为它问一次确认，
-         而审计里要留下**改前改后的公式原文**：否则"这个数为什么变了"根本没线索。 */
       const entry = current();
       let adminId: string;
       try {
@@ -9372,8 +8379,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/expression-item-delete': {
-      /* 删一个表达式控件：被文书引用时**拒绝**（并列出是哪些文书在用）。
-         理由见内核 `removeExpression`：删掉它，报错会出现在"医生要开那份文书"的时候。 */
+      /* 删一个表达式控件：被文书引用时拒绝（并列出是哪些文书在用）。
+         理由见内核 `removeExpression`：删掉它，报错会出现在"医生要开那份文书"的时候。  */
       const entry = current();
       let adminId: string;
       try {
@@ -9403,7 +8410,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         const beforeItem = pack.items.find((item) => item.itemId === itemId) as ExpressionDefinition | undefined;
         const name = beforeItem?.name ?? itemId;
         const after = removeExpression(pack, itemId);
-        /* 删到最后一条：连包一起删（空包通不过校验，见 `deletePack`） */
         if (after.items.length === 0) {
           const removed = deletePack({ registry: packRegistry, db: STORAGE.db, packId });
           packStoreReport = removed.report;
@@ -9469,13 +8475,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/control-item-create': {
-      /* 新建一个**专科控件**：这一格长什么样、填什么。
-         为什么要让人在界面上建它（而不是只能随包提供）：各专科的格子长得完全不一样
-         （牙位图是 32 行 × 几个列、月经史是一条时间轴、量表是十来个评分项），
-         写死在交付方的包里等于"某个科室想加一格"都要等一次交付。
-         形状只能从**闭集**里选（形状决定渲染器，而渲染器是代码）；字段里要算的那些
-         引用同包的**表达式控件** —— 控件自身不带公式，同一件事只有一处口径。
-         与文书、表达式控件一样落**自建包**，走同一条 `writePack()`（换一版内容、前后指纹进审计）。 */
       const entry = current();
       let adminId: string;
       try {
@@ -9564,10 +8563,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/control-item-update': {
-      /* 改一个专科控件：名称 / 语义类型 / 形状 / 说明 / **字段** / 行列。
-         字段或形状一改，服务端会**自动把定义升版**（见内核 `patchControl`）：
+      /* 改一个专科控件：名称 / 语义类型 / 形状 / 说明 / 字段 / 行列。
+         字段或形状一改，服务端会自动把定义升版（见内核 `patchControl`）：
          已开出的病历里存的是当时那份字段快照，同一版本号两种解读是最难查的一类错。
-         所以界面上要说清"这次改动会让定义升到 v2"，而审计里要留改前改后的字段数与版本。 */
+         所以界面上要说清"这次改动会让定义升到 v2"，而审计里要留改前改后的字段数与版本。  */
       const entry = current();
       let adminId: string;
       try {
@@ -9676,9 +8675,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/control-item-delete': {
-      /* 删一个专科控件。与表达式控件不同，这里**没有"还被谁引用"的拦截**：
+      /* 删一个专科控件。与表达式控件不同，这里没有"还被谁引用"的拦截：
          文书的槽位今天还没有"控件"这一类，所以没有任何东西会引用它。
-         等槽位能引用控件之后，这条检查必须补上（见内核 `removeControl` 的注释）。 */
+         等槽位能引用控件之后，这条检查必须补上（见内核 `removeControl` 的注释）。  */
       const entry = current();
       let adminId: string;
       try {
@@ -9708,7 +8707,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         const beforeItem = pack.items.find((item) => item.itemId === itemId) as ControlDefinition | undefined;
         const name = beforeItem?.name ?? itemId;
         const after = removeControl(pack, itemId);
-        /* 删到最后一条：连包一起删（空包通不过校验，见 `deletePack`） */
         if (after.items.length === 0) {
           const removed = deletePack({ registry: packRegistry, db: STORAGE.db, packId });
           packStoreReport = removed.report;
@@ -9775,9 +8773,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
     case '/api/template-item-delete': {
       /* 删一份文书：包里少一条内容。
-         它**不动任何已开出的病历**（病历里只有模板指纹，模板不在了指纹还在，
+         它不动任何已开出的病历（病历里只有模板指纹，模板不在了指纹还在，
          只是"出自哪一份"查不到内容了）—— 这句话必须说在界面上，
-         否则"删掉一份文书"听起来像"删掉一批病历"。 */
+         否则"删掉一份文书"听起来像"删掉一批病历"。  */
       const entry = current();
       let adminId: string;
       try {
@@ -9810,8 +8808,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       try {
         const name = (pack as TemplatePack).items.find((item) => item.itemId === itemId)?.name ?? itemId;
         const after = removeTemplate(pack as TemplatePack, itemId);
-        /* 删到最后一条：**连包一起删**，而不是留一个空包 —— 空包通不过校验
-           （"空包几乎总是导出出错"），而这里是人有意为之（见 `deletePack`）。 */
         if (after.items.length === 0) {
           const removed = deletePack({ registry: packRegistry, db: STORAGE.db, packId });
           packStoreReport = removed.report;
@@ -9877,14 +8873,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           }
 
           case '/api/template-item-duplicate': {
-          /* **从已有模板复制一份**（副本落进本院自建包）。
-           为什么副本不留在源包里：源包多半是交付方给的，那里的内容会在下次载入新包时
-           被整体覆盖 —— "哪些是我们自己维护的"必须一眼分得出来（见 `CUSTOM_TEMPLATE_PACK_ID`）。
-           复制交付方那一份出来改，正是这条纪律要支持的用法。
-
-           它会**把模板引用的表达式控件一起带过来**（缺哪个带哪个，并换成自建 id）：
-           模板包里 `useExpression` 只允许同包引用，不带的话复制出来的是一份
-           **校验不过的文书**，而且要等医生开它的时候才发现（见 `copyTemplateIntoPack`）。 */
           const entry = current();
           let adminId: string;
           try {
@@ -9975,13 +8963,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           }
 
           case '/api/fragment-item-create': {
-          /* 新建一个**章节片段**（界面上「存为片段」走它）。
-           片段恒进**本院自建包**：它是院内自己攒的素材，与"新建一份文书"同一条纪律
-           （交付方包里那些内容会在下次载入新包时被整体覆盖）。
-
-           它会把这一章引用的**表达式控件一起带过来**（从整个注册表里找定义）：
-           界面上"存为片段"的那一章可能来自交付方包，而片段必须自足 ——
-           `useExpression` 只允许同包引用（见 `carryControlsInto`）。 */
           const entry = current();
           let adminId: string;
           try {
@@ -10068,10 +9049,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           }
 
           case '/api/fragment-item-update': {
-          /* 改一个章节片段：名称 / 说明 / 内容，走同一条 `writePack()`。
-           **它不改任何已开出的病历，也不改任何已经用这个片段拼好的文书** ——
-           插入是复制，不是引用（见 `template-pack.ts` 的 `FragmentDefinition`）。
-           这句话要说在界面上：不说的话，"改了片段"听起来像"改了那些文书"。 */
           const entry = current();
           let adminId: string;
           try {
@@ -10164,9 +9141,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
           case '/api/fragment-item-delete': {
           /* 删一个章节片段：包里少一条素材。
-           与删控件不同，这里**没有"还被谁用着"要挡**：插入片段是把章节复制进那份文书，
+           与删控件不同，这里没有"还被谁用着"要挡：插入片段是把章节复制进那份文书，
            之后两者再无联系 —— 所以删片段不会让任何文书变得开不出。
-           反过来那句话说在界面上：已经用这个片段拼好的文书**一个字都不会变**。 */
+           反过来那句话说在界面上：已经用这个片段拼好的文书一个字都不会变。  */
           const entry = current();
           let adminId: string;
           try {
@@ -10199,7 +9176,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           try {
           const name = (pack as TemplatePack).items.find((item) => item.itemId === itemId)?.name ?? itemId;
           const after = removeFragment(pack as TemplatePack, itemId);
-          /* 删到最后一条：**连包一起删**（与删文书同一条处理，理由见那条的注释） */
+          /* 删到最后一条：连包一起删（与删文书同一条处理，理由见那条的注释）  */
           if (after.items.length === 0) {
             const removed = deletePack({ registry: packRegistry, db: STORAGE.db, packId });
             packStoreReport = removed.report;
@@ -10273,8 +9250,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       entry.restored = false;
       entry.sidecarBaseline = undefined;
       ensureRestored(entry);
-      /* 显式标注类型：上面刚把 `sidecarBaseline` 置为 `undefined`，控制流分析会把属性收窄成
-         `undefined`（而 `ensureRestored` 已经把它改回来了），收窄在这里是失真的。 */
       const baseline: string | null | 'unknown' | undefined = entry.sidecarBaseline;
       const accepted = baseline === null || typeof baseline === 'string';
       if (accepted) entry.sidecarConflict = false;
@@ -10287,8 +9262,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
               message: '重新载入失败：磁盘上那一版读不出来（或装载被拒），落盘仍保持关闭',
             }),
         data: {
-          /* 回传完整摘要，不在这里截短：界面上摘要是要拿去逐字比对的东西，
-             而且"截断下发内容"这条纪律（见 `test:ui` 的 A6 静态检查）对服务端一律适用 */
           baseline: baseline === null ? '（盘上没有这个文件：已按首次落盘处理）' : typeof baseline === 'string' ? baseline : null,
           suggestions: entry.session.listSuggestions().length,
         },
@@ -10364,7 +9337,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           by: adminId,
         });
         if (!written.ok) {
-          /* 半途失败要逐份报：前面几份已经进库了，说成"整批失败"会让现场以为什么都没变 */
           results.push({ ok: false, code: written.code, message: written.message });
           failed = true;
           break;
@@ -10491,8 +9463,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         });
         return;
       }
-      /* 整批场景才是沉默报告的常态：范围为 N 个节点，产出往往少于 N 条 ——
-         "少的那几个为什么没写"正是这里最该回答的问题（单条场景下它只有一个目标）。 */
       const silence = resolveSilenceReport({ request, items: response.items, declared: response.skipped });
       entry.lastAiSilence = silence;
       if (response.items.length === 0) {
@@ -10574,12 +9544,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/edit': {
-      /* 人工改文本：不再是整段覆盖。
-         浏览器只交回"这一段现在的全文"，服务端算出与当前内容的最小差异，再用 `replaceRange`
-         只替换真正变了的那一段。两条好处：
-           ① 区间外的 run 格式（marks / 行内 tags）一个字节都不动，整段覆盖会把它们抹掉；
-           ② 一次"改一个标点"不再表现为"整段重写了"。
-         文本没变则整条不发：点进点出编辑框不该产生留痕（连"编辑即确认"也不该被触发）。 */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const text = String(body.text ?? '');
@@ -10601,10 +9565,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/insert-paragraph': {
-      /* 在指定内容节点之后插入一个新段落。
-         为什么要建两个节点：模型里"段落"是结构节点，内容挂在他的文本子节点上，
-         只建段落会得到一个看不见、也写不进东西的空壳。
-         因此文档留痕是两条（两个节点），这是模型的形状，不是重复记录；界面的活动日志合并为一条。 */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const anchor = contentOwnerOf(entry.session, nodeId);
@@ -10636,11 +9596,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/move-node': {
-      /* 段落上移/下移：一次提交写一个 order，而不是"两段交换 order"，
-         交换至少要两次写（两条留痕），而医生只做了一个动作。
-         做法是取相邻两段 order 的中间值：order 是稀疏序号（新建用 +10），中间值天然可用。
-         说明代价：在同一处反复上下移会让间距不断折半，极端情况需要一次"重排序"操作；
-         目前没有那个操作，真到那一步再补。 */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const direction = body.direction === 'down' ? 'down' : 'up';
@@ -10670,9 +9625,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/set-image': {
-      /* 空槽贴图 / 换图：目标是**已经存在的**图片节点（模板开出来的那一格）。
+      /* 空槽贴图 / 换图：目标是已经存在的图片节点（模板开出来的那一格）。
          与 `/api/insert-image` 的分工要清楚：那个是"新插一张图"，
-         这个只回答"把这一格换成这张图"。 */
+         这个只回答"把这一格换成这张图"。  */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const resRef = String(body.resRef ?? '');
@@ -10695,11 +9650,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/delete-image': {
-      /* 删**一张图**。
-         为什么不能复用 `/api/delete-node`：那条路由的删除单位是"段落"——
-         它会把传进来的 nodeId 回溯到所属段落再删整棵子树。拿它删图，
-         同一段里的正文会跟着消失，而界面上只是点了"删图"。
-         （图片字节留在资源目录里不删：撤销要能把它找回来，且内容寻址下删字节也无收益。） */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const node = entry.session.document.nodes[nodeId];
@@ -10732,34 +9682,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/apply-edits': {
-      /* **自由流式编辑的批量落笔**：一次用户动作（打了一段字、按了一次回车、粘了一块）
-         在界面上是一件事，在模型里可能是好几次结构提交（改文本 + 建段落 + 删段落）。
-         为什么必须有这个入口：前端只有"逐条发一次 HTTP"这条路时，
-           ① 撤销会退成"撤掉半个动作"（例如拆段只撤回了新段落、原来那段的尾巴还在新段落里）；
-           ② 每次提交各自落一次盘，一次回车可能触发三份快照。
-         所以这里在**一个撤销组**里按顺序执行，留痕仍是每条一份（模型形状如此），
-         但"撤销"这一下退的是整个动作。
-
-         ## 部分成功，不是全或无
-         与 `acceptSuggestions` 同一条取舍：一条 op 被内核查（关键内容禁删、已签章不可改）
-         拒掉时，**已经成功的那些不回滚**，失败的那条如实回报并写进日志。
-         全或无会让"选中一大段删掉、其中有一句是诊断"变成整段删不掉，
-         而医生真正需要知道的是"哪一句没删成、为什么"。
-
-         ## 为什么 `insert` 只允许 human / imported
-         `origin:'ai'` 在这里被直接拒绝：AI 内容只能经建议通道（suggest → 人工 accept），
-         这是原则 1，不能因为"新加了一个批量入口"就多出一条绕过它的路。 */
       const entry = current();
       const ops = Array.isArray(body.ops) ? body.ops : [];
       if (ops.length === 0) {
         json(res, 200, { ok: false, code: 'E_NO_OPS', message: '没有要落笔的操作', state: stateFor(req) });
         return;
       }
-      /* 乐观锁：**整批一个判据**，判一次。
-         为什么不逐条判：逐条的后果是"前两条落笔、第三条报冲突"，
-         医生的改动被劈成一半，而撤回只能整批撤（同一批不可能撤一半）。
-         不带 `expectedRev` 时不判（本地客户端桥、导入程序这类没有"界面基线"的调用方）。
-         界面传的是"画那一屏时的 rev"，所以这条能真正拦住"两个端同时改同一段"。 */
       const expectedRev = Number.isInteger(body.expectedRev) ? Number(body.expectedRev) : null;
       if (expectedRev !== null && expectedRev !== entry.session.docRev) {
         json(res, 200, {
@@ -10808,8 +9736,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
               return;
             }
             failed.push({ index, op: kind, code: outcome.code, message: outcome.message });
-            /* 逐条失败也进日志：批量动作只留一条汇总日志的话，
-               "为什么这一段没改成"在现场就没有出处。 */
             entry.log.push({
               at: new Date().toISOString(),
               action: `流式编辑第 ${index + 1} 个操作（${kind}）未落笔：${outcome.message}`,
@@ -10847,9 +9773,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/unlock': {
-      /* 解锁已签章文档：内容一个字节不动，只把状态退回 draft，但必须留痕
-         （理由 + 被作废的那次签章，见 `WriteSession.unlock`）。
-         所以这一条不是"绕过不可改"，而是"把不可改的例外变成一次有责任人的动作"。 */
       const entry = current();
       const reason = String(body.reason ?? '');
       const result = act(entry, `解锁已签章文档（理由：${reason.trim() === '' ? '（未填）' : reason.trim()}）`, () =>
@@ -10860,18 +9783,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/paste-text': {
-      /* 多行粘贴：拆成 N 个段落插到锚点之后（单行粘贴不走这里，见 ui.js 的 paste 处理）。
-       *
-       * 为什么必须走服务端：换行在模型里不是段落内的字符，而是段落的边界，
-       * 把多行文本塞进一个 text 节点的 runs 里会得到"一段里有多行"，而机读信息、共享文档、
-       * OFD 导出全都按段落组织。所以多行粘贴只能是"建 N 个段落"。
-       *
-       * 为什么标成 `imported` + 待确认：剪贴板不提供来源，我们判断不出这段文字是从本院 HIS
-       * 拷来的还是医生自己刚写的。两种标法错得不一样：
-       *   · 标成 human → 外来内容可能未经核对就进了签名（不可接受的失败方向）；
-       *   · 标成 imported → 医生多点一次确认（可承受的代价）。
-       * 于是按保守方向处理，并把代价写在界面上（粘贴后给一句提示）。
-       * 这是有意的取舍，不是遗漏：单行粘贴仍等价于"在该段里打字"，来源标记不变。 */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const lines = String(body.text ?? '')
@@ -10888,19 +9799,19 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         json(res, 200, { ok: false, code: 'E_NODE_NOT_FOUND', message: `找不到 ${nodeId} 所属的段落/章节`, state: stateFor(req) });
         return;
       }
-      /* **粘贴即落位**：按落位策略判断每一段该进哪个章节。
-         未命中的段落**落在你粘贴的位置**（不是"未落位"）—— 粘贴与语音唯一的语义差别就在这里：
+      /* 粘贴即落位：按落位策略判断每一段该进哪个章节。
+         未命中的段落落在你粘贴的位置（不是"未落位"）—— 粘贴与语音唯一的语义差别就在这里：
          光标按下的那一处本身就是医生的意图，所以没有理由把他粘的东西挪去别处。
          `place: false` 可关掉（行为回到"全部落在光标处"）。
-         它不改 provenance 判断：落位只决定**放在哪**，不决定**算谁写的**。 */
+         它不改 provenance 判断：落位只决定放在哪，不决定算谁写的。  */
       const placement = body.place === false
         ? null
         : placePastedParagraphs({ texts: lines, anchorSectionId }, entry.session.indexes, placementConfigNow().config);
       const actor = writeActor(req, entry);
       const at = new Date().toISOString();
       /* 每个目标章节各自记一个 order 游标：
-         落到**锚点章节**时插在锚点之后（与原行为一致）；落到**别的章节**时**追加到该章节末尾** ——
-         落位只能给到章节粒度，"插在那一章的哪个位置"它答不了，追加末尾是唯一不撒谎的选择。 */
+         落到锚点章节时插在锚点之后（与原行为一致）；落到别的章节时追加到该章节末尾 ——
+         落位只能给到章节粒度，"插在那一章的哪个位置"它答不了，追加末尾是唯一不撒谎的选择。  */
       const cursors = new Map<string, number>();
       const orderFor = (targetSectionId: NodeId): number => {
         const previous = cursors.get(targetSectionId);
@@ -10962,8 +9873,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
                 reason: item.reason,
                 sectionId: item.sectionId,
                 sectionTitle: item.sectionId ? sectionLabelOf(entry.session, item.sectionId) : null,
-                /* 是否真的被挪走。**由服务端判定**，不让界面从 reason 文案里猜 ——
-                   文案会改，而"这一段到底动没动"是事实 */
+                /* 是否真的被挪走。由服务端判定，不让界面从 reason 文案里猜 ——
+                   文案会改，而"这一段到底动没动"是事实  */
                 moved: item.sectionId !== null && item.sectionId !== anchorSectionId,
               })),
             },
@@ -10982,8 +9893,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         json(res, 400, { ok: false, code: 'E_IMAGE_EMPTY', message: '没有收到图片内容' });
         return;
       }
-      /* 先按**字符数**挡一道：base64 字符数约为字节数 × 4/3。
-         不先挡，一个 100 MB 的请求会先被解进内存再被拒绝。 */
+      /* 先按字符数挡一道：base64 字符数约为字节数 × 4/3。
+         不先挡，一个 100 MB 的请求会先被解进内存再被拒绝。  */
       if (base64.length > Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 8) {
         json(res, 413, {
           ok: false,
@@ -11001,9 +9912,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         });
         return;
       }
-      /* **必须自己认格式**：`Content-Type` 与文件名都由发起方随手写，
+      /* 必须自己认格式：`Content-Type` 与文件名都由发起方随手写，
          改个扩展名就能把任意字节塞进归档件；而写进归档件的东西，
-         将来必须能被证明"当初是什么格式"。 */
+         将来必须能被证明"当初是什么格式"。  */
       const probed = probeImage(bytes);
       if (!probed) {
         json(res, 415, {
@@ -11041,8 +9952,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         json(res, 400, { ok: false, code: 'E_NO_PARAGRAPH', message: '要贴图的那一段不在了（先刷新，再把图贴到现有段落上）' });
         return;
       }
-      /* 只接受**本机存在的资源**：写进一个外部 URL，归档时就打不进字节，
-         于是又回到"纸面有图、归档件没有"的假象 —— 这一轮要消灭的正是那个。 */
+      /* 只接受本机存在的资源：写进一个外部 URL，归档时就打不进字节，
+         于是又回到"纸面有图、归档件没有"的假象 —— 这一轮要消灭的正是那个。  */
       if (!readResourceBytes(resRef)) {
         json(res, 400, { ok: false, code: 'E_IMAGE_MISSING', message: `这张图不在本机：${resRef}` });
         return;
@@ -11077,11 +9988,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/set-control-field': {
-      /* 控件里的一格。与 `/api/set-field` 的三处差别都要说清：
-         ① 目标是**控件节点**，格由 `fieldKey` 定位（键的规则在 `model/control.ts`）；
-         ② 值按那一格的 `dataType` 转成真值（数字给数字、是/否给布尔）——
-            界面把所有输入按文本送上来，而"转真值"这件事只该有一处；
-         ③ 空值交给写路径去处理（清空 = **删掉这个键**，不是写 null）。 */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const fieldKey = String(body.fieldKey ?? '');
@@ -11113,11 +10019,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/confirm-subtree': {
-      /* 按章节确认：一次确认该章节子树内的全部内容节点。
-         为什么是"按章节"而不是"整篇一键"：医生是按章节阅读的，
-         "本章我看过了"是一个有明确含义的声明；而"整篇我看过了"在几十页的住院病历上
-         并不成立，那只是"点了同意"。范围与条数都会进留痕（confirmedNodeIds），
-         因此事后仍能逐条回答"他确认了哪些"。 */
       const entry = current();
       const nodeId = String(body.nodeId ?? '');
       const result = act(entry, `按章节确认（${nodeId}）`, () => entry.session.confirmSubtree({ nodeId }, writeActor(req, entry)));
@@ -11405,12 +10306,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/reading/import-credential': {
-      /* 导入授权平台签发的授权书，凭据进入本系统的唯一入口（本系统不签发）。
-         三道判定，缺一不可：
-           ① 形状（`parseCredential`）：缺字段要说"内容不对"，而不是抛内部错误；
-           ② 自洽（`verifyCredential`）：签名与授权书必须对得上（防中途被改）；
-           ③ 受信（`checkIssuerTrust`）：签发者在不在信任集里。
-         最要紧的是第三道：少了它，任何能提交凭据的人都能自签一份"永久不限次"的授权。 */
       const entry = current();
       const parsed = parseCredential(String(body.text ?? ''));
       if (!parsed.ok) {
@@ -11485,18 +10380,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/structure-propose': {
-      /* 即时结构化（V4）：**只算不写** —— 按词表把正文各段映射成"数据元提议"。
-       *
-       * 为什么不留一份 pending 列表：提议是正文的**派生物**（同一段文本随时能重算），
-       * 存下来只会多出"过期的提议"这种状态，而它没有任何正当用途（同机读信息"派生物"的纪律）。
-       * 提议到这里为止：不改文档、不产生 rev、不留痕；采纳走下面的 `/api/structure-apply`。 */
       const entry = current();
       /* 读路径也要先恢复：否则"重启后第一次提议"会在一份空文档上算出"0 条"，
          而那看起来与"正文里没有可结构化的内容"一模一样（同 `/api/state` 的处置）。 */
       ensureRestored(entry as DocEntry & { restored?: boolean });
       const session = entry.session;
       const requested = Array.isArray(body.nodeIds) ? body.nodeIds.map((item) => String(item)) : [];
-      /* 按**文档阅读顺序**取（同候选集口径）：界面按"第 N 段"呈现，顺序错了医生就对不上号 */
+      /* 按文档阅读顺序取（同候选集口径）：界面按"第 N 段"呈现，顺序错了医生就对不上号  */
       const textNodes = orderedNodeIds({ nodes: session.document.nodes, rootId: session.document.rootId })
         .map((id) => session.document.nodes[id])
         .filter((node): node is Extract<DocNode, { type: 'text' }> => node?.type === 'text');
@@ -11516,7 +10406,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const outcome = proposeStructurings({ texts: targets.map((node) => textOf(node)) }, placementConfigNow().config);
       json(res, 200, {
         ok: true,
-        /* 挂在**顶层**（与 `placement` 同类：它描述"这次判定是怎么做的"，不是"产出了什么"内容） */
+        /* 挂在顶层（与 `placement` 同类：它描述"这次判定是怎么做的"，不是"产出了什么"内容）  */
         structure: {
           enabled: outcome.enabled,
           proposed: outcome.proposed,
@@ -11544,13 +10434,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
 
     case '/api/structure-apply': {
-      /* 采纳：把医生勾选的数据元绑到节点上（**提议到这里才落笔**）。
+      /* 采纳：把医生勾选的数据元绑到节点上（提议到这里才落笔）。
        *
        * 走 `updateNodeProps` 而不是自造写入口：rev +1、留痕、并发校验都是它的既有语义。
        * 同时把该节点打回"待确认"（`humanConfirmed:false`）：标签会进机读信息、被导出与下游
        * 直接消费，机器动过的内容必须由人再确认一次 —— 复用既有签章门控，不新造字段。
        * 对粘贴/AI 产出的段落本来就是未确认，这一步没有额外代价；对医生自己写的段落，
-       * 这就是"机器改过的东西我要再看一眼"的代价，也正是它该有的代价。 */
+       * 这就是"机器改过的东西我要再看一眼"的代价，也正是它该有的代价。  */
       const entry = current();
       const session = entry.session;
       const rawItems = Array.isArray(body.items) ? body.items : [];
@@ -11606,9 +10496,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
               },
             },
             actor,
-            /* 关掉"编辑即确认"：这次提交**一个字都没改**（只绑了标签），不能被读成
+            /* 关掉"编辑即确认"：这次提交一个字都没改（只绑了标签），不能被读成
                "医生看过并负责这段内容" —— 否则内核会把上面那个 `false` 改回 `true`，
-               机器猜的标签就拿到了人工背书。（关键内容本来就不适用"编辑即确认"。） */
+               机器猜的标签就拿到了人工背书。（关键内容本来就不适用"编辑即确认"。）  */
             { implyConfirm: false },
           );
           applied.push({ nodeId, tag });
@@ -11646,8 +10536,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const file = join(ARTIFACTS, `${entry.docId}.ofd`);
       const result = await actAsync(entry, '导出 OFD-H', () => {
         applySignerIfSigned(entry);
-        /* 图片字节从 `state/resources` 读出后**打进容器**（Res/MultiMedia）；
-           取不到的图会回一条 warning，而不是画一张空框。 */
+        /* 图片字节从 `state/resources` 读出后打进容器（Res/MultiMedia）；
+           取不到的图会回一条 warning，而不是画一张空框。  */
         return entry.session.writeOfdFile(file, PLAN, { resolveImage: readResourceBytes });
       });
       if (result.ok) {
@@ -11678,12 +10568,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 }
 
 /* --------------------------- 算子插件（T3）：启动时装一次 ---------------------------
-   插件是**部署方安装的签名组件**（不是包内容：包是数据，插件是代码，信任门槛不同）。
+   插件是部署方安装的签名组件（不是包内容：包是数据，插件是代码，信任门槛不同）。
    它装在运行时目录的 `qc-plugins/` 下，每个插件一个子目录，必须签名验得过才会被装载。
 
-   装不上**不阻断启动**（内核自带的算子够用），但**必须被看见**：静默跳过会让
+   装不上不阻断启动（内核自带的算子够用），但必须被看见：静默跳过会让
    "插件没生效"表现成"规则没命中"，而界面上一切正常 —— 那是最难查的一类问题。
-   `L0_QC_PLUGIN_DIR` 可把它指到别处（自测与联调都靠它）。 */
+   `L0_QC_PLUGIN_DIR` 可把它指到别处（自测与联调都靠它）。  */
 const QC_PLUGIN_ROOT = process.env.L0_QC_PLUGIN_DIR ?? join(RUNTIME.dir, 'qc-plugins');
 const QC_PLUGIN_REPORT: QcPluginLoadReport = await loadQcPlugins({
   dir: QC_PLUGIN_ROOT,
@@ -11734,14 +10624,14 @@ createServer((req, res) => {
     `  审计锚点：${auditAnchors.count()} 条（每 ${ANCHOR_EVERY} 条记录锚一次）` +
       `${ANCHOR_WRITE_ERROR ? `；⚠ ${ANCHOR_WRITE_ERROR}` : ''}\n`,
   );
-  /* **服务端文件配置与系统策略的来源必须打出来**：这两行回答"这台机器按什么跑、钥匙来自哪儿"。
-     尤其"口令用的是内置演示值"这一条，只有在这里能被看见（见 core/server-config.ts 的纪律 3）。 */
+  /* 服务端文件配置与系统策略的来源必须打出来：这两行回答"这台机器按什么跑、钥匙来自哪儿"。
+     尤其"口令用的是内置演示值"这一条，只有在这里能被看见（见 core/server-config.ts 的纪律 3）。  */
   process.stdout.write(`  ${describeServerConfig(SERVER_CONFIG, STATE_KEY_INFO, STATE_SALT_HEX === undefined ? 'derived' : 'file')}\n`);
   process.stdout.write(
     `  系统策略（库 config.system）：鉴权 ${AUTH_MODE} / 会话 ${SESSION_TTL_MINUTES} 分钟 / ` +
       `限流 登录 ${RATE_RULES['login:actor'].limit}·${RATE_RULES['login:source'].limit}、AI ${RATE_RULES['ai:suggest'].limit}/分、导出 ${RATE_RULES.export.limit}/分 / 锚点每 ${ANCHOR_EVERY} 条\n`,
   );
-  /* 内涵质控现状：引擎形态与规则条数（**0 条规则**与"跑了 0 命中"必须能在这里分开） */
+  /* 内涵质控现状：引擎形态与规则条数（0 条规则与"跑了 0 命中"必须能在这里分开）  */
   const qcAtStart = qcContentSafe();
   process.stdout.write(
     `  内涵质控（库 config.qc-content）：引擎 ${qcAtStart.content === null ? `⚠ 配置读不出来（${qcAtStart.error}）` : qcAtStart.content.engine.kind} / ` +
@@ -11757,8 +10647,6 @@ createServer((req, res) => {
     );
   }
   if (RUNTIME_ARCHIVE.archived.length > 0) {
-    /* 归档 ≠ 删除：原处那份搬到了归档目录，日志必须说清它去了哪儿，
-       否则"我的文件怎么不见了"会在下一次有人翻仓库时变成一场排查 */
     process.stdout.write(
       `  ⚠ 已把仓库里的旧运行时数据归档到（原处已清空，回滚从这里取）：${RUNTIME_ARCHIVE.archiveDir}\n` +
         `     归档项：${RUNTIME_ARCHIVE.archived.join('、')}\n`,

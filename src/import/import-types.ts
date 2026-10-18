@@ -1,16 +1,4 @@
-/**
- * 导入侧公共契约（OFD 与 WS/T 500 共用）。
- *
- * 为什么要抽出来：两种格式的**解析完全不同**，但**导入后的纪律必须完全一致** ——
- *   1) 来源可追溯（每个节点带 evidence，含文件名 + SHA-256）；
- *   2) 导入件不继承签名（源文件即使已签章，导入出来也是新草稿）；
- *   3) 导入内容一律标 `humanConfirmed: false`（识别结果不得自动成为"已被医生确认的病历"）；
- *   4) 必须给出人工核对提示。
- *
- * 如果两种格式各写各的，这四条纪律一定会悄悄漂移（一处标了未确认、另一处忘了标），
- * 而"忘了标未确认"的后果是：未核对的外来数据可以直接进入签章流程。
- * 因此这里把纪律收敛成**公共类型 + 公共错误码**，各格式只负责"解析"，不负责"纪律"。
- */
+// 导入侧公共契约（OFD 与 WS/T 500 共用）。
 
 import { createHash } from 'node:crypto';
 import type { DocTypeRef, DocumentModel, EncounterRef, PatientRef } from '../model/types.ts';
@@ -49,9 +37,9 @@ export interface ImportedDraft {
 export const IMPORT_EXTERNAL_KIND = 'external-doc';
 
 /**
- * 文件指纹（SHA-256，十六进制小写，对**文件原始字节**计算）。
+ * 文件指纹（SHA-256，十六进制小写，对文件原始字节计算）。
  * 两种格式必须共用这一个实现：否则同一份文件的来源证据会出现两种哈希，回溯时对不上。
- */
+  */
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -59,10 +47,10 @@ export function sha256Hex(bytes: Uint8Array): string {
 /**
  * 姓名脱敏（L0 默认隐私策略）。
  *
- * **导入不得把明文姓名直接落库**：源文件（尤其是院内导出的正式文档）里通常是完整姓名，
+ * 导入不得把明文姓名直接落库：源文件（尤其是院内导出的正式文档）里通常是完整姓名，
  * 而病历在研发/演示/分析环节以掩码形式流转是硬约束。保留姓氏便于人工核对身份，
  * 其余用 `*` 顶替；复姓（欧阳/司马…）与少数民族长名不做识别——宁可多打码，不可漏打码。
- */
+  */
 export function maskPersonName(name: string | undefined): string | undefined {
   if (!name) return undefined;
   const trimmed = name.trim().replace(/\s+/g, '');

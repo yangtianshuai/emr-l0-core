@@ -1,17 +1,4 @@
-/**
- * 自定义条件（条件树）自测。
- *
- *   node src/qc/condition-self-test.ts
- *
- * 覆盖四层：
- *   A 规格层：字段与算子的封闭清单、下发的那一份与注册表逐项一致（界面照它长构造器）
- *   B 校验层：合法条件往返；未知字段 / 未知算子 / 字段×算子不匹配 / 取值不合法一律拒
- *   C 判定层："宁可不报，不可误报"的几条边界（只判文本段、读不到字段不命中、导入件不判时限）
- *   D 接进规则：条件谓词能编译成可运行规则；条件写错在**装载那一刻**就被拒
- *
- * 为什么 C 层占篇幅最多：条件树把"判什么"交给了配置，于是"误报"的代价从
- * "某条规则写错了"变成"使用者拼出来一条永远成立的条件"。这些边界就是那道闸门。
- */
+// 自定义条件（条件树）自测。
 
 import { TestSuite, assert, assertEqual, assertThrows } from '../testing/harness.ts';
 import type { JsonValue, NodeId } from '../model/types.ts';
@@ -37,8 +24,6 @@ const suite = new TestSuite('质控·自定义条件（条件树）', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/* ------------------------------- 造样本 ------------------------------- */
-
 function view(over: Partial<QcNodeView> = {}): QcNodeView {
   return { nodeId: 'n_1' as NodeId, type: 'text', text: '', tags: [], keyContent: false, ...over };
 }
@@ -55,12 +40,8 @@ function atom(field: string, op: string, value?: unknown): QcConditionNode {
 }
 
 async function main(): Promise<void> {
-  /* ============================== A 规格层 ============================== */
 
   await test('C1 字段与算子的封闭清单：下发的规格与注册表逐项一致，且每个字段都有算子可用', () => {
-    /* 「能拼什么」只该有**一处**定义：界面照 `conditionCatalog()` 长构造器，
-       引擎照同一份注册表校验。两处一旦漂移，表现是"界面能拼、引擎不认"，
-       而它只会在有人真的拼了一条之后才暴露。 */
     const catalog = conditionCatalog();
     assertEqual(
       [...catalog.fields.map((item) => item.name)].sort().join(','),
@@ -88,8 +69,8 @@ async function main(): Promise<void> {
       assertEqual(String(QC_CONDITION_FIELDS[field.name].label), String(field.label), `${field.name} 的人话名要与注册表一致`);
       assert(String(field.doc ?? '').trim().length > 0, `${field.name} 要带说明（界面上那一格的小字）`);
       assert(field.scope === 'document' || field.scope === 'node', `${field.name} 要说清归在「适用范围」还是「判定条件」`);
-      /* **每个字段都要有算子可用**：一个没有算子的字段在构造器里是个死格 ——
-         人选了它，算子下拉是空的，而界面不会有任何解释 */
+      /* 每个字段都要有算子可用：一个没有算子的字段在构造器里是个死格 ——
+         人选了它，算子下拉是空的，而界面不会有任何解释  */
       const usable = catalog.operators.filter((item) => item.fields.includes(field.name));
       assert(usable.length > 0, `${field.name} 至少要有一个可用算子（否则构造器里是死格）`);
     }
@@ -112,8 +93,6 @@ async function main(): Promise<void> {
       }
     }
   });
-
-  /* ============================== B 校验层 ============================== */
 
   await test('C2 合法条件：往返后结构不变，且能读成一句人话', () => {
     const raw = {
@@ -166,23 +145,21 @@ async function main(): Promise<void> {
     for (const [name, raw] of rejected) {
       assertEqual(normalizeCondition(raw), null, `应拒绝：${name}`);
     }
-    /* 反面：同一批取值里合法的那些必须**过**。否则"拒得多"看起来像严谨，其实是把能用的也拒了 */
+    /* 反面：同一批取值里合法的那些必须过。否则"拒得多"看起来像严谨，其实是把能用的也拒了  */
     assert(!!normalizeCondition(atom('text', 'contains', ['待补充'])), '合法词表应通过');
     assert(!!normalizeCondition(atom('keyContent', 'is', true)), '布尔取值应通过');
     assert(!!normalizeCondition(atom('text', 'missing-pattern', 'time')), '枚举取值应通过');
     assert(!!normalizeCondition(atom('text', 'empty')), '无取值的算子应通过');
   });
 
-  /* ============================== C 判定层 ============================== */
-
   await test('C4 正文类算子只对文本段判定：章节与文书根的正文是空的，对它们判"包含"必然错', () => {
     const condition = normalizeCondition(atom('text', 'contains', ['待补充'])) as QcConditionNode;
     const hitText = evaluateCondition(view({ type: 'text', text: '现病史：待补充' }), condition, ctx());
     assert('hit' in hitText && hitText.hit, '文本段命中');
-    /* 命中要**带上命中片段本身**：下游靠它做锚点重定位，拿整段顶上会让"改了一个字"也算还在 */
+    /* 命中要带上命中片段本身：下游靠它做锚点重定位，拿整段顶上会让"改了一个字"也算还在  */
     assertEqual('quote' in hitText ? hitText.quote : undefined, '待补充', '命中片段要原样给出来（不是整段）');
     assertEqual(evaluateCondition(view({ type: 'text', text: '现病史无殊' }), condition, ctx()), { hit: false }, '文本段不命中');
-    /* 这两条是**误报**的主要来源：不说清"只判文本段"的话，一份入院记录的每个章节都会被报一次 */
+    /* 这两条是误报的主要来源：不说清"只判文本段"的话，一份入院记录的每个章节都会被报一次  */
     assertEqual(evaluateCondition(view({ type: 'section', text: '' }), condition, ctx()), { hit: false }, '章节不判正文类条件');
     assertEqual(evaluateCondition(view({ type: 'document', text: '' }), condition, ctx()), { hit: false }, '文书根不判正文类条件');
 
@@ -306,8 +283,6 @@ async function main(): Promise<void> {
     assert('uncertain' in negatedVerdict, '把一个未知取反，还是未知');
   });
 
-  /* ============================== D 接进规则 ============================== */
-
   await test('C9 条件谓词能编译成可运行规则：规则号由引擎注入，依据里写清命中条件', () => {
     const rule = compileRuleDescriptor('doc.rule.test', {
       itemId: 'R-COND-1',
@@ -321,8 +296,8 @@ async function main(): Promise<void> {
     const hit = rule.check(view({ type: 'text', text: '现病史：待补充' }), ctx());
     if (!hit || 'uncertain' in hit) throw new Error('应命中而不是"判不了"');
     assert(String(hit.detail).includes('规则 R-COND-1：'), '规则号由引擎注入（包不得自带）');
-    /* 依据要写成**看得出命中了什么**的一句话：算子实现了 `explain` 就用那句（它带着命中的词），
-       没有才退回"整棵树的人话回读" */
+    /* 依据要写成看得出命中了什么的一句话：算子实现了 `explain` 就用那句（它带着命中的词），
+       没有才退回"整棵树的人话回读"  */
     assert(String(hit.detail).includes('本段正文包含「待补充」'), '依据里要写清命中处（含命中的那一段话）');
     assert(String(hit.suggestion).trim() !== '', '建议动作不能是空的');
     /* 命中片段要一路传到医生端：锚点重定位依赖它 */
@@ -363,9 +338,9 @@ async function main(): Promise<void> {
   });
 
   /* ========================= E 带参数的判定方式（T1） =========================
-     这一层回答的唯一问题：**实参到底生不生效**。
+     这一层回答的唯一问题：实参到底生不生效。
      "参数配了但没生效"是这套质控最想避免的一类错（它表现得像"质控跑了、没问题"），
-     所以正面用例必须证明"同一棵树、两组实参、结论不同"。 */
+     所以正面用例必须证明"同一棵树、两组实参、结论不同"。  */
 
   const paramCondition = {
     itemType: 'condition',
@@ -436,7 +411,7 @@ async function main(): Promise<void> {
     );
 
     /* 占位符放到 `field` / `op` 位置上，连树都不合法（`$x` 不是字段名）——
-       这是它被拦在最外层的证据：**替换字段名等于替换"读什么"** */
+       这是它被拦在最外层的证据：替换字段名等于替换"读什么"  */
     assertThrows(
       () => validateRulePack(refPack({ ...paramCondition, when: { kind: 'atom', field: '$f', op: 'empty' } }, { conditionId: 'C-CUSTOM-1' })),
       (err) => (err as { code?: string }).code === 'E_RULE_CONDITION_INVALID',
@@ -479,8 +454,6 @@ async function main(): Promise<void> {
     );
   });
 
-  /* ========================= F 跨文书与新算子（T2） ========================= */
-
   await test('C16 跨文书聚合：间隔超限与应有而缺（右端取出院时刻、期限未到不报）', () => {
     const gap = normalizeCondition({
       kind: 'all',
@@ -510,7 +483,7 @@ async function main(): Promise<void> {
       { hit: false },
       '该类文书一份都没有时本档不报（由「应有而缺」负责，两条都报会得到重复提示）',
     );
-    /* 右端取出院时刻：下面这一份的"最长间隔"只可能出现在**尾段** */
+    /* 右端取出院时刻：下面这一份的"最长间隔"只可能出现在尾段  */
     const closeDocs = [
       { docId: 'd1', docTypeCode: 'WST500.3', createdAt: base },
       { docId: 'd2', docTypeCode: 'WST500.3', createdAt: at(1) },

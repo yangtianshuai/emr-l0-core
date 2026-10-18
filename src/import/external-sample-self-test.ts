@@ -1,23 +1,4 @@
-/**
- * 外部真实样例回归：HL7 C-CDA 官方 IG 的入院诊断章节。
- *
- *   node src/import/external-sample-self-test.ts
- *
- * 为什么单独一个套件：
- *   其余用例的样例都是**我们自己写的**（自产自验）—— 自产自验只能证明"内部一致"，
- *   证明不了"能读懂别人的文件"。这个套件用一份**外部权威样例**（HL7 C-CDA IG 仓库
- *   的 input/examples/admission-diagnosis-section-example.xml）把解析器钉在真实结构上。
- *
- * 这份样例一进来就暴露了两个真缺陷（已修，见下方用例）：
- *   ① 数据元藏在 `entry → act → entryRelationship → observation` 里 —— 只扫直接子层级会整批丢；
- *   ② 取值是编码型 `<value xsi:type="CD" code="233604007" displayName="Pneumonia"/>` ——
- *      只读 `@value`/元素文本会把它判成"没有取值"而**静默跳过**（丢的是诊断！）。
- *
- * 样例来源与许可：HL7 CDACCDA 规范仓库（github.com/HL7/CDA-ccda），
- * 经 GitHub Contents API 取回（本机对 raw.githubusercontent.com 不可达）。
- * 它是 **section 片段**（不是完整文档），这就是为什么 A2 用例要求"片段必须被明确拒绝"。
- * 该样例为规范自带示例（虚构患者数据），仅用于本地解析器回归。
- */
+// 外部真实样例回归：HL7 C-CDA 官方 IG 的入院诊断章节。
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';

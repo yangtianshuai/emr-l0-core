@@ -1,14 +1,4 @@
-/**
- * T04/T16 验收自测：机读信息派生 + 陈旧检测。
- *
- *   node src/model/machine-self-test.ts
- *
- * 覆盖：
- *   A 派生规则（文档顺序、标签 → 数据元、keyContentRefs、来源与置信度）
- *   B 陈旧判定（缺失 / 版本不一致 / 内容指纹不一致 / 悬挂引用 / 无指纹的时间戳退化）
- *   C 会话集成（重算后新鲜 → 内容变更后陈旧 → 再重算恢复；签章强制重算）
- *   D 跨实现一致性（与工具链 JS 参考实现的机读块逐项比对）
- */
+// T04/T16 验收自测：机读信息派生 + 陈旧检测。
 
 import { WriteSession, type Actor } from '../core/session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -45,10 +35,7 @@ interface RawStore {
   exportMachineReadable(): DocumentModel['machineReadable'];
 }
 
-/* --------------------------------- 用例 --------------------------------- */
-
 async function main(): Promise<void> {
-  /* ============================ A 派生规则 ============================ */
 
   await test('A1 文档顺序遍历：父子有序，且不因节点插入顺序变化而改变', () => {
     const { doc } = fixture();
@@ -133,8 +120,6 @@ async function main(): Promise<void> {
     assertEqual(keyContentRefs, [], '无关键内容时应为空数组');
   });
 
-  /* ============================ B 陈旧判定 ============================ */
-
   await test('B1 机读块缺失 → 陈旧（必须先派生）', () => {
     const { doc } = fixture();
     const status = machineReadableStaleness(doc);
@@ -190,8 +175,6 @@ async function main(): Promise<void> {
     assertEqual(machineReadableStaleness(doc).stale, true, '时间戳落后时应陈旧');
   });
 
-  /* ============================ C 会话集成 ============================ */
-
   await test('C1 会话：重算 → 新鲜；内容变更 → 陈旧；再重算 → 恢复', () => {
     const { doc, ids } = fixture();
     const session = WriteSession.open(doc);
@@ -235,8 +218,6 @@ async function main(): Promise<void> {
     const element = session.document.machineReadable?.dataElements.find((item) => item.nodeId === fieldId);
     assertEqual(element?.valueText, '39.5', '签章时机的机读值应与正文一致');
   });
-
-  /* ======================= D 跨实现一致性（双实现） ======================= */
 
   const jsModule = (await import('../../tools/model-check/lib/doc-store.mjs')) as {
     createStore: (doc: unknown, options?: unknown) => RawStore;

@@ -1,47 +1,26 @@
-/**
- * SM3 密码杂凑算法（GB/T 32905-2016）—— 自研纯 TS 实现，零依赖。
- *
- * ⚠️ **定位必须说清**：自研密码学用于**原型与交叉验证**，未经第三方审计，
- *    **不得直接用于生产签名**。生产对接须换成经认证的密码模块（商用密码产品 / HSM / UKey）——
- *    L0 通过 `CryptoProvider` 接口留出替换点，`nodeProvider`（OpenSSL）就是其中之一。
- *
- * 为什么还自己写：
- *   1) 零 npm 依赖是硬约束（医院内网装机环境常无法联网装包）；
- *   2) 但"零依赖"不能靠降低可信度来换 —— 本实现用两条独立证据锁死正确性：
- *      ① **国标测试向量**（'abc'、'abcd'×16）；
- *      ② **与 OpenSSL（node:crypto 的 sm3）逐字节比对**：同一批消息（含随机长消息）
- *         两个实现必须给出完全相同的摘要。
- *   这比"自己跟自己比"强得多：一个是标准答案，一个是另一套独立实现。
- */
-
-/* ------------------------------- 常量与工具 ------------------------------- */
+// SM3 密码杂凑算法（GB/T 32905-2016），纯 TS 实现。
+//
+// 警告：自研实现未经第三方审计，仅用于原型与交叉验证，不得直接用于生产签名。
+// 生产须换成经认证的密码模块，替换点在 CryptoProvider 接口。
 
 const IV = [0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d, 0xb0fb0e4e];
 
-/** 32 位循环左移。n 为 0 时 (x >>> 32) 在 JS 里等于 (x >>> 0)，会得 0，故单独处理 */
 function rotl(x: number, n: number): number {
   const s = n % 32;
+  // n 为 0 时 (x >>> 32) 在 JS 里等于 (x >>> 0)，会得 0
   return s === 0 ? x >>> 0 : ((x << s) | (x >>> (32 - s))) >>> 0;
 }
 
-/** 置换 P0 */
 function p0(x: number): number {
   return (x ^ rotl(x, 9) ^ rotl(x, 17)) >>> 0;
 }
 
-/** 置换 P1 */
 function p1(x: number): number {
   return (x ^ rotl(x, 15) ^ rotl(x, 23)) >>> 0;
 }
 
-/* ------------------------------- 压缩函数 ------------------------------- */
-
-/**
- * 压缩函数 CF。
- * 注意 JS 位运算返回**有符号** int32：`~e & g`、`a & b` 等在最高位为 1 时会变负数，
- * 直接参与加法就会算错。因此每个按位结果都要 `>>> 0` 归一到无符号 —— 这是本实现最容易踩的坑。
- */
 function compress(v: Uint32Array, block: Uint8Array, offset: number): void {
+  // JS 位运算返回有符号 int32，按位结果一律 >>> 0 归一，否则最高位为 1 时参与加法会算错
   const w = new Uint32Array(68);
   const w1 = new Uint32Array(64);
 
@@ -93,13 +72,8 @@ function compress(v: Uint32Array, block: Uint8Array, offset: number): void {
   v[7] = (v[7]! ^ h) >>> 0;
 }
 
-/* --------------------------------- 主流程 --------------------------------- */
-
-/**
- * 填充：追加 0x80，补 0 至 (len ≡ 56 mod 64)，最后 8 字节写入**比特**长度（大端）。
- * 用 BigInt 写长度：消息超过 2^32 bit（512MB）时 Number 位移会溢出，BigInt 不会。
- */
 function padded(message: Uint8Array): Uint8Array {
+  // 末尾 8 字节写比特长度（大端）；用 BigInt 避免消息超过 2^32 bit 时溢出
   const len = message.length;
   const zeroCount = (56 - ((len + 1) % 64) + 64) % 64;
   const out = new Uint8Array(len + 1 + zeroCount + 8);
@@ -113,7 +87,6 @@ function padded(message: Uint8Array): Uint8Array {
   return out;
 }
 
-/** SM3 摘要（32 字节） */
 export function sm3(message: Uint8Array): Uint8Array {
   const v = Uint32Array.from(IV);
   const data = padded(message);
@@ -152,7 +125,6 @@ export function utf8(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
-/** SM3 十六进制摘要（审计、指纹、签名都用它） */
 export function sm3Hex(message: Uint8Array | string): string {
   return toHex(sm3(typeof message === 'string' ? utf8(message) : message));
 }

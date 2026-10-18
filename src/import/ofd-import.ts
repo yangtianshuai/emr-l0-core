@@ -1,23 +1,4 @@
-/**
- * T25 · OFD / OFD-H 导入（读取 + 还原 + 生成导入草稿）。
- *
- * 目标不是"把版式文件渲染出来"，而是**把文件里的数据拿回来**：
- *   ① 抽真实文本（并识破"路径化陷阱"）；
- *   ② 抽取机读信息（"-H" 的载体）→ 数据元清单；
- *   ③ 识别签名与覆盖范围 → 明确"这是副本还是原件"；
- *   ④ 产出可进入系统的**导入草稿**（全部标 `origin: 'imported'` + 来源证据）。
- *
- * 三条红线（与 AI 门控同级的纪律）：
- *   1) **导入件不继承签名**：源文件即使是已签章原件，导入出来的也是一份新草稿，
- *      法律效力仍在源文件上，不能在导入件上"继承"签章状态；
- *   2) **来源必须可追溯**：每个节点的 provenance 都带 `evidence{kind:'external-doc'}`，
- *      含文件名与文件 SHA-256，事后能回答"这条数据从哪个文件来的"；
- *   3) **导入内容一律标为未确认**（`humanConfirmed: false`），并在警告里提示人工核对
- *      —— 识别结果不得自动变成"已被医生确认过的病历"。
- *
- * ⚠️ 版式文件**不含段落语义**：页面上的行是"画"上去的，导入只能按页/行还原文本，
- *    段落切分、章节归属必须由人工整理或走 L3 后结构化。这一点写在警告里，不假装能做对。
- */
+// T25 · OFD / OFD-H 导入（读取 + 还原 + 生成导入草稿）。
 
 import { SCHEMA_VERSION, type DataElementTag, type DocNode, type DocTypeRef, type DocumentModel, type JsonValue, type NodeId } from '../model/types.ts';
 import { buildMachineReadable } from '../model/machine.ts';
@@ -61,9 +42,9 @@ export interface OfdImportResult {
   pages: number;
   lines: ImportedTextLine[];
   /**
-   * 装饰层（页眉/页脚/页码）内容 —— **不计入 lines/texts 的正文口径**，单独列出。
+   * 装饰层（页眉/页脚/页码）内容 —— 不计入 lines/texts 的正文口径，单独列出。
    * 这样既不污染正文（页码不会混进数据元），又能让下游核对"这一页本来印了什么"。
-   */
+    */
   decorations: ImportedTextLine[];
   /** 被识别为装饰层而分出的文本行数（0 表示该产物没有装饰层） */
   decorationsStripped: number;
@@ -97,7 +78,7 @@ export interface OfdImportResult {
     placeholder: boolean;
     signerId?: string;
     signedAt?: string;
-    /** T18：对容器内被覆盖文件的**独立验签**结论（不依赖签名方任何代码） */
+    /** T18：对容器内被覆盖文件的独立验签结论（不依赖签名方任何代码）  */
     verification?: { ok: boolean; reasons: string[]; publicKeyFingerprint: string; algorithm: string };
   };
   warnings: string[];
@@ -115,8 +96,6 @@ function num(value: string | undefined): number | undefined {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
-
-/* ------------------------------ 主体：导入 ------------------------------ */
 
 export function importOfd(bytes: Uint8Array): OfdImportResult {
   const warnings: string[] = [];
@@ -141,22 +120,14 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
      而 XML 节点没有父指针（极简解析器有意不维护），所以只能从父元素这一层取。 */
   const lines: ImportedTextLine[] = [];
   /**
-   * 装饰层内容（页眉/页脚/页码）**单独收集**：
+   * 装饰层内容（页眉/页脚/页码）单独收集：
    * 既不能混进正文（否则"导入成功"里会多出一堆页码，还会污染数据元统计），
    * 也不能静默丢弃（下游需要知道"这份产物本来有页眉，正文是干净的"）。
-   */
+    */
   const decorations: ImportedTextLine[] = [];
   let pathObjects = 0;
   let uncoveredObjects = 0;
   let suspiciousFurnitureLines = 0;
-  /**
-   * 图对象计数（`ImageObject`）。
-   *
-   * 为什么只数、不还原：还原要动"字节从容器取出来 → 落到本机资源目录 → 把 resRef 改写成
-   * `/res/...`"三步，而导入进的是一份**草稿**（谁都不该指望草稿里的图能直接进归档件）。
-   * 但**必须报出来**：不报的话，文本一切正常、看起来导入成功，而图静默消失 ——
-   * 这类"少了一半而没人知道"正是本系统一路上在避免的。
-   */
   let imageObjects = 0;
 
   const pushLine = (page: number, textNode: XmlNode, size: number | undefined, into: ImportedTextLine[]): void => {
@@ -208,7 +179,7 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
     }
 
     /* 几何提示：别家实现常把页码/页眉直接放在正文层（没有装饰层约定）。
-       这里**不自动剥离**（可能是真实正文，误删比留着更危险），只做提示。 */
+       这里不自动剥离（可能是真实正文，误删比留着更危险），只做提示。  */
     if (pageHeight !== undefined && pageHeight > 0) {
       const lower = pageHeight * 0.08;
       const upper = pageHeight * 0.92;
@@ -222,7 +193,6 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
   const textChars = joined.length;
   const textCharsNoSpace = joined.replace(/\s+/g, '').length;
 
-  /* ---- 机读信息 ---- */
   const machine: OfdImportResult['machine'] = { found: false, namespaces: [], elements: [], keyContentRefs: 0 };
   let sourceDocument: OfdImportResult['sourceDocument'];
   let sourcePatient: OfdImportResult['sourcePatient'];
@@ -277,7 +247,6 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
     }
   }
 
-  /* ---- 签名（含独立验签） ---- */
   const signature: OfdImportResult['signature'] = { signed: false, covers: [], placeholder: false };
   if (signatureEntry) {
     const signatureText = new TextDecoder('utf-8').decode(signatureEntry.data);
@@ -295,9 +264,9 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
     signature.placeholder = /PLACEHOLDER/i.test(signature.method ?? '') || /PLACEHOLDER/i.test(textOf(signedValue ?? undefined));
     if (signature.placeholder) warnings.push('源文件的签名为占位符（未接入国密算法），不能作为合规证据');
 
-    /* **独立验签**：拿签名块里记录的摘要清单，与容器内文件的真实字节逐项复算比对，再用内嵌公钥验签名。
+    /* 独立验签：拿签名块里记录的摘要清单，与容器内文件的真实字节逐项复算比对，再用内嵌公钥验签名。
        这是导入能力里最有价值的一环 —— 它能回答"这份外来文件在我拿到之前有没有被动过"。
-       验签失败要当作**明确警告**报出来：只写"已签章"而不写"验签是否通过"等于谎报。 */
+       验签失败要当作明确警告报出来：只写"已签章"而不写"验签是否通过"等于谎报。  */
     const block = parseSignaturesXml(signatureText);
     if (block && !signature.placeholder) {
       const targets: SignatureTarget[] = [];
@@ -321,14 +290,13 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
     warnings.push('源文件为已签章副本：导入件不继承签名状态，法律效力仍在源文件上');
   }
 
-  /* ---- 格式判定与警告 ---- */
   const format: OfdImportResult['format'] = contentEntries.length === 0 ? 'unknown' : machine.found ? 'ofd-h' : 'ofd';
   if (contentEntries.length === 0) warnings.push('未找到任何页面内容（Content.xml），可能不是 OFD 文件');
   else if (!hasOfdEntry || !hasDocumentEntry) warnings.push(`OFD 结构不完整：入口 OFD.xml=${hasOfdEntry ? '有' : '缺'}，Document.xml=${hasDocumentEntry ? '有' : '缺'}`);
   if (textChars === 0 && pathObjects > 0) warnings.push('疑似"可视化陷阱"：页面由路径对象绘制，机器无法抽取任何文本');
   if (!machine.found) warnings.push('不含机读信息（"-H"）：只能得到版式文本，结构化需要另行识别或人工录入');
-  /* 图要**明说**：这条警告是"这份文件里的图没跟过来"的唯一出口。
-     文本一切正常、看起来导入成功，而图静默消失 —— 没人会去查一个没报错的导入。 */
+  /* 图要明说：这条警告是"这份文件里的图没跟过来"的唯一出口。
+     文本一切正常、看起来导入成功，而图静默消失 —— 没人会去查一个没报错的导入。  */
   if (imageObjects > 0) {
     warnings.push(`源文件含 ${imageObjects} 张图：当前导入只还原文字，图未进入导入件（字节仍在容器的 Res/MultiMedia 下）`);
   }
@@ -352,8 +320,6 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
     );
   }
 
-  /* 装饰层：分出来了就必须说清楚 ——"剥离了什么"和"保留了什么"都要报，
-     否则使用方会以为"页码丢了"或"正文里本来就有页码"。 */
   if (decorations.length > 0) {
     warnings.push(
       `已剥离 ${decorations.length} 行页眉/页脚（页码、文书号等装饰内容），未计入正文；内容保留在 decorations 中供核对`,
@@ -391,8 +357,6 @@ export function importOfd(bytes: Uint8Array): OfdImportResult {
   };
 }
 
-/* --------------------------- 与源文件闭环比对 --------------------------- */
-
 export interface RoundTripReport {
   /** 源文档渲染出的字符数 */
   textCharsSource: number;
@@ -411,8 +375,8 @@ export interface RoundTripReport {
 
 /**
  * 闭环验收：把"导入结果"和"导出它的那份源文档"对起来。
- * 这是导入能力最省钱、最有说服力的验收 —— **连自己导出的都还原不回来，别家文件更不可能**。
- */
+ * 这是导入能力最省钱、最有说服力的验收 —— 连自己导出的都还原不回来，别家文件更不可能。
+  */
 export function verifyAgainstSource(imported: OfdImportResult, sourceDoc: DocumentModel): RoundTripReport {
   const sourceLines = renderLines(sourceDoc);
   const textCharsSource = sourceLines.reduce((sum, line) => sum + line.text.length, 0);
@@ -453,8 +417,6 @@ export function verifyAgainstSource(imported: OfdImportResult, sourceDoc: Docume
   };
 }
 
-/* ---------------------------- 生成导入草稿 ---------------------------- */
-
 export function buildImportedDraft(imported: OfdImportResult, meta: ImportMeta): ImportedDraft {
   const nodes: Record<NodeId, DocNode> = {};
   const at = meta.importedAt;
@@ -485,9 +447,9 @@ export function buildImportedDraft(imported: OfdImportResult, meta: ImportMeta):
 
   const reviewNotes: string[] = [];
   const pageCount = imported.pages;
-  /* 正文按**重建后的段落**落地（而不是"每页一坨文本"）：
+  /* 正文按重建后的段落落地（而不是"每页一坨文本"）：
      每个段落一个 paragraph + text 节点，段落判定依据写进来源链，
-     事后能回答"这段是算法切的还是人切的、依据是什么"。 */
+     事后能回答"这段是算法切的还是人切的、依据是什么"。  */
   const importedParagraphs = imported.layout.paragraphs.filter((paragraph) => paragraph.text.trim() !== '');
   if (pageCount > 0 && importedParagraphs.length > 0) {
     const sectionId = addSection(`导入内容（${meta.fileName}，共 ${pageCount} 页）`, 'importedContent');

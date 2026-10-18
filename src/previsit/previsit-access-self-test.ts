@@ -1,11 +1,4 @@
-/**
- * 预问诊接入凭据自测（A1~A6）。
- *
- *   node src/previsit/previsit-access-self-test.ts
- *
- * 用内存版 `ConfigKv`：要验的是"判定规则"与"库里到底存了什么"，
- * 不需要真的落盘。
- */
+// 预问诊接入凭据自测（A1~A6）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import type { ConfigKv } from '../storage/config-kv.ts';
@@ -30,7 +23,7 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 const NOW = '2026-10-17T03:00:00.000Z';
 const KEY = 'Zx7Qp2Lm9Rt4Vb8Nc3Hf6Jd1Kw5Ys0Ag'; // 32 个字符：够长、无空白
 
-/** 内存版配置层：`read` 与真实实现一样，**没有就是 null** */
+/** 内存版配置层：`read` 与真实实现一样，没有就是 null  */
 function memoryKv(): ConfigKv & { dump(): Record<string, unknown> } {
   const store = new Map<string, unknown>();
   return {

@@ -1,14 +1,4 @@
-/**
- * 患者主索引（EMPI）自测。
- *
- *   node src/model/identity-self-test.ts
- *
- * 本套的重点是三条**不对称**的取舍：漏合并最多查不出问题，误合并会把两个人的病历粘在一起
- * 且几乎无法发现 —— 所以：
- *   M1~M2 归一与解析；M3 **冲突必须报告且不覆盖**；
- *   M4 未登记不猜；M5 **不做概率匹配**（同名不同标识不合并）；
- *   M6 合并可追溯；M7 标识归一化（空格 / 大小写差异不算两个人）。
- */
+// 患者主索引（EMPI）自测。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { PatientIndex, type PatientIdentifier } from './identity.ts';
@@ -74,7 +64,7 @@ async function main(): Promise<void> {
     index.register('P_001', [id('outpatient-no', 'M001')], AT, 'admin');
     index.register('P_002', [id('outpatient-no', 'M002')], AT, 'admin');
     /* 同名同生日在医院里真实存在（尤其常见姓名）。靠概率匹配代替主索引，
-       会把两个人的病历粘在一起，而且这种错误**看起来像正常数据**，几乎无法发现。 */
+       会把两个人的病历粘在一起，而且这种错误看起来像正常数据，几乎无法发现。  */
     assertEqual(index.resolve(id('outpatient-no', 'M002')), { status: 'matched', masterId: 'P_002' }, '不同号是不同患者');
     assertEqual(index.size(), 2, '不得自动合并');
   });

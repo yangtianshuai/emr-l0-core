@@ -1,27 +1,4 @@
-/**
- * 医生端「能力开关」的运行时验收 —— 在**真实 Chromium** 里跑，读 DOM。
- *
- *   npm run test:ui-browser        （不进 npm test 全量，理由见下）
- *
- * 为什么必须单独有这么一条：
- *   ui-self-test 的 A 部分是静态扫源码、B 部分走真实 HTTP —— **两者都不执行浏览器里的 JS**。
- *   于是"能力缺席时把页签摘掉 / 活动页签回退 / 「⋯」菜单空了也一起摘"这三件事在那边
- *   永远不会失败，只会静默不工作：源码里字都在、接口也都对，唯独医生看到的界面没变。
- *   A32 只证明"清单与白名单对得上"，证不了"注入之后页面真的少了那一栏"。这条补的就是这段。
- *
- * 为什么不在 `npm test` 里：
- *   它要拉真实 Chromium（首次安装约 500MB），而全量自测的定位是"零依赖、随便跑"。
- *   同理，**没装就明确失败**并打印安装命令，而不是静默跳过 —— 静默跳过会让它退化成
- *   一个永远绿的装饰，这比没有这条用例更糟。
- *
- * 覆盖（B = Browser）：
- *   B0 整轮跑在自己的 agent-browser 会话里，且每次打开都确认**真的落在应用页**上
- *      （见 SESSION 与 openAppPage：共用默认会话 / 冷启动漂移都会让断言读到空白页）
- *   B1 起一个独立实例（独立库 + 独立运行目录）
- *   B2 **反证**：未注入时，7 个页签与 9 个能力入口都在（否则 B3 的"变少了"可能只是页面坏了）
- *   B3 启动路径注入：页签 7→4、9 个标记元素全摘、持久化的 activeTab 回退、「⋯」菜单清空
- *   B4 同一页面里状态投影与配置镜像也成立（`S.scope`、`S.capture` 的键集）
- */
+// 医生端「能力开关」的运行时验收 —— 在真实 Chromium 里跑，读 DOM。
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -35,37 +12,13 @@ const ARTIFACTS = join(ROOT, 'artifacts');
 /** 独立端口：不复用自测的 8799 / demo 的 8787，免得三者在同一台机器上互相踩 */
 const PORT = 8949;
 const BASE = `http://127.0.0.1:${PORT}`;
-/**
- * 每次运行用**独立的目录与文件名**，而不是"先删掉上一次的"。
- *
- * 为什么：这台机器上 IDE 给 `rmSync` 套了一层"移到回收站"的垫片，而它在删目录/删文件时
- * 会**抛错**（本用例第一次跑就死在这里：`runCli` 里一句删除把整个进程直接带走了，
- * 日志里连报告都没留下）。用独立名字之后就没有"必须先删干净"这个前提，
- * 删除失败也不再影响结论 —— 失败的是清理，不是断言。
- */
 const RUN_STAMP = `${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffff).toString(36)}`;
 const stateDir = join(ARTIFACTS, `state-browser-selftest-${RUN_STAMP}`);
 const runtimeDir = join(ARTIFACTS, `runtime-browser-selftest-${RUN_STAMP}`);
-/** 页面脚本运行**之前**注入的宿主接入点（用 agent-browser 的 `--init-script`） */
 const INIT_SCRIPT = join(ARTIFACTS, `browser-selftest-init-${RUN_STAMP}.js`);
 /** CLI 调用的序号：给每次调用的输出文件起唯一名字（理由同 RUN_STAMP） */
 let cliSeq = 0;
 
-/**
- * 本用例自己的 agent-browser 会话名。
- *
- * 为什么必须自己命名一个：agent-browser 的**默认会话是全机器共享的一个浏览器**
- * （官方 skill 原话：shared with every other agent on the machine）。上一次跑剩下的、
- * 或者编辑器里另一个 agent 手动探测用的浏览器，都挂在同一个默认会话上 ——
- * 实测过：默认会话里敲 `open http://127.0.0.1:8787/`，紧接着 `tab` 列出来的是
- * 上一轮跑剩下的 `8949` 页签。页签被别的会话拿走之后，断言读到的就是 about:blank
- * 的空 DOM，而不是报错。名字里带 RUN_STAMP，跨次运行也不会互相踩。
- *
- * 代价：每次运行会在 `~/.agent-browser` 下留两个几十字节的会话记录（`.config` / `.target`），
- * `close` 不会删它们。相对于"和别的 agent 抢同一个浏览器"，这个代价是值当的。
- * 注意它只解决"会话被抢"，解决不了冷启动时**第一条命令的工具侧漂移** ——
- * 那一层由 `openAppPage` 的确认 + 重开兜住。
- */
 const SESSION = `l0ui-${RUN_STAMP}`;
 
 /** 能力缺席时应当被摘掉的东西（与 ui.html 上的 `data-capability` 一一对应） */
@@ -101,10 +54,10 @@ function step(message: string): void {
  * 走 shell 跑一条命令。
  *
  * 与 `ui-self-test.ts` 里 `rmRecursive` 同一处境：编辑器注入的 node 语言垫片把
- * `spawnSync` 的选项类型收成了 `{ encoding, cwd, windowsHide }`，**没有 `shell`**，
+ * `spawnSync` 的选项类型收成了 `{ encoding, cwd, windowsHide }`，没有 `shell`，
  * 而真实运行时是支持的。这里按真实语义转一次类型，而不是为了过检查去掉 `shell: true`
  * —— 去掉之后 `.cmd` 垫片在当前 Node 上根本起不来（表现是"命令找不到"，不是"参数不对"）。
- */
+  */
 const runSync = spawnSync as unknown as (
   command: string,
   args: string[],
@@ -114,16 +67,6 @@ const runSync = spawnSync as unknown as (
 /** 单条 CLI 的等待上限：浏览器冷启动慢，但超过两分钟就是卡住了，不该无限等 */
 const CLI_TIMEOUT_MS = 120_000;
 
-/**
- * 跑一条 agent-browser 命令并取回它的输出。
- *
- * Windows 上有两个坑都必须绕过，否则这条用例会**静默挂住**（第一次跑就挂在 `open` 上：
- * 既不报错也不结束，看起来像"还在跑"）：
- *   ① 必须经 shell —— npm 全局装出来的是 `.cmd` / `.ps1` 垫片，不经 shell 起不来；
- *   ② **输出必须重定向到文件，不能走管道**：agent-browser 会把一个常驻 daemon 留在后台，
- *      而它继承着父进程的 stdout/stderr 管道。`spawnSync` 等的是"管道关闭"，
- *      于是 CLI 早就退出了、它却永远等下去。改成重定向到文件，这个依赖就没了。
- */
 function runCli(command: string): { ok: boolean; stdout: string; stderr: string } {
   mkdirSync(ARTIFACTS, { recursive: true });
   /* 每次调用换一对文件名，而不是覆盖同一对：覆盖需要先删，而删除在这台机器上会抛错 */
@@ -177,10 +120,10 @@ function tryRemove(path: string): void {
 /**
  * 把一段页面代码交给浏览器执行，取回它返回的 JSON。
  *
- * **页面代码里不得出现双引号**：命令要经 cmd.exe，参数里的双引号会被吃掉或截断，
+ * 页面代码里不得出现双引号：命令要经 cmd.exe，参数里的双引号会被吃掉或截断，
  * 而那时的表现是 `SyntaxError` 或莫名其妙的 `xxx is not defined` —— 与真正的失败
  * 分不开。所以这里把它变成一条硬约束，而不是靠写的时候记得。
- */
+  */
 function evalInPage(js: string): Record<string, unknown> {
   assert(!js.includes('"'), '页面代码里不得出现双引号（Windows 下要经 cmd.exe，参数里的双引号会被吃掉）');
   const run = runCli(ab(`eval "${js}"`));
@@ -238,7 +181,6 @@ async function waitReady(): Promise<boolean> {
       const res = await fetch(`${BASE}/api/state`);
       if (res.ok) return true;
     } catch {
-      /* 尚未就绪 */
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -269,19 +211,6 @@ function closeBrowser(): void {
   runCli(ab('close'));
 }
 
-/**
- * 打开应用页，并确认**真的落在它上面**。
- *
- * 只 `open` + `wait` 不够：实测这台机器上"冷启动后第一条命令 `open` 到的浏览器，
- * 会在该条命令退出时一起消失"，下一条命令于是起了个新的空白浏览器 ——
- * 而这一切都不报错，只是让后面每一条断言读到 about:blank 的空 DOM，
- * 把"浏览器没连上"错读成"页面少了几栏"（第一次跑就是这样：B2 取回 0 个页签）。
- * 所以这里显式验一次 `location.href`，不对就把会话关掉重开。
- *
- * 为什么按**时间**兜而不是按次数：这个漂移是随机的，实测同一轮里连着两次都可能命中
- * （B2 试到第 3 次才落上）。给死一个"三次"会把偶发的工具侧漂移读成"页面坏了"，
- * 所以只保证"45 秒内没落上就是真失败"，中途不等固定次数。
- */
 const OPEN_DEADLINE_MS = 45_000;
 
 function openAppPage(prefix = ''): void {
@@ -362,7 +291,7 @@ async function main(): Promise<void> {
     await test('B3 启动路径注入：页签只剩 4 个、9 个入口全摘、活动页签回退、「⋯」菜单清空', () => {
       step('注入：--init-script 在首次导航之前注册，并把活动页签预置成即将被摘掉的 log…');
       closeBrowser();
-      /* 关键：`--init-script` 注册在**首次导航之前**，且活动页签预置成将被摘掉的 `log` */
+      /* 关键：`--init-script` 注册在首次导航之前，且活动页签预置成将被摘掉的 `log`  */
       openAppPage(`--init-script "${INIT_SCRIPT}" `);
       const seen = evalInPage(probeJs());
       step(`注入后取回：${(seen.tabs as string[]).length} 个页签 / ${seen.markedCount} 个能力入口 / 活动页签 ${seen.activeTab}`);
@@ -391,10 +320,6 @@ async function main(): Promise<void> {
     for (const dir of [stateDir, runtimeDir, INIT_SCRIPT]) tryRemove(dir);
   }
 
-  /* 设 exitCode 而不调 `process.exit()`：stdout 重定向到文件时写入是异步的，直接退会把
-     还没落盘的报告整段丢掉 —— 这条用例第一次跑就是"无声结束"的（日志里只有进度、没有报告）。
-     让事件循环自己走完即可：本进程除了 spawnSync 没有别的常驻句柄，浏览器与实例都已在
-     finally 里收掉。这里转一次类型同样是因为编辑器注入的 node 垫片把 `process` 收窄了。 */
   const proc = process as unknown as { exitCode: number };
   proc.exitCode = suite.report();
 }

@@ -1,25 +1,4 @@
-/**
- * T25b · WS/T 500（电子病历共享文档）XML 映射导入（零依赖）。
- *
- * 与 OFD 导入的关键差别：**WS/T 500 是结构化文档，段落语义是真实存在的**。
- *   - OFD 是版式文件：文字是"画"上去的，只能按页/行还原，段落与章节归属必须人工整理；
- *   - WS/T 500 是 CDA 风格的临床文档：`section/code` 就是章节，`section/text` 就是叙述正文，
- *     `entry/observation` 就是结构化数据元 —— 可以**直接映射**到我们的 section/paragraph/text/field，
- *     章节归属与数据元标签都不丢。
- *
- * 因此这条通道是"AI 生成端直接产出合格病历"最快落地的入口：医院现场最常见的数据源就是
- * 这类共享文档 XML（区域平台、HIS 归档、病案系统导出），而不是 OFD 版式件。
- *
- * 但**纪律与 OFD 完全一致**（见 import-types.ts）：来源可追溯、不继承签名、
- * 全部标未确认、必须人工核对。
- *
- * ⚠️ 诚实边界（写进 warnings，不假装能做对）：
- *   1) `entryRelationship` / 深层 `component` 等嵌套关系**不还原**，只取 entry 的直接子层级；
- *      临床逻辑（如"用药与诊断的关联"）需人工确认；
- *   2) `codeSystem` 是 OID，我们的标签体系是受限枚举 —— 按 OID 根归类，**不保证等价**；
- *   3) XML 本身**不承载电子签章**（签章在随附的 XAdES/PDF/OFD 上），导入件一律是新草稿；
- *   4) 编码：按 XML 声明解码，环境不支持该编码时给出警告而不是静默乱码。
- */
+// T25b · WS/T 500（电子病历共享文档）XML 映射导入（零依赖）。
 
 import { SCHEMA_VERSION, type DataElementTag, type DocNode, type DocumentModel, type JsonValue, type NodeId, type TagSystem } from '../model/types.ts';
 import { buildMachineReadable } from '../model/machine.ts';
@@ -53,7 +32,7 @@ export interface Wst500Field {
   dataType: 'number' | 'text';
   /** 承载它的元素名（observation / procedure …），便于回溯 */
   sourceElement: string;
-  /** 取值本身是**编码型**时的机器可读编码（如诊断 ICD/SNOMED 编码）：valueText 给人看，这里给机器 */
+  /** 取值本身是编码型时的机器可读编码（如诊断 ICD/SNOMED 编码）：valueText 给人看，这里给机器  */
   valueCode?: { code: string; codeSystem?: string };
   /** 该数据元位于 entry 下的嵌套层级（0 = entry 直接子元素） */
   nestingDepth?: number;
@@ -104,8 +83,6 @@ export interface Wst500ImportResult {
   warnings: string[];
 }
 
-/* ------------------------------- 小工具 ------------------------------- */
-
 /** 保留 OID 但归类到受限的 TagSystem：只认 WS/T 500 的根 OID，其余一律 local（不猜） */
 function tagSystemOf(codeSystem: string | undefined): TagSystem {
   if (codeSystem && codeSystem.startsWith(WST500_OID_ROOT)) return 'WST500';
@@ -139,8 +116,8 @@ function genderOf(code: string | undefined, display: string | undefined): 'M' | 
 /**
  * 解码源文件字节。
  * 医院现场常见 GB18030/GBK 编码的 XML：按声明解码；环境不支持时给出警告，
- * **不静默按 UTF-8 硬解**（那样中文会乱码，而用户看到的是"病历正文乱码"这种最坏结果）。
- */
+ * 不静默按 UTF-8 硬解（那样中文会乱码，而用户看到的是"病历正文乱码"这种最坏结果）。
+  */
 function decodeSource(bytes: Uint8Array): { text: string; warnings: string[] } {
   const head = new TextDecoder('utf-8').decode(bytes.slice(0, 256));
   const encoding = (/encoding\s*=\s*["']([\w.-]+)["']/i.exec(head)?.[1] ?? 'utf-8').toLowerCase();
@@ -176,18 +153,18 @@ function tagOf(codeNode: XmlNode | undefined): { tag: DataElementTag; codeSystem
 }
 
 /**
- * value 元素 → 取值。**必须按 `xsi:type` 分派**，因为 CDA 的值类型差别很大：
+ * value 元素 → 取值。必须按 `xsi:type` 分派，因为 CDA 的值类型差别很大：
  *   - `PQ` / `INT` / `REAL` / `MO`：数值在 `@value`（+ `@unit`）；
- *   - `CD` / `CE` / `CV` / `CS`：**编码型值**（诊断、检验结论、过敏原…），
+ *   - `CD` / `CE` / `CV` / `CS`：编码型值（诊断、检验结论、过敏原…），
  *     人类可读的是 `@displayName`，机器可读的是 `@code`；
  *   - `ST` / `ED` / `TX`：值就是元素文本。
  *
- * ⚠️ 早期实现只读 `@value` 与元素文本（实测由**外部真实样例**暴露）：
+ *  早期实现只读 `@value` 与元素文本（实测由外部真实样例暴露）：
  *   真实 C-CDA 里"入院诊断"长这样 ——
  *   `<value xsi:type="CD" code="233604007" codeSystem="…6.96" displayName="Pneumonia"/>`，
- *   既没有 `@value` 也没有元素文本，于是**整条诊断被当成"没有取值"静默跳过**。
+ *   既没有 `@value` 也没有元素文本，于是整条诊断被当成"没有取值"静默跳过。
  *   这是最坏的一类缺陷：导入"成功"、报告里只多一行"跳过 2 条"，而丢的是诊断。
- */
+  */
 function readValueNode(
   node: XmlNode | undefined,
 ): { valueText: string; unit?: string; coded?: { code: string; codeSystem?: string } } | undefined {
@@ -222,8 +199,6 @@ function childSections(section: XmlNode): XmlNode[] {
   return [...childrenOf(section, 'section'), ...childrenOf(section, 'component').flatMap((component) => childrenOf(component, 'section'))];
 }
 
-/* ------------------------------ 主体：导入 ------------------------------ */
-
 export function importWst500(bytes: Uint8Array): Wst500ImportResult {
   const fileSha256 = sha256Hex(bytes);
   const decoded = decodeSource(bytes);
@@ -241,7 +216,6 @@ export function importWst500(bytes: Uint8Array): Wst500ImportResult {
     throw new ImportError('不是 WS/T 500 结构的临床文档（根元素不是 ClinicalDocument）');
   }
 
-  /* ---- 文档头 ---- */
   const idNode = childOf(root, 'id');
   const codeNode = childOf(root, 'code');
   const codeInfo = tagOf(codeNode);
@@ -261,7 +235,6 @@ export function importWst500(bytes: Uint8Array): Wst500ImportResult {
     ...(authorOrg ? { authorOrg } : {}),
   };
 
-  /* ---- 患者 ---- */
   const patientRole = findFirst(root, 'patientRole');
   const patientNode = childOf(patientRole ?? root, 'patient');
   const rawName = textOf(findFirst(patientNode ?? root, 'name')).replace(/\s+/g, '').trim();
@@ -279,7 +252,6 @@ export function importWst500(bytes: Uint8Array): Wst500ImportResult {
       }
     : undefined;
 
-  /* ---- 章节树（结构化正文） ---- */
   const structuredBody = findFirst(root, 'structuredBody');
   if (!structuredBody) {
     warnings.push('源文档没有结构化正文（structuredBody），只能导入头部信息，正文需人工处理');
@@ -309,16 +281,15 @@ export function importWst500(bytes: Uint8Array): Wst500ImportResult {
     const fields: Wst500Field[] = [];
     /* 真实文档里"一条数据元"往往不在 entry 的直接子层级：
        C-CDA 的入院诊断是 `entry → act → entryRelationship → observation`（三层）。
-       早期实现只扫 entry 的直接子元素 → **诊断这类数据元被整批静默跳过**
+       早期实现只扫 entry 的直接子元素 → 诊断这类数据元被整批静默跳过
        （由外部真实样例暴露：报告只多一行"跳过 2 条"，丢的却是诊断）。
-       这里按 CDA 的容器关系下钻，并如实记录层级与截断次数。 */
+       这里按 CDA 的容器关系下钻，并如实记录层级与截断次数。  */
     const collect = (element: XmlNode, depth: number): number => {
       const elementName = localNameOf(element.name);
       let extracted = 0;
 
       if (CLINICAL_ELEMENTS.includes(elementName)) {
         const codeOfElement = tagOf(childOf(element, 'code'));
-        /* 值可能在 <value>，也可能在 <text>（CDA 允许用叙述承载值） */
         const value = readValueNode(childOf(element, 'value')) ?? readValueNode(childOf(element, 'text'));
         if (codeOfElement && value) {
           if (codeOfElement.codeSystem) codeSystems.add(codeOfElement.codeSystem);
@@ -358,8 +329,8 @@ export function importWst500(bytes: Uint8Array): Wst500ImportResult {
       for (const child of element.children) {
         /* 下钻条件必须同时包含"容器"与"临床元素"：
            只看容器的话，`entryRelationship → observation` 这一步里 observation 不是容器，
-           递归就停在那里，**数据元永远提取不到**（实测由外部样例暴露：
-           entry 下明明是 act/entryRelationship/observation 三层，结果 0 条字段 + "跳过 1 条"）。 */
+           递归就停在那里，数据元永远提取不到（实测由外部样例暴露：
+           entry 下明明是 act/entryRelationship/observation 三层，结果 0 条字段 + "跳过 1 条"）。  */
         const name = localNameOf(child.name);
         if (!NESTING_CONTAINERS.includes(name) && !CLINICAL_ELEMENTS.includes(name)) continue;
         if (depth + 1 > MAX_NESTING_DEPTH) {
@@ -399,7 +370,7 @@ export function importWst500(bytes: Uint8Array): Wst500ImportResult {
     warnings.push(`有 ${stats.skippedEntries} 条 entry 缺少编码或取值，未导入（不生成空值字段，避免被误读为"阴性/正常"）`);
   }
   warnings.push('WS/T 500 的 XML 本身不承载电子签章：法律效力取决于随附的签名载体或原件，导入件一律为新草稿');
-  /* 深层嵌套与编码型值都必须**如实上报**：既要说清楚还原了什么，也要说清楚什么没还原 */
+  /* 深层嵌套与编码型值都必须如实上报：既要说清楚还原了什么，也要说清楚什么没还原  */
   if (stats.nestedFields > 0) {
     warnings.push(`其中 ${stats.nestedFields} 条数据元位于深层嵌套（act/entryRelationship 等）中，已按容器关系下钻还原`);
   }
@@ -423,8 +394,6 @@ export function importWst500(bytes: Uint8Array): Wst500ImportResult {
     warnings,
   };
 }
-
-/* ---------------------------- 生成导入草稿 ---------------------------- */
 
 function jsonText(value: string | undefined): JsonValue {
   return value ?? null;
@@ -512,8 +481,8 @@ export function buildWst500Draft(imported: Wst500ImportResult, meta: ImportMeta)
         humanConfirmed: false,
         /* source 保持 'imported'（外来内容未经本系统确认，这条纪律不能破），
            但把"源系统记录的 AI 生成信息"放进 derivedFrom 与证据链 —— 参与度保留、责任不被继承。
-           另外把**原始 codeSystem(OID)** 也记进证据：再导出时优先用它，
-           否则受限枚举体系会把 LOINC 之类的 OID 改写成本地命名空间，标签体系在往返中丢失。 */
+           另外把原始 codeSystem(OID) 也记进证据：再导出时优先用它，
+           否则受限枚举体系会把 LOINC 之类的 OID 改写成本地命名空间，标签体系在往返中丢失。  */
         provenance: provenance({
           evidence: [
             evidence,

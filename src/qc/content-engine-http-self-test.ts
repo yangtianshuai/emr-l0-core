@@ -1,14 +1,4 @@
-/**
- * 内涵类质控 **HTTP 传输层**自测（H1~H8）。
- *
- *   node src/qc/content-engine-http-self-test.ts
- *
- * 用一个**本机假引擎**（真起 HTTP 服务）把三件事做成事实：
- *   H1 **明文只允许本机**：这一下会把病历内容发出去，配置写错一个字符就是明文外发；
- *   H2/H6 传输层**不修补**：它只搬运与拦"搬运层面的问题"（状态码 / 超时 / 非 JSON / 过大）；
- *   H8 分工真的成立：**想夹带建议**的引擎会被下游校验整份拒掉，
- *      **引文对不上**的会被逐条丢掉 —— 传输层不替它美化。
- */
+// 内涵类质控 HTTP 传输层自测（H1~H8）。
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -62,9 +52,9 @@ async function withFakeEngine(
 }
 
 /**
- * ⚠️ 本环境 `node:http` 的类型声明不全：`ServerResponse` 缺 `writeHead`（运行时存在）。
- * 按仓库既有做法做**局部断言**，而不是换一种写法绕开。
- */
+ *  本环境 `node:http` 的类型声明不全：`ServerResponse` 缺 `writeHead`（运行时存在）。
+ * 按仓库既有做法做局部断言，而不是换一种写法绕开。
+  */
 interface RawResponse {
   writeHead(status: number, headers: Record<string, string>): void;
   end(body?: string): void;
@@ -135,7 +125,7 @@ async function main(): Promise<void> {
         const engine = createHttpContentEngine({ endpoint, token: 'secret-token', expectEngineId: 'fake-engine' });
         const request = sampleRequest();
         const produced = await engine.run(request, { timeoutMs: 3000 });
-        /* 传输层交回的是**原始产出**：校验在调用方（这条分工是刻意的） */
+        /* 传输层交回的是原始产出：校验在调用方（这条分工是刻意的）  */
         const validated = validateEngineOutput(produced, request);
         assertEqual(validated.ok, true, `合法产出应通过校验：${validated.ok ? '' : validated.message}`);
         assertEqual(validated.ok ? validated.findings.length : -1, 1, '一条发现');
@@ -234,7 +224,7 @@ async function main(): Promise<void> {
   });
 
   await test('H8 端到端分工：传输层不修补，**夹带建议的被整份拒、引文幻觉的被逐条丢**', async () => {
-    /* 两条坏引擎，走**同一条真实通路**（HTTP → 传输层 → 校验）。 */
+    /* 两条坏引擎，走同一条真实通路（HTTP → 传输层 → 校验）。  */
     await withFakeEngine(
       (_req, res) =>
         json(
@@ -249,8 +239,8 @@ async function main(): Promise<void> {
                 title: '未给出鉴别依据',
                 rationale: '提到了鉴别诊断但没写依据',
                 quote: '需与肺结核鉴别',
-                /* ← 想夹带一条"可落笔的建议"。它**过不了类型**，但类型过不了 JSON，
-                   所以真正拦住它的是运行时校验。 */
+                /* ← 想夹带一条"可落笔的建议"。它过不了类型，但类型过不了 JSON，
+                   所以真正拦住它的是运行时校验。  */
                 suggestion: '建议补充：结核接触史阴性、PPD 阴性。',
               },
             ],

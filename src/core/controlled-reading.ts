@@ -1,27 +1,4 @@
-/**
- * T18 · 受控阅读（归档件的阅读授权控制）。
- *
- * 归档件一旦签章，内容就不可改（改了签名即失效）。但"不可改"不等于"谁都能随便看"：
- * 病案、传染病报告、精神科记录这类内容，**阅读本身**就需要授权与留痕。
- * 本模块实现四类控制，全部**密码学绑定**（不是界面上的开关）：
- *
- *   ① **有效期**：`notBefore` / `notAfter`，过期后即使持有凭证也不能读；
- *   ② **次数**：`maxReads`，按调用方持久化的 readCount 判定，用尽即拒；
- *   ③ **环境绑定**：`allowedEnvironments`（工作站/终端指纹），凭证**不可转让**——
- *      换台机器就读不了，堵住"授权后把文件转发出去"；
- *   ④ **内容范围**：章节白名单（fail-closed：空清单 = 什么都不放行），
- *      未授权内容**根本不进视图**（而不是显示成黑块 —— 黑块仍会泄露"这里有什么"）。
- *
- * 凭证用**本仓库既有的 SM2-SM3 签名原语**签发（把授权书当成一份"虚拟文件"来签），
- * 因此自动获得：公钥指纹校验、SignedInfo 规范化、篡改可检出。不新增密码学代码。
- *
- * ⚠️ 诚实边界：
- *   - 凭证校验是**本系统内的授权控制**，防的是"越权阅读"，不是防"拿到文件的人暴力破解"：
- *     文件本身仍是明文（未做加密），DBA/物理接触者能绕过本模块；
- *   - `readCount` 由调用方持久化，本模块只判定 —— **换一个不记账的调用方就能绕过**；
- *     真正的强制点应在服务端集中记账（本仓库的 Demo 就是集中记账的形态）；
- *   - 环境指纹是自报的标识（如终端号），不是可信执行环境（TEE）度量。
- */
+// T18 · 受控阅读（归档件的阅读授权控制）。
 
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
 import {
@@ -38,7 +15,7 @@ import type { DocumentModel } from '../model/types.ts';
 export interface ReadingGrant {
   grantId: string;
   docId: string;
-  /** 文档内容指纹：被授权阅读的**就是这一份内容**，文档改动后旧凭证立即失效 */
+  /** 文档内容指纹：被授权阅读的就是这一份内容，文档改动后旧凭证立即失效  */
   documentFingerprint: string;
   notBefore: string;
   notAfter: string;
@@ -46,29 +23,21 @@ export interface ReadingGrant {
   maxReads: number | null;
   /** 允许的环境指纹（空 = 不限环境；非空 = 只能在这些终端读） */
   allowedEnvironments: string[];
-  /** 允许阅读的章节 id 白名单；包含 '*' 表示全部；**空数组 = 什么都不放行**（fail-closed） */
+  /** 允许阅读的章节 id 白名单；包含 '*' 表示全部；空数组 = 什么都不放行（fail-closed）  */
   allowedSections: string[];
   /** 是否隐藏患者身份（姓名/就诊号以外的一切标识不进入视图） */
   concealPatientIdentity: boolean;
   issuedBy: string;
   issuedAt: string;
-  /** 用途说明：授权必须写明目的，审计要回答"为什么给他看" */
   purpose: string;
-  /**
-   * **加密交付**：把"内容密钥（被接收方公钥封装）"一并写进授权书。
-   *
-   * 这一步把"授权"与"机密性"缝成一条链：授权书本身是被签名的，因此
-   *   ① 改接收方 → 签名验不过；
-   *   ② 把授权书转给第三人 → 他没有对应私钥，解不出内容密钥（换了终端也一样）；
-   *   ③ 拿 A 文档的授权去读 B 文档 → 两处封装的密钥解出来不一致（本地校验直接拒绝）。
-   * 也就是"授权即密钥交付"，比"环境绑定"更硬：后者是自报标识，前者是密码学约束。
-   */
+  // ② 把授权书转给第三人 → 他没有对应私钥，解不出内容密钥（换了终端也一样）；
+
   keyDelivery?: ReadingKeyDelivery;
 }
 
 /** 内容密钥的交付片段（放进授权书，随授权书一起被签名） */
 export interface ReadingKeyDelivery {
-  /** 被授权阅读的**那一份明文**的 SM3：绑定"授权的是这份内容" */
+  /** 被授权阅读的那一份明文的 SM3：绑定"授权的是这份内容"  */
   plaintextDigest: string;
   /** SM2 封装的内容密钥（C1C3C2，base64） */
   wrappedKey: string;
@@ -92,7 +61,7 @@ export interface ReadingContext {
   actorId: string;
   /** 当前时间（ISO） */
   at: string;
-  /** 该凭证在此环境**已完成**的阅读次数（由调用方集中记账） */
+  /** 该凭证在此环境已完成的阅读次数（由调用方集中记账）  */
   readCount: number;
 }
 
@@ -119,7 +88,7 @@ export interface ReadingView {
   validUntil: string;
   remainingReads: number | null;
   sections: ReadingSection[];
-  /** 因未授权而被隐藏的章节数（**如实告知"有内容你没被授权看"**，而不是假装文档就这么点） */
+  /** 因未授权而被隐藏的章节数（如实告知"有内容你没被授权看"，而不是假装文档就这么点）  */
   concealedSectionCount: number;
   /** 必须随视图展示的告知/水印（受控阅读标识、有效期、用途） */
   notices: string[];
@@ -141,18 +110,16 @@ export interface ReadingDecision {
   view?: ReadingView;
 }
 
-/* ------------------------------ 指纹与规范化 ------------------------------ */
-
 /**
- * 文档内容指纹：**患者身份 + 就诊 + 文书类型 + 节点树 + 机读摘要 + 签章指纹**。
+ * 文档内容指纹：患者身份 + 就诊 + 文书类型 + 节点树 + 机读摘要 + 签章指纹。
  *
- * ⚠️ 患者身份必须进指纹（实测踩到）：早期版本只放了 `patientId`，
+ *  患者身份必须进指纹（实测踩到）：早期版本只放了 `patientId`，
  * 于是"姓名掩码/性别/出生日期被改"不会改变指纹 —— 旧凭证继续有效。
- * 反过来说，指纹是**授权的绑定对象**：它覆盖什么，授权就保护到什么。
+ * 反过来说，指纹是授权的绑定对象：它覆盖什么，授权就保护到什么。
  *
- * 刻意**不含** `updatedAt`/`revisions`/`status`：这些是流程元数据，
+ * 刻意不含 `updatedAt`/`revisions`/`status`：这些是流程元数据，
  * 机读信息重算、状态流转不应让一份合法授权失效（否则每次流程动作都要重签授权）。
- */
+  */
 export function documentFingerprint(doc: DocumentModel): string {
   const patient = doc.patient;
   const encounter = doc.encounter;
@@ -202,8 +169,6 @@ export function canonicalGrant(grant: ReadingGrant): Uint8Array {
   );
 }
 
-/* ------------------------------- 签发与校验 ------------------------------- */
-
 export async function issueReadingGrant(grant: ReadingGrant, signer: Signer): Promise<ReadingCredential> {
   const block = await signTargets(
     [{ path: `grant/${grant.grantId}`, bytes: canonicalGrant(grant) }],
@@ -226,13 +191,6 @@ export async function issueReadingGrant(grant: ReadingGrant, signer: Signer): Pr
   };
 }
 
-/**
- * 演示用签发者（生产应注入密码设备；与本仓库其它演示密钥同一纪律）。
- *
- * ⚠️ 它现在的定位是**演示替身"授权源"**，而不是"本系统的签发功能"：
- * 受控阅读授权应由院内授权平台签发（见 `src/reading/reading-authority.ts`），
- * 真实部署里本系统只持有平台公钥、**不持有签发私钥**。
- */
 export const DEMO_READING_ISSUER_SEED = 'l0-demo-reading-issuer';
 
 export function demoReadingIssuer(seed = DEMO_READING_ISSUER_SEED): Signer {
@@ -240,11 +198,11 @@ export function demoReadingIssuer(seed = DEMO_READING_ISSUER_SEED): Signer {
 }
 
 /**
- * 演示替身授权源的**公钥指纹** = `demo` 模式下的信任根。
+ * 演示替身授权源的公钥指纹 = `demo` 模式下的信任根。
  *
- * 单独导出它，是为了让"信任的是哪把钥匙"**只有一处定义**：界面显示的、
+ * 单独导出它，是为了让"信任的是哪把钥匙"只有一处定义：界面显示的、
  * 配置校验比对的、凭据登记时核对的，必须是同一个值。
- */
+  */
 export function demoReadingIssuerFingerprint(): string {
   return publicKeyFingerprint(demoKeyPair(DEMO_READING_ISSUER_SEED).publicKey);
 }
@@ -274,8 +232,6 @@ export function verifyCredential(credential: ReadingCredential): { ok: boolean; 
   const result = verifyTargets(block, [{ path: `grant/${credential.grant.grantId}`, bytes: canonicalGrant(credential.grant) }]);
   return { ok: result.ok, reasons: result.reasons };
 }
-
-/* -------------------------------- 受控阅读 -------------------------------- */
 
 function allowedSection(grant: ReadingGrant, sectionId: string): boolean {
   if (grant.allowedSections.includes('*')) return true;
@@ -350,11 +306,11 @@ function buildView(grant: ReadingGrant, doc: DocumentModel, remainingReads: numb
 
 /**
  * 受控阅读：先验凭证，再逐项判定（撤销 → 文档是否被改 → 有效期 → 次数 → 环境），
- * 全部通过才返回**受控视图**。任何一项不满足都拒绝，并给出可读原因。
+ * 全部通过才返回受控视图。任何一项不满足都拒绝，并给出可读原因。
  *
  * 拒绝原因用独立错误码而不是一句"无权访问"：运维要能区分"过期"和"环境不对"，
  * 否则只能把所有情况都当"系统坏了"处理。
- */
+  */
 export function openForReading(
   credential: ReadingCredential,
   doc: DocumentModel,

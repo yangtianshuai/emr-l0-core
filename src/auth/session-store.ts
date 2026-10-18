@@ -1,29 +1,5 @@
-/**
- * 会话存储：把"登录过"变成一件**有寿命、可吊销、且不落明文**的事。
- *
- * ## 为什么是"按指纹索引"
- *
- * 会话 id 本身就是凭证（cookie 里拿着它就能用）。所以：
- *   - 内存里**只存 `SM3(id)` 的指纹**，不存 id 原文 —— 内存快照/崩溃转储泄露也无法复原会话 id
- *     （与 `server/actor-directory.ts` 只存凭证指纹同一口径）；
- *   - `issue()` 是**唯一**能看到 id 原文的时刻，调用方立刻写进 Set-Cookie；
- *   - `list()` 只回指纹与身份，供管理后台展示"有哪些活跃会话"。
- *
- * 这一条与"摘要不是签名"那条纪律不冲突：这里防的是**内存态泄露**，不是防篡改。
- *
- * ## 为什么必须有过期，即使演示
- *
- * 原实现记录了 `at` 却**从没有任何代码读过它** —— 会话永生，只靠重启和显式登出消失。
- * 一个"看起来有寿命、实际没有"的字段比没有字段更糟：审代码的人会以为过期已经处理了。
- * 所以这里把 TTL 做成**构造参数**（必填），并配一条注入时钟的用例：到点即失效、不再续期。
- *
- * ## 滑动续期：这里是"有"还是"没有"
- *
- * 采用**滑动过期**（每次成功认领都续期）：这是给医生工作站的选择 —— 医生一上午开着页面，
- * 不该在写病历时忽然掉线。代价是"一直活跃的会话永不失效"，所以同时提供 `revokeAllFor()`
- * 供"改口令就踢掉全部旧会话"这类处置。**绝对过期**（无论多活跃，到点必须重登）没有做，
- * 它需要与医院的班次/终端策略一起定，见文件末尾边界。
- */
+// 会话存储：把"登录过"变成一件有寿命、可吊销、且不落明文的事。
+// 供"改口令就踢掉全部旧会话"这类处置。绝对过期（无论多活跃，到点必须重登）没有做，
 
 import { randomBytes } from 'node:crypto';
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
@@ -44,7 +20,7 @@ export interface SessionRecord extends SessionPrincipal {
   seen: number;
 }
 
-/** 只回指纹的展示形态（管理后台用；**没有 id 原文**） */
+/** 只回指纹的展示形态（管理后台用；没有 id 原文）  */
 export interface SessionSummary extends Omit<SessionRecord, never> {
   fingerprint: string;
 }
@@ -55,7 +31,6 @@ export type ResolveResult =
   | { ok: false; code: typeof AUTH_ERRORS.E_SESSION_EXPIRED; expiredAt: number };
 
 export interface SessionStoreOptions {
-  /** 会话寿命（毫秒）。**必填**：不给默认值是有意的，见文件头 */
   ttlMs: number;
   /** 注入时钟（测试用）。默认 `Date.now` */
   now?: () => number;
@@ -68,7 +43,6 @@ export interface SessionStoreOptions {
 }
 
 export class SessionStore {
-  /** 指纹 → 记录。**键是指纹，不是 id**（见文件头） */
   private readonly byFingerprint = new Map<string, SessionRecord>();
 
   private readonly ttlMs: number;
@@ -98,9 +72,9 @@ export class SessionStore {
   }
 
   /**
-   * 签发会话。**唯一**返回 id 原文的地方 —— 调用方必须立刻把它写进 cookie，
+   * 签发会话。唯一返回 id 原文的地方 —— 调用方必须立刻把它写进 cookie，
    * 不要存进日志、不要进审计（审计里不该出现能换取权限的东西）。
-   */
+    */
   issue(principal: SessionPrincipal): { id: string; record: SessionRecord } {
     const id = hex(randomBytes(32));
     const now = this.now();
@@ -120,18 +94,18 @@ export class SessionStore {
    * 认领：会话 id → 记录。
    *
    * 三种结果分开报：
-   *   - `E_AUTH_REQUIRED`：没给 id，或这个 id 从来没签发过（**不猜**）；
+   *   - `E_AUTH_REQUIRED`：没给 id，或这个 id 从来没签发过（不猜）；
    *   - `E_SESSION_EXPIRED`：确实签发过、但已经到点 —— 与"没登录"分开，否则医生刚登录就被说成没登录，
    *     会去反复重登而不是去查时间；
    *   - ok：并（在滑动模式下）续期。
    *
-   * 过期记录**不在这里删**：删了之后第二次请求只能报"没登录"，把"过期"这件事盖掉。
+   * 过期记录不在这里删：删了之后第二次请求只能报"没登录"，把"过期"这件事盖掉。
    * 清理由 `sweep()` 在宽限期之后做。
    *
    * 有人会问：区分"已过期"与"从未存在"是不是泄露信息？会话 id 是 256 位随机值，
-   * 攻击者猜不出一个存在的 id，所以这个区分**不构成可利用的探测**；
+   * 攻击者猜不出一个存在的 id，所以这个区分不构成可利用的探测；
    * 换来的是医生界面上"会话已过期，请重新登录"这句准确的话。
-   */
+    */
   resolve(id: string | null | undefined): ResolveResult {
     if (!id) return { ok: false, code: AUTH_ERRORS.E_AUTH_REQUIRED };
     const record = this.byFingerprint.get(fingerprintOf(id));
@@ -144,7 +118,7 @@ export class SessionStore {
     return { ok: true, record: { ...record } };
   }
 
-  /** 吊销一个会话。返回是否确实存在过（不存在也返回 false，**不报错** —— 登出应幂等） */
+  /** 吊销一个会话。返回是否确实存在过（不存在也返回 false，不报错 —— 登出应幂等）  */
   revoke(id: string | null | undefined): boolean {
     if (!id) return false;
     return this.byFingerprint.delete(fingerprintOf(id));
@@ -170,7 +144,7 @@ export class SessionStore {
     return live;
   }
 
-  /** 活跃会话清单（**只有指纹，没有 id**）。已过期的默认不列 */
+  /** 活跃会话清单（只有指纹，没有 id）。已过期的默认不列  */
   list(includeExpired = false): SessionSummary[] {
     const now = this.now();
     return [...this.byFingerprint.entries()]
@@ -192,7 +166,7 @@ export class SessionStore {
     return removed;
   }
 
-  /** 上限保护：先清过期，再按创建时刻清最旧（**不静默丢当前有效的会话**，只在上限真的顶住时才丢最旧） */
+  /** 上限保护：先清过期，再按创建时刻清最旧（不静默丢当前有效的会话，只在上限真的顶住时才丢最旧）  */
   private enforceCap(): number {
     if (this.byFingerprint.size <= this.maxRecords) return 0;
     const now = this.now();

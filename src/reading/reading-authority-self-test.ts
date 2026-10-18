@@ -1,24 +1,4 @@
-/**
- * 受控阅读**授权平台**配置与信任判定自测。
- *
- *   node src/reading/reading-authority-self-test.ts
- *
- * ## 本套件的立场
- *
- * 本系统**不签发**阅读授权：授权由院内授权平台签发，本系统只做三件事 ——
- * 配"信任哪个平台"、验签并登记平台签发的凭据、按凭据执行阅读。
- * 因此这里**没有任何"本系统签发"的用例**（产品里也没有这条路径；测试里的"平台"是自建钥匙对）。
- *
- * ## 覆盖
- *
- *   A 配置校验：允许空配置（= 未配置状态），但只要给了公钥/指纹就必须自洽
- *   B 信任判定：**未配置拒绝一切**（fail-closed）与**自洽 ≠ 受信**（本套件最要紧的两条）
- *   C 存储：界面配置优先、来源可见、文件损坏**不静默当"没配过"**
- *   D 外部凭据解析：形状校验先做（否则内部错误会被当成"系统坏了"）
- *
- * 为什么重点全在"拒绝"：信任判定的失败模式是**接纳** ——
- * 放进来一份不受信的授权，等同于把病历内容交给一个没人批准过的读者。
- */
+// 受控阅读授权平台配置与信任判定自测。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession } from '../core/session.ts';
@@ -100,8 +80,6 @@ function grantFor(doc: ReturnType<typeof fixture>): ReadingGrant {
 async function main(): Promise<void> {
   const doc = fixture();
 
-  /* ========================= A 配置校验 ========================= */
-
   await test('A1 空配置合法（= 未配置状态），但此时**不算已配置**', async () => {
     const config = validateReadingAuthority({});
     assertEqual(Object.keys(config).length, 0, '空输入应产出空配置（不是报错）');
@@ -175,9 +153,7 @@ async function main(): Promise<void> {
     const config = validateReadingAuthority({ trustedIssuerFingerprint: PLATFORM_FINGERPRINT });
     const otherKey = demoKeyPair('not-the-platform');
     const credential = await issueReadingGrant(grantFor(doc), softwareSigner(otherKey.privateKey));
-    /* ① 内核认为它**完全有效** —— 签名、授权书、公钥指纹全都对得上 */
     assertEqual(verifyCredential(credential).ok, true, '自签凭据在密码学上应自洽（这正说明内核判断不了"谁被信任"）');
-    /* ② 信任根拒绝它 */
     const decision = checkIssuerTrust(credential, config);
     assertEqual(decision.ok, false, '不在信任集里的签发者必须被拒');
     assertEqual(decision.code, 'E_UNTRUSTED_ISSUER', '拒绝码应为 E_UNTRUSTED_ISSUER');
@@ -189,8 +165,6 @@ async function main(): Promise<void> {
     const oldCredential = await issueReadingGrant(grantFor(doc), PLATFORM_SIGNER);
     assertEqual(checkIssuerTrust(oldCredential, newConfig).ok, false, '换平台后，旧平台的凭据必须失效');
   });
-
-  /* ========================= C 存储 ========================= */
 
   await test('C1 没配过 = 空配置，来源可见且**未配置**', async () => {
     const fixture = openConfigFixture({ prefix: 'l0-authority-' });
@@ -262,8 +236,6 @@ async function main(): Promise<void> {
       fixture.cleanup();
     }
   });
-
-  /* ========================= D 凭据解析 ========================= */
 
   await test('D1 合法凭据可解析（形状校验先于信任判定）', async () => {
     const credential = await issueReadingGrant(grantFor(doc), PLATFORM_SIGNER);

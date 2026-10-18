@@ -1,31 +1,5 @@
-/**
- * 命令行账号维护：**忘记口令时唯一的出路**。
- *
- * ## 为什么必须有它（而不是"忘了就用环境变量兜底"）
- *
- * 口令搬进数据库之后，多了一个共享口令时代没有的失败模式：
- * **唯一的管理员口令想不起来了**。这时如果没有任何自助通道，唯一的办法就是改库文件 ——
- * 而那需要知道 `scrypt` 哈希格式、盐的编码、参数列的意思。那不是一条能写进运维手册的路。
- *
- * 所以这里给一条明确的路，同时**不引入新的弱口令**：
- * 它直接读写同一个库、走同一个 `UserStore`（于是"最后一个管理员不能被删"这类红线
- * 在这里同样生效），并且口令**从标准输入读**，不从命令行参数读 ——
- * 命令行参数会进 shell 历史与进程列表（`ps` 里一行就能看见）。
- *
- * ## 用法
- *
- * ```bash
- * npm run user -- list
- * npm run user -- add dr-zhang clinician
- * npm run user -- passwd admin              # 口令从标准输入读
- * npm run user -- role dr-zhang qc
- * npm run user -- disable dr-zhang
- * npm run user -- enable  dr-zhang
- * npm run user -- remove  dr-zhang
- * ```
- *
- * 口令也可以由 `L0_NEW_PASSWORD` 给出（便于脚本化）；两者都没有时会提示着从标准输入读一行。
- */
+// 命令行账号维护：忘记口令时唯一的出路。
+// 口令搬进数据库之后，多了一个共享口令时代没有的失败模式：
 
 import { MIGRATIONS, STORAGE_SCHEMA_VERSION } from '../storage/schema.ts';
 import { openDatabase } from '../storage/sqlite.ts';
@@ -33,8 +7,8 @@ import { resolveRuntimeLayout } from '../core/runtime-dir.ts';
 import { ROLE_LABELS, type Role } from './principal.ts';
 import { UserError, UserStore, PASSWORD_MIN_LENGTH } from './user-store.ts';
 
-/* ⚠️ 本环境的 `@types/node` 里 `readFileSync` 只声明了字符串路径（运行时支持 fd 0 = 标准输入）。
-   与 `core/persistence.ts` 对 fs 的处置同一套办法：局部断言用到的形状。 */
+/*  本环境的 `@types/node` 里 `readFileSync` 只声明了字符串路径（运行时支持 fd 0 = 标准输入）。
+   与 `core/persistence.ts` 对 fs 的处置同一套办法：局部断言用到的形状。  */
 const fsx = (await import('node:fs')) as unknown as {
   readFileSync: (path: string | number, options: string) => string;
 };
@@ -63,9 +37,9 @@ function die(message: string): never {
 /**
  * 口令来源：环境变量 > 标准输入。
  *
- * **刻意不支持命令行参数**：`npm run user -- passwd admin mypassword` 会把这串口令
+ * 刻意不支持命令行参数：`npm run user -- passwd admin mypassword` 会把这串口令
  * 写进 shell 历史、写进 `ps` 的输出、也写进 npm 的日志。而这三处都是别人能看到的。
- */
+  */
 function readNewPassword(): string {
   const fromEnv = process.env.L0_NEW_PASSWORD;
   if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
@@ -81,7 +55,7 @@ function readNewPassword(): string {
   } catch {
     die('读不到标准输入。请用管道把口令送进来（echo "新口令" | npm run user -- passwd admin），或设 L0_NEW_PASSWORD');
   }
-  /* 只去掉**行尾**的换行：口令本身可以含空格，顺手 trim 会在"口令两端有空格"时静默改掉它 */
+  /* 只去掉行尾的换行：口令本身可以含空格，顺手 trim 会在"口令两端有空格"时静默改掉它  */
   return raw.replace(/\r?\n$/, '');
 }
 
@@ -117,9 +91,9 @@ function main(): void {
       die(`打开数据库失败（${runtime.dbFile}）：${(err as Error).message}`);
     }
   })();
-  /* 命令行工具的操作者在审计里记成 **cli**（而不是某个用户名）：
+  /* 命令行工具的操作者在审计里记成 cli（而不是某个用户名）：
      它就是"有人在服务器上执行了命令"，冒充成某个用户名只会让审计说谎。
-     这条也顺带说明了一件事：拿到服务器 shell 的人本来就能做这一切 —— 本工具不承诺抵抗它。 */
+     这条也顺带说明了一件事：拿到服务器 shell 的人本来就能做这一切 —— 本工具不承诺抵抗它。  */
   const BY = 'cli';
   const store = new UserStore(opened.db);
 

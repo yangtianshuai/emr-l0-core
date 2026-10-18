@@ -1,25 +1,5 @@
-/**
- * 预问诊接入凭据（机对机）。
- *
- * ## 为什么只存哈希，不加密存原文
- *
- * 采集 / 模型 / 落位那几项要**取出来用**（带着它去呼外部服务），所以加密存、用的时候解密。
- * 这一项只做一件事：把我们收到的请求头与它**比对**。既然永远不需要取回原文，就只存哈希 ——
- * 连管理员也看不到明文，"谁能把密钥抄走"这条路径直接不存在。
- *
- * ## 为什么用 sha256 而不是 scrypt
- *
- * scrypt 的代价是为"人记的口令"设计的：短、可猜、值得拖慢穷举。机对机密钥是随机串，
- * 穷举不成立；慢哈希只会让每次写入多花上百毫秒。盐仍然要（防两份部署用同一个密钥时哈希相同）。
- *
- * ## 三种状态必须分清
- *
- *   - **从没配过**（`null`）：这是"还没上锁"，不是"锁坏了"。演示模式放行（并如实标注），
- *     严格模式拒绝 —— 与系统里 `authMode` 的两档是同一把尺子。
- *   - **已关闭校验**（`enabled: false`）：管理员显式选择的"不上锁"，放行。
- *   - **已启用**（`enabled: true` + 有密钥）：必须带对，否则拒绝。
- *     启用但密钥为空是**配置不完整**，一律拒绝 —— 不能"没密钥就当没启用"，那等于把门开着还挂个锁。
- */
+// 预问诊接入凭据（机对机）。
+// scrypt 的代价是为"人记的口令"设计的：短、可猜、值得拖慢穷举。机对机密钥是随机串，
 
 import nodeCrypto from 'node:crypto';
 import { CONFIG_KEY_PREFIX, type ConfigKv } from '../storage/config-kv.ts';
@@ -54,7 +34,7 @@ export interface PrevisitAccessRecord {
 
 export interface PrevisitAccessView {
   enabled: boolean;
-  /** 密钥是否就位（界面只报这个，**不回显值**） */
+  /** 密钥是否就位（界面只报这个，不回显值）  */
   keyPresent: boolean;
   /** 真正生效 = 已启用且密钥就位 */
   effective: boolean;
@@ -63,8 +43,6 @@ export interface PrevisitAccessView {
   /** 给界面的一句实话：现在到底是什么状态、谁会写不进来 */
   note: string;
 }
-
-/* ------------------------------- 哈希与校验 ------------------------------- */
 
 export function hashAccessKey(key: string): string {
   const salt = nodeCrypto.randomBytes(SALT_BYTES);
@@ -108,8 +86,6 @@ export function validateAccessKey(raw: unknown): KeyValidation {
   }
   return { ok: true, key };
 }
-
-/* --------------------------------- 读写配置 --------------------------------- */
 
 export function loadAccess(kv: ConfigKv): PrevisitAccessRecord | null {
   return kv.read<PrevisitAccessRecord>(PREVISIT_ACCESS_KEY);
@@ -195,9 +171,6 @@ export function saveAccess(
 
   const record: PrevisitAccessRecord = {
     version: 1,
-    /* 没给就沿用原值；从没配过时默认 **false**（关闭）。
-       为什么不默认 true：默认 true 且没有密钥 = 配置不完整 = 写入全被拒，
-       装完就"什么都写不进来"，而现场只会看到"接口坏了"。 */
     enabled: patch.enabled ?? previous?.enabled ?? false,
     keyHash,
     updatedAt: now,
@@ -207,8 +180,6 @@ export function saveAccess(
   return { record, keyAction };
 }
 
-/* --------------------------------- 准入判定 --------------------------------- */
-
 export type AccessMode = 'key' | 'off' | 'unconfigured-demo';
 
 export type AccessCheck = { ok: true; mode: AccessMode } | { ok: false; code: string; message: string };
@@ -216,9 +187,9 @@ export type AccessCheck = { ok: true; mode: AccessMode } | { ok: false; code: st
 /**
  * 判定一次写入能不能进来。
  *
- * `allowUnconfigured` 对应演示模式：**只对"从没配过"放行**，对"已启用但没密钥"仍然拒绝 ——
+ * `allowUnconfigured` 对应演示模式：只对"从没配过"放行，对"已启用但没密钥"仍然拒绝 ——
  * 后者是配置错误，不是"还没上锁"。
- */
+  */
 export function checkAccess(input: {
   record: PrevisitAccessRecord | null;
   presentedKey: string;

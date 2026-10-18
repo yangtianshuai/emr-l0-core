@@ -1,14 +1,4 @@
-/**
- * 文档校验：结构校验 + 语义校验（11 条硬规则）。
- *
- * 与工具链 S5（tools/model-check/schema-validate.mjs）**必须等价**：
- *   - 语义规则码完全同名（见 types.ts 的 SEMANTIC_CODES）；
- *   - 通过标准一致：合法文档 0 error；反例必须命中全部 11 类语义规则。
- * 等价性由 src/model/self-test.ts 用同一批夹具交叉验证。
- *
- * 注意：结构校验是"自实现"而非复用 JSON Schema 引擎，因此对未知字段采取**拒绝**策略，
- * 防止外部输入夹带未声明字段（这类字段既不会被渲染，也不会进入留痕，却可能被下游误读）。
- */
+// 文档校验：结构校验 + 语义校验（11 条硬规则）。
 
 import { hashNodes } from './hash.ts';
 import { isPlainObject } from './guards.ts';
@@ -56,7 +46,7 @@ const NODE_EXTRA_KEYS: Record<string, string[]> = {
   text: ['runs'],
   field: ['dataType', 'value', 'valueText', 'unit', 'required', 'valueSet', 'sourceKey', 'sampledAt', 'referenceRange'],
   /* 控件的呈现快照随实例抄进节点（形状 / 字段 / 行列 / 排布 / 行数），
-     漏一项的后果是 `E_UNKNOWN_FIELD` —— 而那份文档**本来就是本引擎写出来的** */
+     漏一项的后果是 `E_UNKNOWN_FIELD` —— 而那份文档本来就是本引擎写出来的  */
   control: [
     'controlKind',
     'shape',
@@ -82,17 +72,6 @@ const NODE_EXTRA_KEYS: Record<string, string[]> = {
 const PROVENANCE_KEYS = ['origin', 'actorId', 'modelId', 'promptId', 'confidence', 'evidence', 'acceptedBy', 'acceptedAt', 'suggestionId', 'derivedFrom', 'at'];
 const EVIDENCE_KEYS = ['kind', 'ref', 'field', 'valueText', 'quote', 'nodeId', 'capturedAt'];
 const DERIVATION_KEYS = ['modelId', 'confidence', 'suggestionId', 'editedBy', 'editedAt'];
-/**
- * 留痕（RevisionEntry）的允许字段白名单。
- *
- * ⚠️ **凡给留痕记录新增字段，必须同时登记到这里**。漏登记不会当场报错：
- * 建议/留痕照常写入，只有在下一次全量校验（`verifyInvariants`）时才会以
- * `E_UNKNOWN_FIELD` 形式暴露 —— 本次新增批量建议范围（`aiSuggestionIds`）
- * 就是这样被抓到的（见 `suggestion-self-test` A16）。
- *
- * 批量操作的范围字段（`confirmedNodeIds` / `aiSuggestionIds` /
- * `acknowledgedUnconfirmed`）属于同一族，必须一并登记。
- */
 const REVISION_KEYS = [
   'rev',
   'at',
@@ -187,8 +166,6 @@ function checkDateTime(issues: ValidationIssue[], value: unknown, path: string, 
   }
 }
 
-/* ----------------------------- 结构校验 ----------------------------- */
-
 export function validateStructure(doc: unknown): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!isPlainObject(doc)) {
@@ -229,7 +206,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
     }
   }
 
-  /* 节点 */
   if (!isPlainObject(doc.nodes) || Object.keys(doc.nodes).length === 0) {
     push(issues, 'E_REQUIRED_FIELD', '$.nodes', '缺少 nodes 或为空');
   } else {
@@ -251,7 +227,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
       if (typeof node.order !== 'number' || !Number.isInteger(node.order)) push(issues, 'E_TYPE_INVALID', `${path}.order`, 'order 必须是整数', key);
       if (typeof node.rev !== 'number' || !Number.isInteger(node.rev) || node.rev < 1) push(issues, 'E_TYPE_INVALID', `${path}.rev`, 'rev 必须是 ≥1 的整数', key);
 
-      /* provenance */
       if (!isPlainObject(node.provenance)) push(issues, 'E_REQUIRED_FIELD', `${path}.provenance`, '缺少 provenance', key);
       else {
         const p = node.provenance;
@@ -280,7 +255,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
         }
       }
 
-      /* tags */
       if (Array.isArray(node.tags)) {
         node.tags.forEach((tag, i) => {
           if (!isPlainObject(tag)) push(issues, 'E_TYPE_INVALID', `${path}.tags[${i}]`, 'tag 必须是对象', key);
@@ -292,7 +266,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
         });
       }
 
-      /* 分类型必填 */
       if (node.type === 'text') {
         if (!Array.isArray(node.runs)) push(issues, 'E_REQUIRED_FIELD', `${path}.runs`, 'text 节点必须有 runs 数组', key);
         else {
@@ -328,14 +301,14 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
       }
       if (node.type === 'control') {
         checkEnum(issues, node.controlKind, CONTROL_KIND_VALUES, path, 'controlKind', key);
-        /* 形状：**渲染器按它分派**。认不出来的形状在界面上是一片空白 ——
-           而"空白"与"这一格还没填"长得一模一样（同 `template/engine.ts` 装载期那条）。 */
+        /* 形状：渲染器按它分派。认不出来的形状在界面上是一片空白 ——
+           而"空白"与"这一格还没填"长得一模一样（同 `template/engine.ts` 装载期那条）。  */
         checkEnum(issues, node.shape, CONTROL_SHAPE_VALUES, path, 'shape', key);
         if (!isPlainObject(node.payload)) {
           push(issues, 'E_REQUIRED_FIELD', `${path}.payload`, 'control 节点必须有 payload 对象', key);
         }
-        /* 字段快照是 payload 的**说明书**（界面上的名字、单位、取值域都从它来）：
-           `label` 缺了不会报错，只会让医生看到一串键名。 */
+        /* 字段快照是 payload 的说明书（界面上的名字、单位、取值域都从它来）：
+           `label` 缺了不会报错，只会让医生看到一串键名。  */
         if (node.fields !== undefined && !Array.isArray(node.fields)) {
           push(issues, 'E_TYPE_INVALID', `${path}.fields`, 'fields 若是给就得是数组（字段快照）', key);
         } else if (Array.isArray(node.fields)) {
@@ -350,11 +323,11 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
             checkEnum(issues, field.dataType, FIELD_TYPE_VALUES, fieldPath, 'dataType', key);
           });
         }
-        /* **键必须落在格里**：控件的 payload 是一张扁平表，而"哪一格"由形状算出来
+        /* 键必须落在格里：控件的 payload 是一张扁平表，而"哪一格"由形状算出来
            （`model/control.ts` 的 `controlCellsOf`）。写到一个算不出来的键上，
            症状是"医生填的值在导出里凭空不见" —— 写路径与渲染器都不会报错。
-           值也要与那一格的 `dataType` 对得上：payload 是**机器真值**（带 tag 的格会摊成数据元），
-           `"37.2"` 与 `37.2` 在展示上一样、在机器读的时候不是一回事。 */
+           值也要与那一格的 `dataType` 对得上：payload 是机器真值（带 tag 的格会摊成数据元），
+           `"37.2"` 与 `37.2` 在展示上一样、在机器读的时候不是一回事。  */
         if (isPlainObject(node.payload)) {
           const cells = controlCellsOf(node as unknown as ControlGridNode);
           const byKey = new Map(cells.map((cell) => [cell.key, cell]));
@@ -383,10 +356,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
         }
       }
       if (node.type === 'image') {
-        /* `resRef` 允许**空串**：模板里的图片槽开出来就是"待医生贴图"的空槽
-           （见 `template/types.ts` 的 `slot: 'image'`）。但字段本身必须在、且必须是字符串 ——
-           "缺字段"是结构损坏，"空着"是还没填，这两件事的处置完全不同：
-           前者要修数据，后者只需要医生贴一张图。 */
         if (node.resRef === undefined) {
           push(issues, 'E_REQUIRED_FIELD', `${path}.resRef`, '缺少必填字段 resRef', key);
         } else if (typeof node.resRef !== 'string') {
@@ -402,7 +371,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
     }
   }
 
-  /* 机读信息 */
   if (doc.machineReadable !== undefined) {
     if (!isPlainObject(doc.machineReadable)) push(issues, 'E_TYPE_INVALID', '$.machineReadable', 'machineReadable 必须是对象');
     else {
@@ -435,7 +403,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
     }
   }
 
-  /* 留痕 */
   if (!Array.isArray(doc.revisions)) push(issues, 'E_REQUIRED_FIELD', '$.revisions', 'revisions 必须是数组');
   else {
     doc.revisions.forEach((rev, i) => {
@@ -464,7 +431,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
     });
   }
 
-  /* 签名引用 */
   if (Array.isArray(doc.signatureRefs)) {
     doc.signatureRefs.forEach((sig, i) => {
       const p = `$.signatureRefs[${i}]`;
@@ -477,9 +443,9 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
       checkEnum(issues, sig.signerRole, SIGNER_ROLE_VALUES, p, 'signerRole');
       checkDateTime(issues, sig.signedAt, p, 'signedAt');
 
-      /* T18：签名材料必须**成组齐全**。
+      /* T18：签名材料必须成组齐全。
          只留元数据、丢掉签名值（或被改写掉）的签名是最危险的产物：
-         界面会显示"已签章"，而它根本不可验证。 */
+         界面会显示"已签章"，而它根本不可验证。  */
       const material = ['algorithm', 'publicKeyBase64', 'publicKeyFingerprint', 'signedInfoDigest', 'signatureValue', 'references'] as const;
       const present = material.filter((key) => (sig as Record<string, unknown>)[key] !== undefined);
       if (present.length > 0 && present.length < material.length) {
@@ -502,8 +468,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
 
   return issues;
 }
-
-/* ----------------------------- 语义校验 ----------------------------- */
 
 export function validateSemantics(doc: DocumentModel, options: ValidateOptions = {}): ValidationIssue[] {
   const thr = { ...DEFAULT_THRESHOLDS, ...options };
@@ -564,7 +528,7 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
       push(issues, SEMANTIC_CODES.E_KEY_CONTENT_UNCONFIRMED, `$.nodes.${node.id}.humanConfirmed`, `关键内容节点在 ${doc.status} 状态仍未人工确认`, node.id);
     }
     /* 机器绑的标签：与关键内容同档（不受任何 acknowledge 声明影响）。
-       它不是"内容"而是**元数据**，会进机读信息被下游直接消费 —— 而医生看正文时看不见它。 */
+       它不是"内容"而是元数据，会进机读信息被下游直接消费 —— 而医生看正文时看不见它。  */
     if (finalState && (node.unconfirmedTags?.length ?? 0) > 0) {
       push(
         issues,
@@ -605,7 +569,6 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
     }
   }
 
-  /* 留痕连续性 */
   doc.revisions.forEach((rev, i) => {
     if (rev.rev !== i + 1) push(issues, SEMANTIC_CODES.E_REVISION_GAP, `$.revisions[${i}]`, `留痕 rev 不连续：第 ${i + 1} 条 rev=${rev.rev}（应为 ${i + 1}）`);
   });

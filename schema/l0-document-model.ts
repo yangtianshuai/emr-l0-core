@@ -1,20 +1,4 @@
-/**
- * L0 文档模型 · 类型定义（v0.1）
- * schemaVersion = "1.0.0"
- *
- * 设计约束（不可妥协）：
- *  1) 每个节点必须携带 provenance（来源）与 rev（版本），缺一不可 —— 这是 G1/G2/G3 能成立的前提
- *  2) 关键内容节点必须 keyContent = true，并强制 humanConfirmed（诊断/剂量/过敏/术式）
- *  3) 节点 id 全局唯一且创建后永不变更 —— AI 落位、留痕 diff、OFD-H 机读信息回指全靠它
- *  4) 机读信息不手工维护，一律由节点树派生（machineReadable 是派生物，可随时重建）
- *  5) 所有时间戳为 ISO8601 UTC 字符串；payload 内不放不可序列化的值
- *  6) schemaVersion 必须支持迁移（见 MIGRATION_NOTES）
- *
- * 载体说明：
- *  - 存储 canonical 形态 = 本模型的 JSON（视图与数据分离）
- *  - 交换/归档形态 = 由本模型映射生成的 OFD（导出侧，见 OfdExportPlan）
- *  - 机读信息落到 OFD 的扩展区：标准正文未公开前不写死命名空间，用 extensions 占位
- */
+// L0 文档模型 · 类型定义（v0.1）。
 
 export const SCHEMA_VERSION = '1.0.0';
 
@@ -26,9 +10,7 @@ export type RevisionNo = number;
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-/* ------------------------------------------------------------------ */
 /* 元数据                                                              */
-/* ------------------------------------------------------------------ */
 
 export type DocStatus = 'draft' | 'reviewing' | 'signed' | 'archived' | 'void';
 
@@ -55,9 +37,7 @@ export interface EncounterRef {
   dischargedAt?: ISODateTime;
 }
 
-/* ------------------------------------------------------------------ */
 /* 来源与依据（AI 原生能力的核心）                                      */
-/* ------------------------------------------------------------------ */
 
 export type ProvenanceOrigin = 'human' | 'ai' | 'system' | 'imported';
 
@@ -120,9 +100,7 @@ export interface Provenance {
   at: ISODateTime;
 }
 
-/* ------------------------------------------------------------------ */
 /* 数据元标签                                                          */
-/* ------------------------------------------------------------------ */
 
 export interface DataElementTag {
   system: 'WS445' | 'WST500' | 'ICD10' | 'ICD9CM3' | 'LOINC' | 'local' | 'custom';
@@ -130,9 +108,7 @@ export interface DataElementTag {
   display?: string;
 }
 
-/* ------------------------------------------------------------------ */
 /* 节点                                                                */
-/* ------------------------------------------------------------------ */
 
 export type NodeType =
   | 'document'
@@ -221,7 +197,7 @@ export interface FieldNode extends NodeBase {
   valueSet?: Array<{ code: string; display?: string }>;
   /** 来源于外部系统时的稳定 key，如 "LIS.WBC"（趋势聚合的键） */
   sourceKey?: string;
-  /** 采样时间（**标本采集/测量时间，不是报告时间**）：趋势按它排序，用报告时间会错位 */
+  /** 采样时间（标本采集/测量时间，不是报告时间）：趋势按它排序，用报告时间会错位  */
   sampledAt?: ISODateTime;
   /** 参考范围：回答"这个值是不是异常"；text 用于无法数值化的范围（如"阴性"） */
   referenceRange?: { low?: number; high?: number; text?: string; unit?: string };
@@ -307,9 +283,7 @@ export type DocNode =
   | SignatureBlockNode
   | ExtensionNode;
 
-/* ------------------------------------------------------------------ */
 /* 机读信息（OFD-H 侧派生物 + round-trip 校验基准）                     */
-/* ------------------------------------------------------------------ */
 
 export interface MachineDataElement {
   tag: DataElementTag;
@@ -346,9 +320,7 @@ export interface MachineReadableBlock {
   keyContentRefs?: Array<{ nodeId: NodeId; tag?: DataElementTag; present: boolean }>;
 }
 
-/* ------------------------------------------------------------------ */
 /* 留痕与审计                                                          */
-/* ------------------------------------------------------------------ */
 
 export type RevisionOp =
   | 'create'
@@ -361,7 +333,7 @@ export type RevisionOp =
   | 'sign'
   | 'import'
   | 'migrate'
-  /** 系统取数（LIS/HIS 搬运确定性数据）；**不在**"编辑即确认"白名单里 */
+  /** 系统取数（LIS/HIS 搬运确定性数据）；不在"编辑即确认"白名单里  */
   | 'external';
 
 export interface RevisionEntry {
@@ -389,9 +361,7 @@ export interface SignatureRef {
   covers?: string[];
 }
 
-/* ------------------------------------------------------------------ */
 /* 文档根                                                              */
-/* ------------------------------------------------------------------ */
 
 export interface DocumentModel {
   schemaVersion: string;
@@ -416,9 +386,7 @@ export interface DocumentModel {
   resources?: Record<string, { mime: string; dataBase64?: string; sha256?: string }>;
 }
 
-/* ------------------------------------------------------------------ */
 /* OFD 导出计划（导出侧契约，实现见后续阶段）                           */
-/* ------------------------------------------------------------------ */
 
 export interface OfdExportPlan {
   /** 呈现侧：节点 → 页面对象映射策略 */
@@ -446,9 +414,7 @@ export interface OfdExportPlan {
   };
 }
 
-/* ------------------------------------------------------------------ */
 /* 校验与迁移                                                          */
-/* ------------------------------------------------------------------ */
 
 export type ValidationCode =
   | 'E_NODE_ID_DUP'

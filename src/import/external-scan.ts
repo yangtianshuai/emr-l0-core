@@ -1,20 +1,4 @@
-/**
- * 真实数据批量扫描：把一个目录里的外来样本**逐个**跑一遍导入，出人类可读的报告。
- *
- *   npm run scan:external                      # 默认扫 artifacts/external
- *   node src/import/external-scan.ts <目录> --json artifacts/external-scan.json
- *
- * 为什么要有它：
- *   单份文件走界面导入只能看"这一份对不对"；现场真实数据验证是**一批文件一起看**，
- *   要的是"哪些能进、哪些进不来、各自卡在哪一条警告上"。
- *   这个脚本把三类结论分开输出，避免把"解析器缺陷"和"上游文件缺陷"混在一起看：
- *     ✅ 正常：识别成功、无明显异常
- *     ⚠️ 需人工：能进但有警告（警告就是"必须有人核对"的清单）
- *     ❌ 失败：进不来（要么文件本身坏了，要么我们的解析缺口）
- *
- * 退出码：存在 ❌ 时返回 1（可挂进 CI / 现场验收入口）。
- * 它**不修改任何文件**，除非显式传 --json。
- */
+// 真实数据批量扫描：把一个目录里的外来样本逐个跑一遍导入，出人类可读的报告。
 
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -124,8 +108,8 @@ function main(): void {
 
   const succeeded = rows.filter((row) => row.ok);
   console.log(`扫描目录：${dir}`);
-  /* 注意口径：导入件按纪律**一律**需要人工核对，所以"带警告"不是异常状态，
-     而是"待核对清单"。这里不把它算作"不正常"，否则报告会天天显示"全部异常"。 */
+  /* 注意口径：导入件按纪律一律需要人工核对，所以"带警告"不是异常状态，
+     而是"待核对清单"。这里不把它算作"不正常"，否则报告会天天显示"全部异常"。  */
   console.log(
     `样本 ${rows.length} 份 | 导入成功 ${succeeded.length}（其中 ${withWarnings.length} 份带警告 = 待核对清单） | 导入失败 ${failed.length}\n`,
   );

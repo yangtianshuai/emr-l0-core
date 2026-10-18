@@ -1,16 +1,5 @@
-/**
- * 授权登记入库自测（`storage/reading-grant-store.ts` 与 `reading-grants-import.ts`）。
- *
- *   node src/storage/reading-grant-store-self-test.ts
- *
- * 锁死六条：
- *   RG1 空表 = 没有登记（不是错误）；
- *   RG2 往返保真 + **载荷不得以明文落库**（直接读那一行的密文，不听服务端自报"已加密"）；
- *   RG3 列与载荷**同一次写入**更新（撤销与阅读计数是次数门控唯一读的地方）；
- *   RG4 按 `doc_id` / `revoked` 筛选走列，**不需要口令**（列表与统计不该付派生的代价）；
- *   RG5 载荷解不开 → **报错，不当作"没有这条授权"**（两者在界面上都"看起来正常"）；
- *   RG6 一次性导入：记账闸门、库里已有则不混来源、旧文件读不出来**不记账**（要能再试）。
- */
+// 授权登记入库自测（`storage/reading-grant-store.ts` 与 `reading-grants-import.ts`）。
+// RG4 按 `doc_id` / `revoked` 筛选走列，不需要口令（列表与统计不该付派生的代价）；
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { FIXTURE_ITERATIONS, openConfigFixture, type ConfigFixture } from '../testing/config-fixture.ts';
@@ -149,7 +138,6 @@ async function main(): Promise<void> {
       assertEqual(byDoc.map((row) => row.grantId).join(','), 'g1,g2', '顺序稳定（按 doc_id, grant_id）');
       assertEqual(listReadingGrants(db, { docId: 'd1', revoked: true }).map((row) => row.grantId).join(','), 'g2', '按撤销状态可筛');
       assertEqual(listReadingGrants(db, { revoked: false }).length, 2, '未撤销的应有两条（g1 与 g3）');
-      /* **这条是它存在的理由**：纯查询不该付出派生的代价（生产每次约 7.6 秒） */
       assertEqual(listReadingGrants(db, {}).length, 3, '不带筛选应列全部');
     } finally {
       db.close();
@@ -203,7 +191,6 @@ async function main(): Promise<void> {
     const fixture = openConfigFixture({ prefix: 'l0-reading-grants-import-' });
     const db = connect(fixture);
     try {
-      /* ① 没有旧文件 → 不记账（部署时后放进来仍该被搬一次） */
       const missing = importReadingGrantsOnce({
         workStore: fixture.workStore,
         db,
@@ -215,7 +202,6 @@ async function main(): Promise<void> {
       assertEqual(missing.imported, 0, '没有文件就没得导入');
       assertEqual(fixture.workStore.ledgerHas(READING_GRANTS_LEDGER_ID), false, '没搬成不许记账（记早了会把这条路堵死）');
 
-      /* ② 有旧文件 → 导入并记账 */
       const file = writeLegacyFile(fixture, [
         { credential: { grant: { grantId: 'g1', docId: 'd1' } }, readCount: 2, revoked: false, reads: [] },
         { credential: { grant: { grantId: 'g2', docId: 'd1' } }, readCount: 0, revoked: true, reads: [] },
@@ -229,11 +215,9 @@ async function main(): Promise<void> {
       const imported = loadReadingGrant(db, fixture.passphrase, 'g1');
       assertEqual(imported.ok && imported.found ? imported.record.readCount : -1, 2, '阅读计数应从旧记录搬过来（它决定"还能读几次"）');
 
-      /* ③ 再调一次 → 被记账拦住 */
       const again = importReadingGrantsOnce({ workStore: fixture.workStore, db, passphrase: fixture.passphrase, file, options: { iterations: FIXTURE_ITERATIONS, at: AT } });
       assertEqual(again.ran, false, '记了账就不再碰旧文件');
 
-      /* ④ 库里已有（另一台库）→ 不混来源，但要记账 */
       const other = openConfigFixture({ prefix: 'l0-reading-grants-import-' });
       const otherDb = connect(other);
       try {
@@ -243,7 +227,7 @@ async function main(): Promise<void> {
         assertEqual(countReadingGrants(otherDb).total, 1, '库里那条不该被动');
         assertEqual(other.workStore.ledgerHas(READING_GRANTS_LEDGER_ID), true, '这种情况要记账（否则每次启动都要判一次）');
 
-        /* ⑤ 旧文件读不出来 → 报问题且**不记账**（修好之后还能再试） */
+        /* ⑤ 旧文件读不出来 → 报问题且不记账（修好之后还能再试）  */
         const broken = `${other.dir}/broken.json`;
         saveSealedPayload(broken, { version: 1, grants: [] }, 'wrong-passphrase', { iterations: FIXTURE_ITERATIONS, at: AT });
         const fresh = openConfigFixture({ prefix: 'l0-reading-grants-import-' });

@@ -1,34 +1,6 @@
-/**
- * 限流：滑动窗口计数。给"会被暴力猜、会花钱、会拖垮服务"的动作加代价。
- *
- * ## 它现在补的是哪个洞
- *
- * 管理员登录**完全没有失败次数限制**：口令是单一口令（`L0_ADMIN_TOKEN`），
- * 于是"猜一万次"与"猜一次"的成本一样 —— 这是当前最容易被打穿的一处
- * （审计里会留下失败记录，但审计是**事后**看的，它拦不住正在进行的爆破）。
- * 另外两个接入点是**外呼花钱**的动作：测试连接 / 测试签名，以及导出这类重操作。
- *
- * ## 为什么是滑动窗口，不是固定窗口
- *
- * 固定窗口（每分钟清零）有一个众所周知的缺口：在窗口边界两侧各打满一轮，
- * 瞬时速率是上限的两倍。这里的目的不是精算流量，而是让**爆破变得不划算**，
- * 所以选不会给边界漏洞的实现。代价是每个键要保留窗口内的命中时刻（内存与命中数成正比，
- * 上限就是 `limit`，因为超过就不再记录）。
- *
- * ## 内存与隐私
- *
- *   - 键由调用方给（如 `login:actor:ADMIN`），本模块**只计数、不解释键**；
- *   - 命中时刻**不落盘、不进审计**：限流是运行时的自我约束，不是证据
- *     （把 IP 或身份写进审计需要有依据，见文件末尾边界）；
- *   - 键的数量有上限，超出后淘汰**最久没命中**的键 —— 否则"每个来源一个键"本身就是一条内存耗尽路径。
- *
- * ## 边界（必须一起说）
- *
- * ① 单进程内存态：多实例部署时**每实例各算一份**，真实额度是 N 倍 —— 要准就得靠共享存储；
- * ② 不防"慢速爆破"（每 5 分钟猜 4 次）：限流只能提高成本，不能消除风险，
- *    口令本身的强度与轮换才是根；
- * ③ 只按给定键限流，**不识别代理后真实来源**（`X-Forwarded-For` 可伪造，采信它等于让攻击者自己选桶）。
- */
+// 限流：滑动窗口计数。
+// 管理员登录完全没有失败次数限制：口令是单一口令（`L0_ADMIN_TOKEN`），
+// 口令本身的强度与轮换才是根；
 
 import { AUTH_ERRORS } from './principal.ts';
 
@@ -76,7 +48,7 @@ export class SlidingWindowLimiter {
     return this.hits.size;
   }
 
-  /** 记一次命中并判定。**先判定后记录**：被拒的那次不进入窗口（否则拒绝本身会自我延长） */
+  /** 记一次命中并判定。先判定后记录：被拒的那次不进入窗口（否则拒绝本身会自我延长）  */
   hit(key: string, rule: RateRule): RateDecision {
     this.assertRule(rule);
     const now = this.now();
@@ -101,7 +73,7 @@ export class SlidingWindowLimiter {
     return { ok: true, limit: rule.limit, remaining: rule.limit - stamps.length };
   }
 
-  /** 清掉一个键（例如**登录成功后**把该身份的失败计数清零：成功不该继续背着失败） */
+  /** 清掉一个键（例如登录成功后把该身份的失败计数清零：成功不该继续背着失败）  */
   reset(key: string): boolean {
     return this.hits.delete(key);
   }
@@ -139,7 +111,6 @@ export class SlidingWindowLimiter {
   /** 保留窗口内的命中时刻（升序，最长 `limit` 条） */
   private prune(key: string, rule: RateRule, now: number): number[] {
     const stamps = this.hits.get(key) ?? [];
-    /* 窗口最多 `MAX_WINDOW_MS`：避免注入一个超大窗口后，数组无界增长 */
     const windowMs = Math.min(rule.windowMs, MAX_WINDOW_MS);
     return stamps.filter((stamp) => now - stamp < windowMs).slice(-rule.limit);
   }
@@ -155,7 +126,7 @@ export class SlidingWindowLimiter {
 
   private assertRule(rule: RateRule): void {
     if (!Number.isInteger(rule.limit) || rule.limit < 1) {
-      /* 配置错了必须**当场抛**：一个"上限为 0 或 NaN"的限流器会静默变成"全部放行"或"全部拦截" */
+      /* 配置错了必须当场抛：一个"上限为 0 或 NaN"的限流器会静默变成"全部放行"或"全部拦截"  */
       throw new Error(`限流上限必须是正整数，实际 ${String(rule.limit)}（${rule.label}）`);
     }
     if (!Number.isFinite(rule.windowMs) || rule.windowMs <= 0) {

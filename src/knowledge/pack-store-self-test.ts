@@ -1,15 +1,4 @@
-/**
- * 知识资产包存储自测（S1~S10，**一个包一行**的新模型）。
- *
- *   node src/knowledge/pack-store-self-test.ts
- *
- * 守的是新模型下最容易做错的几件事：
- *   S1 空库**就是空库** —— 不用任何内置内容顶上（"看起来有规则在跑"是最危险的状态）；
- *   S4 覆盖**不悄悄丢策略** —— 仍存在的条目开关保留、失效的如实报出（`droppedSwitches`）；
- *   S8 开关只改 `disabled` 列 —— 内容指纹一个字节都不许动（否则"换包"与"关条规则"又混成一件）；
- *   S9 内存里有、库里没有的包 → **报错而不是凭空造一行**（那等于多出一份内容）；
- *   S10 v2→v3 迁移：多版本里只有**生效那一份**活下来，且开关被带过来。
- */
+// 知识资产包存储自测（S1~S10，一个包一行的新模型）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -34,7 +23,7 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'pack-store');
 const SAMPLE_DIR = join(ROOT, 'samples', 'packs');
 
-/** ⚠️ 本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言 */
+/**  本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
 const suite = new TestSuite('知识资产包存储自测（一个包一行）', [
@@ -64,7 +53,7 @@ function samplePack(name = 'qc.form.builtin.json'): Pack {
   return JSON.parse(readFileSync(join(SAMPLE_DIR, name), 'utf8').replace(/^\uFEFF/, '')) as Pack;
 }
 
-/** 改一个字段造"内容变了"的版本（**不升版本号**——新模型里没有版本号了） */
+/** 改一个字段造"内容变了"的版本（不升版本号——新模型里没有版本号了）  */
 function modified(pack: Pack, patch: Record<string, unknown>): Pack {
   return { ...(pack as unknown as Record<string, unknown>), ...patch } as unknown as Pack;
 }
@@ -171,7 +160,7 @@ async function main(): Promise<void> {
     const broken = modified(pack, { items: [] });
     const result = write(registry, db, broken);
     assertEqual(result.ok, false, '空 items 必须被拒');
-    /* 校验失败要走**返回**而不是抛异常：抛出去时接口层只剩 500，而原因本来写着 */
+    /* 校验失败要走返回而不是抛异常：抛出去时接口层只剩 500，而原因本来写着  */
     assertEqual(result.ok ? '' : result.code, 'E_PACK_STORE_BAD_CONTENT', '错误码应可定位');
     assert(result.ok ? true : result.message.includes('没有任何条目'), `消息要带上具体原因，实际：${result.ok ? '' : result.message}`);
     assertEqual(readPackRows(db)[0]?.fingerprint, before.fingerprint, '被拒时库里一个字节都不该变');
@@ -229,7 +218,7 @@ async function main(): Promise<void> {
     const db = freshDb();
     const registry = createEmptyPackRegistry();
     const pack = samplePack();
-    /* 只装进注册表，**不写库** —— 模拟"内存与库不一致" */
+    /* 只装进注册表，不写库 —— 模拟"内存与库不一致"  */
     registry.load(pack, { validate: packValidatorFor(pack.kind) });
     let code = '';
     try {
@@ -245,7 +234,6 @@ async function main(): Promise<void> {
     mkdirSync(DIR, { recursive: true });
     seq += 1;
     const file = join(DIR, `migrate-${seq}.db`);
-    /* 建一个 **v2** 库（两张表 + 生效指针），塞进"同一个包的两份内容" */
     const v2 = openDatabase(file, {
       schemaVersion: 2,
       migrations: MIGRATIONS.filter((migration) => migration.id !== '0003-pack-without-version'),
@@ -287,8 +275,8 @@ async function main(): Promise<void> {
     assertEqual(rows[0]?.packId, pack.packId, '留下的是生效的那个包');
     assertEqual(rows[0]?.disabled, [liveItem, goneItem], '开关要按原样带过来');
 
-    /* 迁移后的内容**必须仍然可装载**：带着 `version` 字段的旧内容若被新的校验拒掉，
-       那这次迁移就是把"能用的包"变成了"装载失败" —— 这条断言就是那道闸。 */
+    /* 迁移后的内容必须仍然可装载：带着 `version` 字段的旧内容若被新的校验拒掉，
+       那这次迁移就是把"能用的包"变成了"装载失败" —— 这条断言就是那道闸。  */
     const registry = createEmptyPackRegistry();
     const loaded = open(registry, v3.db);
     assertEqual(loaded.ok, true, `迁移后的库必须能装载：${loaded.ok ? '' : loaded.message}`);
@@ -300,10 +288,6 @@ async function main(): Promise<void> {
   });
 
   await test('S11 删掉整个包：库里那一行与内存里那一份一起没（删到空的包**不留空壳**）', () => {
-    /* 为什么需要"删包"这条独立动作：`validatePack` 明确拒绝空包（"空包几乎总是导出出错"），
-       而**删掉包里最后一条内容**恰恰会让包变空 —— 那是人有意为之、不是导出出错。
-       于是出路只有一条：连包一起删。留一个空壳在库里，界面上就多出一个"什么都装着的包"，
-       而"这个包为什么是空的"事后没人答得出来。 */
     const registry = createEmptyPackRegistry();
     const db = freshDb();
     const pack = samplePack();

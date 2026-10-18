@@ -1,25 +1,5 @@
-/**
- * T17 · OFD / OFD-H 导出（零依赖）。
- *
- * 产出的是**真实 OFD 容器**（ZIP + XML），不是"模拟对象"：
- *   OFD.xml                             入口
- *   Doc_0/Document.xml                  元数据 + 页面清单
- *   Doc_0/Pages/Page_n/Content.xml       页面内容（真实文本对象，禁止路径化）
- *   Doc_0/MachineReadable.xml           机读信息（"-H" 的载体，独立文件以便纳入签名覆盖）
- *   Doc_0/Res/DocumentRes.xml           字体等资源
- *   Doc_0/Signatures/Signatures.xml     签章描述（含被签文件清单 FileRef）
- *
- * 三条设计红线（对应标准六维度里的"基础格式/机读信息/安全防护"）：
- *   1. **文本必须是文本对象**（TextCode），不得转成路径——否则后期无法抽取，等于 PDF 换壳；
- *   2. **机读信息独立成文件**：便于签名覆盖、便于第三方抽取、便于单独校验；
- *   3. **签名必须覆盖机读文件**：否则机读数据可被改而不破坏签名，"归档不可信"。
- *
- * 签名（T18）：导出时对**容器内真实文件字节**做 SM2-SM3 签名，SignedInfo 的规范化规则
- * 写在 Signatures.xml 注释里，第三方只需本文件 + 被覆盖文件即可独立验签。
- *
- * ⚠️ 诚实边界：算法与容器都是真实的，但**本仓库的签名后端是自研实现、未过第三方审计**，
- *    且演示私钥可由种子推导 —— 生产必须换成经认证的密码模块（见 src/crypto/provider.ts）。
- */
+// T17 · OFD / OFD-H 导出（零依赖）。
+// 且演示私钥可由种子推导 —— 生产必须换成经认证的密码模块（见 src/crypto/provider.ts）。
 
 import { DOCUMENT_COVERS, signTargets, verifyTargets, type SignatureBlock, type SignatureTarget, type VerifySignatureResult } from '../crypto/signature.ts';
 import { utf8 } from '../crypto/sm3.ts';
@@ -41,18 +21,18 @@ export interface OfdLayoutPlan {
   lineHeightPt?: number;
   /**
    * 段前间距（pt）。
-   * **这不是排版美观问题，而是"段落边界能否被还原"的信息载体**：
+   * 这不是排版美观问题，而是"段落边界能否被还原"的信息载体：
    * 若所有行等距且同缩进，版式文件里段落边界在原理上不可恢复（实测踩到），
    * 导出端必须把边界"画"出来（段前间距 + 首行缩进），导入端才可能聚回段落。
-   */
+    */
   paragraphGapPt?: number;
   /** 正文段首行缩进（pt）：中文排版习惯，也是段落边界的第二重线索 */
   firstLineIndentPt?: number;
   /**
-   * 装订边（pt）：**只加在左侧**的额外留白，供纸质病历左侧装订。
+   * 装订边（pt）：只加在左侧的额外留白，供纸质病历左侧装订。
    * 默认 0（不改动既有版式）；启用后正文左边界与可用宽度同时收窄，
    * 装订孔不会压到文字 —— 这是纸质归档的实际要求，不是排版美观问题。
-   */
+    */
   bindingMarginPt?: number;
   /** 页眉区高度（pt）。未指定且启用页眉时按行高 × 1.5 推导 */
   headerHeightPt?: number;
@@ -60,24 +40,12 @@ export interface OfdLayoutPlan {
   footerHeightPt?: number;
 }
 
-/**
- * 页眉/页脚的**计划**（不是"装饰"）：这是打印链路里唯一能让散页归位的东西。
- *
- * 为什么要做：纸质病历在流转中是**散页**的。此前产物的每一页除了正文什么都没有，
- * 一叠纸混在一起后无法判断哪一页属于哪份病历、是不是最后一张。
- * 页眉带患者标识（用 `nameMasked`，不写全名）、页脚带"第 N 页 共 M 页 + 文书号"，
- * 打印后每一张纸都能自证归属。
- *
- * 为什么放在**独立 Layer**：正文与页码必须可分。若混在一层里，导入端只会得到
- * "正文里多了一堆数字"（且无法区分）—— 那是把可修复问题变成不可修复问题。
- */
 export interface OfdFurniturePlan {
   /**
    * 页眉模板。占位符：`{docType}` `{patient}` `{visitId}` `{page}` `{pages}` `{docId}`。
    * 空串表示不出页眉。
    */
   header?: string;
-  /** 页脚模板，占位符同上 */
   footer?: string;
 }
 
@@ -105,23 +73,15 @@ export const DEFAULT_LAYOUT: Required<Omit<OfdLayoutPlan, 'textAsPath'>> = {
   footerHeightPt: 0,
 };
 
-/**
- * 默认页眉/页脚：**默认开启**。
- *
- * 理由：页码不是"打印时才需要的点缀"，而是病历文档完整性的一部分
- * （散页可归位、缺页可发现）。默认关掉等于没有这项能力 —— 需要的人往往不会去开。
- * 患者标识一律取 `nameMasked`（脱敏字段）；若该字段缺失，宁可显示"（未脱敏）"，
- * 也**绝不**把 `patientId` 印在纸面上（页眉是最容易泄露身份的位置）。
- */
 export const DEFAULT_FURNITURE: Required<OfdFurniturePlan> = {
   header: '{docType} · 患者 {patient}{visitId} · 共 {pages} 页',
   footer: '第 {page} 页 共 {pages} 页 · 文书号 {docId}',
 };
 
 /**
- * 装饰层（页眉/页脚/水印）的 Layer ID 前缀 —— 导出与导入两侧的**共同契约**。
+ * 装饰层（页眉/页脚/水印）的 Layer ID 前缀 —— 导出与导入两侧的共同契约。
  * 导入端据此把页码从正文行流中分出来（而不是混进正文，也不是静默丢弃）。
- */
+  */
 export const FURNITURE_LAYER_PREFIX = 'layer-furniture';
 export const HEADER_LAYER_ID = `${FURNITURE_LAYER_PREFIX}-header`;
 export const FOOTER_LAYER_ID = `${FURNITURE_LAYER_PREFIX}-footer`;
@@ -131,10 +91,10 @@ export type BlockKind = 'title' | 'body' | 'list' | 'table' | 'signature' | 'oth
 
 /**
  * 版面里的一块图（pt）。`resourceId` 是容器内 `DocumentRes.xml` 的 `MultiMedia` ID ——
- * 图片**不是**文本对象，它在 Content.xml 里是 `ImageObject` + `ResourceID`，
+ * 图片不是文本对象，它在 Content.xml 里是 `ImageObject` + `ResourceID`，
  * 字节本体在 `Res/MultiMedia/` 下。三者（对象 / 资源清单 / 字节）必须同进同出，
  * 少任何一个，归档件里的图就是一张空框。
- */
+  */
 export interface RenderImage {
   resRef: string;
   /** 指向容器内资源（`MM_1`）。导出前由 `buildOfdPackage` 分配好 */
@@ -151,14 +111,14 @@ export interface RenderLine {
   nodeId: NodeId;
   /**
    * 该行属于哪个版式块（= 来源节点 id）。
-   * **同一节点被折行拆出的多行共享同一个 nodeId** —— 导入侧正是靠"同块续行"把它们合回一段。
-   */
+   * 同一节点被折行拆出的多行共享同一个 nodeId —— 导入侧正是靠"同块续行"把它们合回一段。
+    */
   blockKind?: BlockKind;
   /**
-   * 这一行是一张图：`text` 为空（纸面上**不产文字对象**，否则会与图重叠），
-   * 由 `contentXml` 改产 `ImageObject`。`y` 对图片行是**图框顶部**，
+   * 这一行是一张图：`text` 为空（纸面上不产文字对象，否则会与图重叠），
+   * 由 `contentXml` 改产 `ImageObject`。`y` 对图片行是图框顶部，
    * 对文字行是基线 —— 两处用法各自明确，别把 `y - fontSize` 套到图上。
-   */
+    */
   image?: RenderImage;
 }
 
@@ -167,9 +127,9 @@ export interface RenderLinePlan {
   /**
    * 由调用方按正文可用宽度封顶后给出尺寸 —— `renderLines` 既不知道版心宽度，
    * 也拿不到图片字节（它必须保持纯函数、可单测）。
-   * 返回 null = 这个地址取不到可用的图（文件缺失 / 不是图片）：此时画一行**占位文字**，
+   * 返回 null = 这个地址取不到可用的图（文件缺失 / 不是图片）：此时画一行占位文字，
    * 而不是静默跳过 —— 归档件少一块而没人知道，是最难查的一类缺页。
-   */
+    */
   imageBoxOf?: (resRef: string, altText: string) => { widthPt: number; heightPt: number; resourceId: string } | null;
 }
 
@@ -180,35 +140,30 @@ export interface OfdPackage {
   stats: { textObjects: number; textChars: number; dataElements: number; bytes: number };
   /** 容器级签名块（无签章文档为 null），供导出后立即自检或第三方验签 */
   signature: SignatureBlock | null;
-  /**
-   * 导出过程中的**实质性问题**（图片取不到、格式认不出来等）。
-   * 为什么要回给调用方而不是只写日志：这些是"归档件比病历少了一块"，
-   * 现场必须看得见、能据此去补图，而不能等审计时才发现纸面缺一张。
-   */
   warnings: string[];
 }
 
 export interface OfdExportOptions {
   date?: Date;
   /**
-   * 签名后端。文档已签章时**必须提供**：否则会导出一份"已签章但没有签名值"的文件，
+   * 签名后端。文档已签章时必须提供：否则会导出一份"已签章但没有签名值"的文件，
    * 那是最糟的产物（看起来已签、实际无签名）。
-   */
+    */
   signer?: Signer;
   /**
-   * 取一张图的字节。**由调用方注入**：`export/ofd.ts` 是纯函数层，
+   * 取一张图的字节。由调用方注入：`export/ofd.ts` 是纯函数层，
    * 不认识"图存在哪儿"（demo 存在 `state/resources`，用例用内存夹具）。
    * 返回 null = 取不到：纸面画一行 `[图片缺失：…]` 并记进 `warnings`，
-   * **不静默跳过** —— 归档件少一块而没人知道，比导出失败更难查。
-   */
+   * 不静默跳过 —— 归档件少一块而没人知道，比导出失败更难查。
+    */
   resolveImage?: (resRef: string) => Uint8Array | null;
 }
 
 /**
  * 独立验签：从容器 entries 里解析 Signatures.xml，按 SignedInfo 里的 Reference 清单
  * 重新计算每个文件的 SM3，再用内嵌公钥验 SM2 签名。
- * **完全不依赖签名时的内存状态** —— 这正是"第三方可验证"的含义。
- */
+ * 完全不依赖签名时的内存状态 —— 这正是"第三方可验证"的含义。
+  */
 export function verifyOfdEntries(entries: ZipEntry[]): VerifySignatureResult | null {
   const signatureEntry = entries.find((entry) => /Signatures\.xml$/.test(entry.path));
   if (!signatureEntry) return null;
@@ -225,8 +180,6 @@ export function verifyOfdEntries(entries: ZipEntry[]): VerifySignatureResult | n
   /* 容器里必然存在未被签名覆盖的文件（OFD.xml / DocumentRes.xml 等），故不要求全覆盖 */
   return verifyTargets(block, targets, { requireAllCovered: false });
 }
-
-/* ----------------------------- XML 工具 ----------------------------- */
 
 function esc(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -269,8 +222,6 @@ function wrapLine(text: string, fontSizePt: number, maxWidth: number): string[] 
   return out;
 }
 
-/* --------------------------- 节点 → 行 --------------------------- */
-
 function fieldText(node: Extract<DocNode, { type: 'field' }>): string {
   const label = node.tags?.[0]?.display ?? '';
   const value = node.valueText ?? (node.value === null || node.value === undefined ? '' : String(node.value));
@@ -295,11 +246,11 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
   /**
    * 预建"父 → 有序子"映射（一次遍历）。
    *
-   * ⚠️ 早期实现在**每个节点上**都做 `Object.values(nodes).filter(item => item.parentId === id)`，
-   * 那是 O(n²)：1000 页（32k 节点）实测导出耗时 **169 秒**（约 10 亿次比较）。
+   *  早期实现在每个节点上都做 `Object.values(nodes).filter(item => item.parentId === id)`，
+   * 那是 O(n²)：1000 页（32k 节点）实测导出耗时 169 秒（约 10 亿次比较）。
    * 阴险之处是 100 页时只表现为"有点慢"（0.85s），完全看不出结构性缺陷 ——
    * 只有把规模推上去才会暴露。任何"在循环里扫全表"的写法都会长成这样。
-   */
+    */
   const childMap: Record<string, DocNode[]> = {};
   for (const item of Object.values(nodes)) {
     if (item.parentId === null || item.parentId === undefined) continue;
@@ -325,27 +276,12 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
     });
   };
 
-  /**
-   * 控件的纸面行：**一行名字 + 每格一行**。
-   *
-   * 名字从**证据链**里取 —— 节点自身不带名字（名字属于定义，定义改了名字，
-   * 已开出的病历不该跟着改口）。
-   *
-   * 为什么单独成一个函数：控件是**块级**内容，而实例化时它挂在**段落**下面
-   * （见 `template/engine.ts` 的 `startsParagraph`）。段落那一支走的是"内联拼接"，
-   * 不在那里单独成行，纸面上就只剩 `[控件：kind]` 这个内部标识 ——
-   * 一格一格填进去的东西整块不见，而导出件正是拿去归档与交换的那一份。
-   */
   const pushControl = (node: ControlNode): void => {
     const controlName = (node.provenance.evidence ?? [])
       .find((evidence) => evidence.field === 'control')?.valueText;
     push(controlName ?? node.definitionId ?? '专科控件', node.id);
     /* 空格不导出（"没填"与"填了个空"在纸面上都是空着，但纸面只关心有没有内容） */
     const cellByKey = new Map(controlCellsOf(node).map((cell) => [cell.key, cell]));
-    /* 影像格的值是一条**资源引用**，不是一个量：纸面上照 `ImageNode` 那条一样写成
-       `[影像：地址]`，而不是让一长串 URL 直接当正文 —— 归档件里第一个要回答的是
-       "这里本来有什么"，地址只是"去哪儿把它找回来"。做成引用而不是像素，是因为
-       本系统只存引用，图的字节不在病历里（见 `model/types.ts` 的 `ControlShape`）。 */
     const isImageShape = node.shape === 'image';
     for (const [cellKey, cellValue] of Object.entries(node.payload ?? {})) {
       const cell = cellByKey.get(cellKey);
@@ -359,13 +295,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
     }
   };
 
-  /**
-   * 一张图进版式：能取到图就是一块图（不折行、不可拆），取不到就画一行**占位文字**。
-   *
-   * 为什么图必须自成一行、不能并进段落：图是块级内容，而 Content.xml 是"对象 + 坐标"——
-   * 混进段落会让"这一段的文字到哪儿结束"在纸面上变得不可判；更要紧的是，
-   * 图与文字挤在同一行时，谁压着谁取决于阅读器，而归档件不能有这种不确定性。
-   */
   const pushImage = (node: Extract<DocNode, { type: 'image' }>): void => {
     const altText = node.altText ?? '';
     /* 空槽（`resRef` 是空串）不是"图丢了"，是"还没贴"。
@@ -398,14 +327,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
     if (node.caption) push(node.caption, node.id, { fontSize: Math.max(7, base - 1) });
   };
 
-  /**
-   * 列表项的行首标记：有序列表按**兄弟位置**给 `1. `，无序给 `· `。
-   *
-   * 为什么在这里算、不从节点上读：`ordered` 挂在**父** `listGroup` 上，
-   * 而"第几项"是位置函数 —— 节点上没有任何字段记着它。屏幕侧（`demo-server.ts`
-   * 的 `listItemMetaOf`）用的是同一条规则；两处各写一遍，一旦漂移，
-   * 屏幕上与归档件里就会各有一个"第 3 条"，而两边看起来都对。
-   */
   const listMarkerOf = (node: Extract<DocNode, { type: 'listItem' }>): string => {
     const parent = node.parentId === null || node.parentId === undefined ? undefined : nodes[node.parentId];
     if (!parent || parent.type !== 'listGroup' || parent.ordered !== true) return '· ';
@@ -427,8 +348,8 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
       case 'paragraph': {
         const parts: string[] = [];
         for (const child of kidsOf(node.id)) {
-          /* 控件是**块级**内容：先把它前面那截句子成行，再让它整块自成几行。
-             不这样做，`inlinePart` 会把它压成 `[控件：kind]` 一行内部标识。 */
+          /* 控件是块级内容：先把它前面那截句子成行，再让它整块自成几行。
+             不这样做，`inlinePart` 会把它压成 `[控件：kind]` 一行内部标识。  */
           if (child.type === 'control') {
             consumed.add(child.id);
             push(parts.join(''), node.id);
@@ -536,8 +457,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
   return lines;
 }
 
-/* --------------------------- 分页与生成 --------------------------- */
-
 export interface PlacedLine extends RenderLine {
   x: number;
   y: number;
@@ -567,20 +486,6 @@ export function contentBox(
   };
 }
 
-/**
- * 分页：**按页分桶返回**（`pages[page]` 即该页的行）。
- *
- * 为什么不再返回扁平数组：调用方要逐页生成 Content.xml，扁平结构下只能写成
- * `for (页) placed.filter(行 => 行.page === 页)` —— 那是 O(页数 × 行数)，
- * 1000 页规模下约三千万次比较（实测为大文档导出的第一瓶颈）。分桶一次遍历即可。
- *
- * 三条与"纸质件可用性"直接相关的规则：
- *   1) **孤行控制**：标题不得落在页面最后两行内 —— 否则标题在页底、正文翻页，
- *      纸质件上无法判断标题归哪一页；
- *   2) **续页不重复段前间距与首行缩进**：翻页不是新段落。若续页首行也缩进，
- *      导入端的段落重建会拿到一条**假线索**（把续行切成新段），比没有线索更糟；
- *   3) 正文区被页眉/页脚/装订边压缩（见 contentBox），文字不会压到装订孔或页码上。
- */
 export function paginatePages(
   lines: RenderLine[],
   layout: Required<Omit<OfdLayoutPlan, 'textAsPath'>>,
@@ -606,9 +511,9 @@ export function paginatePages(
     }
     const indent = line.blockKind === 'body' && blockChanged && !atPageTop ? layout.firstLineIndentPt : 0;
 
-    /* 图：**不可拆、不折行**。放不下就整块换页；比一页还高时按比例缩到一页高 ——
+    /* 图：不可拆、不折行。放不下就整块换页；比一页还高时按比例缩到一页高 ——
        宁可缩小，也不要被页边裁掉半张（裁掉的正是"结论在哪"那一半）。
-       `y` 在这里是图框顶部，不是基线。 */
+       `y` 在这里是图框顶部，不是基线。  */
     if (line.image) {
       const usable = area.bottom - area.top;
       const height = Math.min(line.image.heightPt, usable);
@@ -662,9 +567,9 @@ export interface FurnitureVars {
 /**
  * 页眉/页脚模板渲染。
  *
- * `{patient}` 由调用方传入**脱敏姓名**（`nameMasked`）；调用方在缺失时传"（未脱敏）"，
+ * `{patient}` 由调用方传入脱敏姓名（`nameMasked`）；调用方在缺失时传"（未脱敏）"，
  * 而不是回落到 `patientId` —— 页眉是纸质件上最容易泄露身份的位置。
- */
+  */
 export function renderFurniture(template: string, vars: FurnitureVars): string {
   return template
     .replace(/\{docType\}/g, vars.docType)
@@ -687,16 +592,6 @@ function textObjectXml(text: string, x: number, y: number, size: number, bold: b
   ].join('\n');
 }
 
-/**
- * 一张图 → `ImageObject`。
- *
- * 为什么同时给 `Boundary` 与 `CTM`：`Boundary` 是对象边界（缺它，阅读器无法确定放置框），
- * `CTM` 是把图片自身坐标系映射到页面坐标系的仿射变换（缺它，图会按原图像素尺寸铺开，
- * 一张 300 DPI 的超声图能铺满三页）。两个都给，读起来才是"画在这个框里、缩放到这个尺寸"。
- *
- * 图片**没有 TextCode**：它是图，不是文本。这也让导入端能明确认出"这里有一张图"，
- * 而不是像早先那样只得到一句 `[图像：地址]` 的文本。
- */
 function imageObjectXml(image: RenderImage, x: number, y: number, idPrefix: string, index: number): string {
   const width = image.widthPt.toFixed(2);
   const height = image.heightPt.toFixed(2);
@@ -706,18 +601,6 @@ function imageObjectXml(image: RenderImage, x: number, y: number, idPrefix: stri
   ].join('\n');
 }
 
-/**
- * 生成一页的 Content.xml。
- *
- * 层结构（导出与导入的共同契约）：
- *   `layer-furniture-header` 页眉 —— 装饰层，导入端按 Layer ID 与正文分开；
- *   `layer0`                 正文；
- *   `layer-furniture-footer` 页脚（页码/文书号）。
- *
- * 页眉页脚**必须与正文同在一份 Content.xml 里**：它们也在签名覆盖范围内
- * （签名覆盖 Pages/Page_n/Content.xml），因此页码不可被事后篡改。
- * 同时它们放在独立 Layer，导入端才能"分开处理"而不是丢掉或混进正文。
- */
 function contentXml(
   pageLines: PlacedLine[],
   layout: Required<Omit<OfdLayoutPlan, 'textAsPath'>>,
@@ -813,14 +696,6 @@ function machineXml(block: MachineReadableBlock, doc: DocumentModel): string {
   ].join('\n');
 }
 
-/**
- * 容器级签名：**对容器内真实文件字节重新签一次**。
- *
- * 为什么不用文档级签名直接搬过来：文档级签名覆盖的是"内存文档快照"（ofd-document/v1 文本），
- * 与容器里的 Document.xml 不是同一份字节 —— 那样第三方拿文件根本复算不出来，
- * 签名就退化成"只有我们自己的代码能验"（等于没有第三方可验证性）。
- * 所以导出时对真实文件字节签名，并把 SignedInfo 的规范化规则写进 XML 注释。
- */
 /** 容器内一张图片资源：ID / 文件名 / 字节 / 像素与 DPI（排版要按它换算 pt） */
 interface ImageResource {
   id: string;
@@ -840,12 +715,12 @@ function mediaFormatOf(mime: ImageMime): string {
 }
 
 /**
- * 文档里用到的图片地址，按**文档顺序**去重。
+ * 文档里用到的图片地址，按文档顺序去重。
  *
  * 顺序必须是文档顺序（而不是"谁先被访问"）：导出是可重放的，同一份病历两次导出的
  * 资源编号与容器布局应当逐字节一致 —— 否则"同一份病历的两个归档件指纹不同"，
  * 而指纹正是用来判断"有没有被人动过"的。
- */
+  */
 function imageRefsOf(doc: DocumentModel): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -870,11 +745,11 @@ async function containerSignature(doc: DocumentModel, entries: ZipEntry[], optio
   /* covers 里写的是逻辑名（Document.xml / Pages/Page_0/Content.xml / MachineReadable.xml），
      容器内的真实路径统一加 Doc_0/ 前缀 */
   const paths = new Set(covers.map((name) => (name.startsWith('Doc_0/') ? name : `Doc_0/${name}`)));
-  /* **资源类文件必须一并覆盖**：字体清单与图片字节由导出过程生成，
+  /* 资源类文件必须一并覆盖：字体清单与图片字节由导出过程生成，
      文档签章那一刻不可能把它们写进 covers。漏签的后果很实在：
      把 Res/MultiMedia/1.png 换成一另一张图、ResourceID 仍指同一个文件名，
      签名照样验得过 —— 那等于"图可以换而病历没被改过"。
-     只补容器里真实存在的 Res/* 文件（不凭空要求）。 */
+     只补容器里真实存在的 Res/* 文件（不凭空要求）。  */
   for (const entry of entries) {
     if (entry.path.startsWith('Doc_0/Res/')) paths.add(entry.path);
   }
@@ -924,16 +799,16 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
   const footerHeightPt = furniture.footer === '' ? 0 : layout.footerHeightPt > 0 ? layout.footerHeightPt : layout.lineHeightPt * 1.5;
   const furnitureVars = {
     docType: doc.docType.display,
-    /* 只印脱敏姓名；缺失时写"（未脱敏）"，**绝不**回落到 patientId */
+    /* 只印脱敏姓名；缺失时写"（未脱敏）"，绝不回落到 patientId  */
     patient: doc.patient.nameMasked ?? '（未脱敏）',
     visitId: doc.encounter?.visitId ?? '',
     docId: doc.docId,
   };
 
-  /* ---------- 图片资源：**先收齐、再排版** ----------
+  /* ---------- 图片资源：先收齐、再排版 ----------
      顺序不能反：排版要知道"这张图占多宽多高"，而尺寸只能从图片字节本身来（像素 ÷ DPI）。
      反过来"让界面把宽高报上来"是不行的 —— 同一张图从剪贴板贴、从文件拖、从 PACS 取，
-     三条路的宽高来源各不相同，归档件就会因为"图是怎么进来的"而长得不一样。 */
+     三条路的宽高来源各不相同，归档件就会因为"图是怎么进来的"而长得不一样。  */
   const imageResources = new Map<string, ImageResource>();
   const warnings: string[] = [];
   for (const resRef of imageRefsOf(doc)) {
@@ -960,13 +835,6 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
   }
 
   const pageArea = contentBox(layout, headerHeightPt, footerHeightPt);
-  /**
-   * 一张图在版面上的框。三条规则：
-   *   ① 按图片自报的 DPI 把像素换成 pt —— 96 DPI 的截图与 300 DPI 的超声图，
-   *      同样的像素数在纸上本来就该是不同大小；
-   *   ② 上限是**正文可用宽度**（装订边已扣），超出等比缩到框内；
-   *   ③ **不放大**：小图拉大只会更糊，而"糊到看不清结论"的归档件没有意义。
-   */
   const imageBoxOf = (resRef: string): { widthPt: number; heightPt: number; resourceId: string } | null => {
     const resource = imageResources.get(resRef);
     if (!resource) return null;
@@ -1066,7 +934,7 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
     ].join('\n'),
   });
 
-  /* 图片字节本体。**打包顺序按 ID**（= 文档顺序），保证同一份病历两次导出逐字节一致 */
+  /* 图片字节本体。打包顺序按 ID（= 文档顺序），保证同一份病历两次导出逐字节一致  */
   for (const item of imageResources.values()) {
     entries.push({ path: `Doc_0/Res/MultiMedia/${item.file}`, data: item.bytes });
   }

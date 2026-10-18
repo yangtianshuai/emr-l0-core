@@ -1,28 +1,9 @@
-/**
- * SQLite 接入层：**唯一**触碰 `node:sqlite` 的地方。
- *
- * ## 为什么是内置的 `node:sqlite`，而不是某个 npm 驱动
- *
- * 本项目运行在不保证外网、不保证能装依赖的构建环境里。`node:sqlite` 是 Node 内置的
- * SQLite 绑定（本环境 v24 可用）—— 没有依赖、没有版本冲突、没有"装不上就整条链路不可用"。
- * 代价要说清：它是**单机嵌入式**数据库，多实例共享要走文件系统语义；
- * 换成 PostgreSQL 时改的是这一层与 `work-store.ts` 的 SQL，**上层仓储接口不变**。
- *
- * ## 三条与我们既有纪律一致的取舍
- *
- * 1) **结构版本不猜**：库里记着 `schema_version`。比本程序要求的高 → **直接拒绝启动**
- *    （用新版本写过的库，用旧版本去读会"成功地"读出一份错的内容，比报错危险得多）；
- *    低 → 按迁移清单**显式**往前推，每次迁移都在一个事务里，失败即回滚。
- * 2) **异步变同步**：`DatabaseSync` 是同步 API，与本仓库既有存储层（全是同步）一致 ——
- *    不必为了"落库"把几十个调用点改成 async（那种改动会把复杂度扩散到与它无关的地方）。
- * 3) ** durability 而不是速度**：`synchronous=FULL` + `journal_mode=WAL`。
- *    这是病历数据，宁可慢一点，也不要"提交了但断电后没了"。
- */
+// SQLite 接入层：唯一触碰 `node:sqlite` 的地方。
 
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-/** ⚠️ 本环境的类型声明里没有 `node:sqlite`，按用到的形状局部断言（同 core/persistence.ts 对 fs 的处置） */
+/**  本环境的类型声明里没有 `node:sqlite`，按用到的形状局部断言（同 core/persistence.ts 对 fs 的处置）  */
 export interface SqliteStatement {
   run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
   get(...params: unknown[]): Record<string, unknown> | undefined;
@@ -39,9 +20,9 @@ interface SqliteModule {
   DatabaseSync: new (file: string) => SqliteDatabase;
 }
 
-/* 用**变量**做说明符：本环境的 `@types/node` 里还没有 `node:sqlite` 的声明，
+/* 用变量做说明符：本环境的 `@types/node` 里还没有 `node:sqlite` 的声明，
    写成字面量会在编译期报"找不到模块"。运行时是真模块（Node 内置），
-   所以这里既是绕开类型解析，也是在明说"类型是这个环境的短板"。 */
+   所以这里既是绕开类型解析，也是在明说"类型是这个环境的短板"。  */
 const sqliteSpecifier = 'node:sqlite';
 const sqlite = (await import(sqliteSpecifier)) as unknown as SqliteModule;
 
@@ -51,7 +32,6 @@ export const SCHEMA_VERSION_KEY = 'schema_version';
 export interface Migration {
   /** 迁移标识（`0001-init` 这种有序、可读的名字） */
   id: string;
-  /** 一句话说明"这次迁移改了什么、为什么" */
   note: string;
   sql: string[];
 }
@@ -90,9 +70,9 @@ function readMeta(db: SqliteDatabase, key: string): string | null {
 /**
  * 打开数据库并把它迁到本程序要求的版本。
  *
- * **失败即抛**（`StorageError`）：调用方据此决定"回落到文件存储"还是"拒绝启动"。
+ * 失败即抛（`StorageError`）：调用方据此决定"回落到文件存储"还是"拒绝启动"。
  * 绝不返回一个"看起来能用的"半迁移库 —— 那是数据损坏最常见的入口。
- */
+  */
 export function openDatabase(file: string, options: OpenDatabaseOptions): OpenDatabaseResult {
   let db: SqliteDatabase;
   let fresh = false;
@@ -138,14 +118,13 @@ export function openDatabase(file: string, options: OpenDatabaseOptions): OpenDa
     try {
       db.close();
     } catch {
-      /* 关闭失败不掩盖真正的错误 */
     }
     if (err instanceof StorageError) throw err;
     throw new StorageError('E_STORAGE_INIT_FAILED', `初始化数据库失败（${file}）：${(err as Error).message}`);
   }
 }
 
-/** 按清单把库推到目标版本。**每个迁移一个事务**：失败即回滚，不留半个结构 */
+/** 按清单把库推到目标版本。每个迁移一个事务：失败即回滚，不留半个结构  */
 function migrate(db: SqliteDatabase, options: OpenDatabaseOptions, current: number): string[] {
   const done = new Set(
     db.prepare('select id from schema_migrations').all().map((row) => String(row.id)),

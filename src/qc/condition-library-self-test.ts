@@ -1,22 +1,4 @@
-/**
- * 具名条件（**判定方式库**）自测。
- *
- *   node src/qc/condition-library-self-test.ts
- *
- * 覆盖四层：
- *   E 库本身：新建的编号 / 编码形状 / 名称必填 / 条件树不合法即拒 / 同码即拒
- *   F 引用面："谁在用它"是**一份**数据（目录与删除保护读同一个函数），而且是**跨包**的
- *   G **改一处处处生效**：改一条条件，引它的规则一起变（无论在哪个包）；没引它的一个字不动
- *   H 引用保护与悬空引用：被引用不许删；引用了库里没有的条件在**装载期**就拒
- *
- * 为什么 G 是这一组的核心：具名条件这件事的价值与代价是同一句话 ——
- * "改一处，引它的规则一起变"。它错了，那就是一次静默的批量改动；
- * 模板公式那边至今**没有**这条用例（照抄它的实现时，这条缺口要补上）。
- *
- * 为什么 F 要跨包：判定方式是**库级资产**（不属于任何包），所以"这条规则按什么判"
- * 不再取决于它在哪个包 —— 引用面也必须跨包数，否则会出现
- * "界面说没人用、删除却被拒"这种对不上的话。
- */
+// 具名条件（判定方式库）自测。
 
 import { TestSuite, assert, assertEqual, assertThrows } from '../testing/harness.ts';
 import type { JsonValue, NodeId } from '../model/types.ts';
@@ -50,8 +32,6 @@ const suite = new TestSuite('质控·判定方式库（具名条件被规则引�
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/* ------------------------------- 造样本 ------------------------------- */
-
 function view(over: Partial<QcNodeView> = {}): QcNodeView {
   return { nodeId: 'n_1' as NodeId, type: 'text', text: '', tags: [], keyContent: false, ...over };
 }
@@ -60,7 +40,7 @@ function ctx(over: Partial<QcContext> = {}): QcContext {
   return { now: '2026-10-16T12:00:00.000Z', ...over };
 }
 
-/** 一条"正文包含某个词"的条件树（返回值就是库里的 JSON 形状：条件是**未校验的 JSON**） */
+/** 一条"正文包含某个词"的条件树（返回值就是库里的 JSON 形状：条件是未校验的 JSON）  */
 function contains(words: string[]): JsonValue {
   const tree = normalizeCondition({ kind: 'atom', field: 'text', op: 'contains', value: words });
   if (!tree) throw new Error(`构造样本失败：contains ${words.join('/')}`);
@@ -82,8 +62,8 @@ function ruleOf(itemId: string, conditionId: string, title = '引用判定方式
   return { itemId, title, severity: 'warn', predicate: { kind: 'field-condition', params: { conditionId } } };
 }
 
-/* 用**出厂的空注册表**（`createEmptyPackRegistry()`）：它带着本机实现了哪些引擎这一类信息，
-   这里看不出"本机有没有规则引擎"才是对的 —— 引用面要跨包数，所以需要一个真实的注册表 */
+/* 用出厂的空注册表（`createEmptyPackRegistry()`）：它带着本机实现了哪些引擎这一类信息，
+   这里看不出"本机有没有规则引擎"才是对的 —— 引用面要跨包数，所以需要一个真实的注册表  */
 function registryWith(library: ConditionLibrary, ...packs: QcRulePack[]): PackRegistry {
   const registry = createEmptyPackRegistry();
   for (const pack of packs) {
@@ -111,7 +91,6 @@ function libraryWith(input: { name: string; when: unknown; params?: unknown }): 
 }
 
 async function main(): Promise<void> {
-  /* ============================ E 库本身 ============================ */
 
   await test('E1 新建：编码按 C-CUSTOM-N 递增、名称必填、条件树不合法即拒、同码即拒', () => {
     const first = addCondition([], { name: '占位文字未替换', when: contains(['待补充']) });
@@ -146,8 +125,6 @@ async function main(): Promise<void> {
       '清单里两条同码必须拒（编码是引用键）',
     );
   });
-
-  /* ============================ F 引用面 ============================ */
 
   await test('F2 "谁在用它"只有一份数据，而且是**跨包**的：目录与删除保护读同一个函数', () => {
     const { items, itemId } = libraryWith({ name: '占位文字未替换', when: contains(['待补充']) });
@@ -186,8 +163,6 @@ async function main(): Promise<void> {
     );
   });
 
-  /* ======================= G 改一处，处处生效 ======================= */
-
   await test('G3 改一条判别方式：引它的规则（跨包）一起变，没引它的一个字不动', () => {
     const { items, itemId } = libraryWith({ name: '占位文字未替换', when: contains(['待补充']) });
     const library = conditionLibraryOf(items);
@@ -207,8 +182,6 @@ async function main(): Promise<void> {
 
     const patched = patchCondition(items, itemId, { when: contains(['待补充', '未填写']) });
     const patchedLibrary = conditionLibraryOf(patched);
-    /* ① 规则条目**一个字节都没动**：改的是共用资产，不是批量改写规则 ——
-       这一点很重要，"一起变"如果是靠改写那几条规则实现的，就会出现"保存一次改了五条规则" */
     assertEqual(
       JSON.stringify(ruleItemsOf(packA)),
       JSON.stringify([ruleOf('R-USE-1', itemId)]),
@@ -219,7 +192,6 @@ async function main(): Promise<void> {
     assertEqual(verdictOf(packB, patchedLibrary, 'R-USE-2', '既往史：未填写'), 'hit', '**另一个包的引用方也跟着变**（这才叫改一处、处处生效）');
     assertEqual(verdictOf(inline, patchedLibrary, 'R-INLINE', '既往史：未填写'), 'miss', '没引它的规则一个字不动');
 
-    /* ② 人名话回读也跟着变：界面上那句"这条规则按什么判"不能停留在旧口径 */
     const summary = conditionSummaryOf(ruleOf('R-USE-1', itemId) as never, resolvedConditionsOf(packA, patchedLibrary));
     assertEqual(
       summary,
@@ -227,15 +199,12 @@ async function main(): Promise<void> {
       '引用写法的人话回读要带条件名与条件本身（否则界面只显示一个孤零零的编码）',
     );
 
-    /* ③ 内联写法的人话回读：不带"引用条件"，就事论事 */
     assertEqual(
       conditionSummaryOf(ruleItemsOf(inline)[0] as never, resolvedConditionsOf(inline, patchedLibrary)),
       '段落正文 包含（任一） 「TODO」',
       '内联写法照旧',
     );
   });
-
-  /* ======================= H 引用保护与悬空引用 ======================= */
 
   await test('H4 被规则引用的判定方式不许删（跨包数）：拒绝时要说清是哪几条规则在用、在哪个包', () => {
     const { items, itemId } = libraryWith({ name: '占位文字未替换', when: contains(['待补充']) });

@@ -1,15 +1,5 @@
-/**
- * 接收方公钥目录入库自测（`storage/recipient-key-store.ts`）。
- *
- *   node src/storage/recipient-key-store-self-test.ts
- *
- * 锁死四条：
- *   RK1 空表 = **首次使用**（正常状态），不是错误；
- *   RK2 整表往返保真（含顺序与 `note`）；
- *   RK3 **指纹唯一由库保证**（不再只靠写入前检查一次）：重复插入必须被拒；
- *   RK4 形状不对（算法不是 SM2）**读的时候就报错** —— 加密是不可逆的动作，
- *       拿一把来历不明的钥匙去加密，产出的是一份没有私钥能解开的归档件。
- */
+// 接收方公钥目录入库自测（`storage/recipient-key-store.ts`）。
+// 拿一把来历不明的钥匙去加密，产出的是一份没有私钥能解开的归档件。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openDbFixture } from '../testing/db-fixture.ts';
@@ -26,7 +16,7 @@ const suite = new TestSuite('接收方公钥目录入库自测', [
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 const AT = '2026-10-14T09:00:00.000Z';
 
-/** 造一把真公钥（用演示密钥对导出 SPKI，再 base64）——**不造假数据**：导入路径要真的过曲线校验 */
+/** 造一把真公钥（用演示密钥对导出 SPKI，再 base64）——不造假数据：导入路径要真的过曲线校验  */
 function spkiBase64(seed: string): string {
   return Buffer.from(publicKeyToSpki(demoKeyPair(seed).publicKey)).toString('base64');
 }

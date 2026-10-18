@@ -1,11 +1,4 @@
-/**
- * 极简测试框架（零依赖）。
- *
- * 设计取向：
- *   - 断言失败必须给出"期望 vs 实际"，否则排错成本高；
- *   - 每条用例记录耗时（性能回归常先在单测里露头）；
- *   - report() 直接返回退出码，便于 CI 与 npm scripts 串联。
- */
+// 极简测试框架（零依赖）。
 
 export interface TestResult {
   name: string;
@@ -64,12 +57,6 @@ export function assert(cond: unknown, message: string): asserts cond {
   if (!cond) throw new Error(message);
 }
 
-/**
- * BigInt 安全的序列化。
- * 直接 `JSON.stringify` 遇到 BigInt 会抛 "Do not know how to serialize a BigInt" ——
- * 密码学用例里到处都是大数（私钥、签名 r/s、模数），断言工具必须先能表示它们，
- * 否则失败信息会变成"工具报错"而不是"期望 vs 实际"，排错方向立刻被带偏。
- */
 function serialize(value: unknown): string {
   try {
     const text = JSON.stringify(value, (_key, item: unknown) => (typeof item === 'bigint' ? `${item.toString()}n` : item));
@@ -85,14 +72,6 @@ export function assertEqual(actual: unknown, expected: unknown, message: string)
   if (a !== b) throw new Error(`${message}：期望 ${b}，实际 ${a}`);
 }
 
-/**
- * 异步版"取错误码"。
- *
- * 为什么必须单独有一个：签章链路改成可异步之后（签名后端可能是网络服务或密码设备），
- * `codeOf(() => session.sign(...))` 会**静默失效** —— async 函数抛错表现为 rejected Promise，
- * 而不是同步抛出，于是断言拿到 `undefined`，"签章应当被拒"这条用例**假装通过了**。
- * 这类失效连类型检查都抓不到（返回值被丢弃），只能靠显式的异步版本避免。
- */
 export async function codeOfAsync(fn: () => unknown | Promise<unknown>): Promise<string> {
   try {
     await fn();

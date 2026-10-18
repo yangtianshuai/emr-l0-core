@@ -1,20 +1,4 @@
-/**
- * 管理审计自测（A1~A10）：**入库** + SM3 链式摘要。
- *
- *   node src/core/admin-audit-store-self-test.ts
- *
- * 重点是"**重启之后还对不对**"与"**被动过看得出来**"：
- *   A3 重载一致 —— 新实例读出来必须与写进去的逐条相同（这是"留存"的全部意义）；
- *   A4 **改一条历史 → 指认断在第几条**，且断点之后的条目**不再被当作可信数据展示**
- *      （但仍然**留在库里**：审计系统不销毁证据）；
- *   A5 **删尾在链内检不出来** —— 这条是如实承认能力边界，它才是锚点存在的理由；
- *   A6 删掉中间一条 → 链断（下一行的 prevHash 对不上）；
- *   A9 **多实例接同一条链**（文件时代这里会混出两条链，库不会）；
- *   A10 序号重复被主键拦住（可发现的失败，而不是两条链混在一份文件里）。
- *
- * 文件时代的"尾行被撕断 → tornTail"这一条**不在这里**：库里一行要么在要么不在，
- * 那类损坏只可能出现在**导入旧文件**时（用例在 `storage/audit-files-import` 那条线上）。
- */
+// 管理审计自测（A1~A10）：入库 + SM3 链式摘要。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openDbFixture } from '../testing/db-fixture.ts';
@@ -119,7 +103,6 @@ async function main(): Promise<void> {
     });
 
     await test('A5 **删尾在链内检不出来**（如实承认边界：它才是锚点存在的理由）', () => {
-      /* 重建一份干净的链 */
       db.exec('delete from admin_audit');
       const log = seed();
       log.append(record(1));
@@ -132,8 +115,6 @@ async function main(): Promise<void> {
       assertEqual(report.loaded, 2, '剩下两条自身都自洽');
       assertEqual(report.problem, null, '**链内一切正常** —— 尾部被删这件事，链自己说不出来');
       assertEqual(report.totalInStore, 2, '库里就两行（被删的那一行不知去向，链内无从判断）');
-      /* 这条不是"我们没做"，而是"链做不到"：能重算链的人也能把尾部删掉再重算。
-         能认出它的只有**留在别处的锚点**（见 `audit-anchor-self-test` 的 A5/A6）。 */
     });
 
     await test('A6 删掉中间一条 → 链断（下一行的 prevHash 对不上）', () => {
@@ -182,9 +163,9 @@ async function main(): Promise<void> {
     });
 
     await test('A8 序号被改并**重算该条自己的 hash** → 报 seqGap（链内其它校验都看不出）', () => {
-      /* `seq` 一直是主键，但**主键只保证不重复、不保证连续**（删掉中间一条就断号了）。
+      /* `seq` 一直是主键，但主键只保证不重复、不保证连续（删掉中间一条就断号了）。
          这条钉住"读的时候真的校验了连续性"。
-         注意：**它不是新的防篡改能力** —— 完整重写整条链的人照样能把序号写顺，那要靠链头锚点。 */
+         注意：它不是新的防篡改能力 —— 完整重写整条链的人照样能把序号写顺，那要靠链头锚点。  */
       db.exec('delete from admin_audit');
       const log = seed();
       log.append(record(1));
@@ -224,10 +205,10 @@ async function main(): Promise<void> {
     });
 
     await test('A9 **两个实例接同一条链**：序号与 prevHash 连续（文件时代这里会混出两条链）', () => {
-      /* 这条是"入库"换来的核心性质。链条头每次都从**库里最后一行**取，而不是内存副本 ——
+      /* 这条是"入库"换来的核心性质。链条头每次都从库里最后一行取，而不是内存副本 ——
          所以两个实例（例如正在跑的实例与自检实例）交替追加，接上的仍是同一条链。
          文件时代的现场是：两个进程各有各的内存链，各自往同一个文件追加，
-         于是同一份文件里混着两条互不相容的链（实测累积到 286 条互相污染的锚）。 */
+         于是同一份文件里混着两条互不相容的链（实测累积到 286 条互相污染的锚）。  */
       db.exec('delete from admin_audit');
       const first = seed();
       const second = seed();
@@ -255,8 +236,8 @@ async function main(): Promise<void> {
         ).run();
         log.load();
       } catch (err) {
-        /* 驱动把 SQLite 的错误一律包成 `ERR_SQLITE_ERROR`，**具体原因在 message 里**，
-           所以判据必须看 message —— 只看 code 会把这条断言写成永远为真的形状。 */
+        /* 驱动把 SQLite 的错误一律包成 `ERR_SQLITE_ERROR`，具体原因在 message 里，
+           所以判据必须看 message —— 只看 code 会把这条断言写成永远为真的形状。  */
         message = (err as Error).message;
       }
       assert(message !== 'OK', '重复序号必须失败（而不是静默覆盖或追加成第二条链）');

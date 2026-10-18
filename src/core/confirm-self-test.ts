@@ -1,20 +1,4 @@
-/**
- * 确认与签章分级自测（T29）。
- *
- *   node src/core/confirm-self-test.ts
- *
- * 背景：原来的设计里 `humanConfirmed` 是节点级的、`confirmNode` 一次只能确认一个节点，
- * 而签名前所有 AI/导入/关键内容都必须确认 —— 导入一份文档要点几十上百次。
- * 在真实诊室里，这会退化成"不看就全点一遍"：**门控形式还在、实质已失效**。
- *
- * 本套锁死"便利与责任"的边界，重点是**防回退**：
- *   A1~A3 批量/子树确认（范围必须进留痕）
- *   A4    编辑即确认（医生动过的节点视为已看过）
- *   A5    **采纳 ≠ 确认责任**（这条最容易在改代码时被顺手破坏）
- *   A6    **关键内容不适用"编辑即确认"**（改一个字不等于核对过全部）
- *   A7    签名分级：声明后放行，但未确认清单进留痕
- *   A8    **声明不豁免关键内容**（"关键"二字的定义）
- */
+// 确认与签章分级自测（T29）。
 
 import { TestSuite, assert, assertEqual, codeOfAsync } from '../testing/harness.ts';
 import { WriteSession } from './session.ts';
@@ -173,8 +157,6 @@ async function main(): Promise<void> {
       AI,
     );
     session.acceptSuggestion({ suggestionId: suggestion.suggestionId }, HUMAN);
-    /* 先确认关键内容，才走得到 ② 那道门 —— 否则会被 ① 先挡住，
-       测到的就不是 AI 门控，而是关键内容门控（这一条自己也是用例：A6/A8） */
     session.confirmNodes({ nodeIds: ['n_k'] }, HUMAN);
 
     const node = nodeOf(session, 'n_t');
@@ -203,7 +185,6 @@ async function main(): Promise<void> {
       AI,
     );
     session.acceptSuggestion({ suggestionId: suggestion.suggestionId }, HUMAN);
-    /* 先把关键内容确认掉，才能走到 ② 这道门（否则被 ① 挡住，测不到分级行为） */
     session.confirmNodes({ nodeIds: ['n_k'] }, HUMAN);
 
     assertEqual(

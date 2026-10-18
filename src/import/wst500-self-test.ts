@@ -1,18 +1,4 @@
-/**
- * T25b 验收自测：WS/T 500（电子病历共享文档）XML 映射导入。
- *
- *   node src/import/wst500-self-test.ts
- *
- * 覆盖五层：
- *   A 识别层：格式嗅探（ZIP vs ClinicalDocument vs 无关文件）、文档头、患者、编码声明
- *   B 映射层（头号用例）：章节树 / 叙述文本 / entry→数据元 / 标签体系归类 / 无值条目
- *   C 纪律层：来源可追溯、不继承签名、全部标未确认、机读新鲜、与签章门控联动
- *   D 反例层：非 ClinicalDocument、空输入、缺结构化正文（不假装有内容）
- *   E 黄金样例：样例落盘 → 读回 → 与人工核对的期望逐项相等；两次导入幂等
- *
- * 为什么用黄金样例：映射规则一旦被改动（哪怕"看起来更合理"），期望值立刻对不上。
- * 它挡住的是**静默的语义漂移**，而不是"测试太严"。
- */
+// T25b 验收自测：WS/T 500（电子病历共享文档）XML 映射导入。
 
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -74,7 +60,6 @@ function fieldsOf(imported: ReturnType<typeof importWst500>): Wst500Field[] {
 }
 
 async function main(): Promise<void> {
-  /* ========================= A 识别层 ========================= */
 
   await test('A1 格式嗅探：ZIP→OFD、ClinicalDocument→WS/T 500、无关文件→明确拒绝（不硬试）', async () => {
     assertEqual(sniffImportFormat(new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00])), 'ofd', 'ZIP 魔数应识别为 OFD');
@@ -130,8 +115,6 @@ async function main(): Promise<void> {
     assertEqual(imported.fileSha256, expected, 'fileSha256 应等于独立计算的 SHA-256');
     assertEqual(imported.fileSha256, sha256Hex(bytes), '两条计算路径必须同一口径');
   });
-
-  /* ========================= B 映射层 ========================= */
 
   await test('B1 章节树：顶层章节顺序、数量与**嵌套子章节的父子归属**', async () => {
     const imported = importWst500(readSample());
@@ -200,8 +183,6 @@ async function main(): Promise<void> {
     assertEqual(plain.stats.fields, imported.stats.fields, '去前缀后数据元数应一致');
   });
 
-  /* ========================= C 纪律层 ========================= */
-
   await test('C1 纪律：内容节点全部 origin=imported、humanConfirmed=false，且证据含文件名与 SHA-256', async () => {
     const bytes = readSample();
     const imported = importWst500(bytes);
@@ -263,8 +244,6 @@ async function main(): Promise<void> {
     assertEqual(temp?.origin, 'imported', '机读数据元应保留来源');
   });
 
-  /* ========================= D 反例层 ========================= */
-
   await test('D1 非 ClinicalDocument 的 XML：明确报错，不返回半成品', async () => {
     assertEqual(codeOf(() => importWst500(enc('<?xml version="1.0"?><Note><text>x</text></Note>'))), 'E_IMPORT_FAILED', '非临床文档必须报错');
     let message = '';
@@ -300,8 +279,6 @@ async function main(): Promise<void> {
     const { doc } = buildWst500Draft(imported, { docId: 'doc_ws_valid', actorId: 'DR_T', fileName: SAMPLE_FILE, importedAt: '2026-10-08T10:35:00Z' });
     assertEqual(errorsOf(validateDocument(doc)), [], '导入草稿应无校验错误');
   });
-
-  /* ========================= E 黄金样例 ========================= */
 
   await test('E1 样例落盘 → 读回导入 → 与人工核对的期望逐项一致（自产自验）', async () => {
     ensureArtifacts();

@@ -1,19 +1,4 @@
-/**
- * T17 验收自测：OFD / OFD-H 导出。
- *
- *   node src/export/ofd-self-test.ts
- *
- * 关键点：**导出产物必须能被独立第三方工具验证**，而不是自己说"我导出了 OFD"。
- * 因此本套用例会把产物落盘，然后调用工具链探针 `tools/ofd-check/ofd-roundtrip-check.mjs`
- * 做真实解包与判定（C1 结构 / C2 文本真实性 / C3 机读探测 / C4 签名覆盖 / C5 round-trip）。
- *
- * 覆盖：
- *   A 导出计划守卫（禁止路径化、机读必须纳入签名）
- *   B 陈旧门（内容变了不重算就导出 → 拒绝）
- *   C 产物结构（ZIP 可解、真实文本、机读文件独立、签名覆盖机读）
- *   D 独立探针验收（含 round-trip ≥95% 与"路径化陷阱"对照）
- *   E 确定性（同文档两次导出字节一致）
- */
+// T17 验收自测：OFD / OFD-H 导出。
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -65,16 +50,16 @@ interface ProbeReport {
 
 /** 图片夹具：仓库里那张真 PNG（1615×928）。用真图而不是手搓字节——
  *  能顺带证明"探测头读得懂、归档件里的字节不需要重编码"。
- *  位置在 `docs/images/`：截图统一归档在那里，**不要**再搬回仓库根。 */
+ *  位置在 `docs/images/`：截图统一归档在那里，不要再搬回仓库根。  */
 const IMAGE_FIXTURE = join(ROOT, 'docs', 'images', 'flow-mode.png');
 const IMAGE_RES_REF = '/res/flow-mode.png';
 
 /**
  * 构造一份"已定稿"的门诊病历：含字段、关键内容、AI 采纳内容、签章。
  *
- * `withImage` 会在**签章之前**往第一段里贴一张图：图必须在签章前进来，
+ * `withImage` 会在签章之前往第一段里贴一张图：图必须在签章前进来，
  * 因为签章之后文档就不可改了 —— 而"图片进不进签名覆盖"正是要验的东西。
- */
+  */
 async function signedSession(options: { withImage?: boolean } = {}): Promise<{
   session: WriteSession;
   textId: NodeId;
@@ -88,8 +73,8 @@ async function signedSession(options: { withImage?: boolean } = {}): Promise<{
 
   let resRef = '';
   if (options.withImage === true) {
-    /* 图挂在**段落**下（与医生端贴图的挂法一致）：段落那一支走的是内联拼接，
-       不特殊处理就会被压成一行 `[图像：地址]` 文本，图本身一个字都进不了归档件。 */
+    /* 图挂在段落下（与医生端贴图的挂法一致）：段落那一支走的是内联拼接，
+       不特殊处理就会被压成一行 `[图像：地址]` 文本，图本身一个字都进不了归档件。  */
     const paragraphId = doc.nodes[textId]?.parentId;
     if (!paragraphId) throw new Error('前置：文本节点应挂在段落上');
     resRef = IMAGE_RES_REF;
@@ -148,12 +133,8 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return true;
 }
 
-/* --------------------------------- 用例 --------------------------------- */
-
 async function main(): Promise<void> {
   ensureArtifacts();
-
-  /* ============================ A 计划守卫 ============================ */
 
   await test('A1 禁止文本路径化：textAsPath !== false 直接拒绝', async () => {
     const { session } = await signedSession();
@@ -178,8 +159,6 @@ async function main(): Promise<void> {
     }
     assertEqual(code, 'E_EXPORT_INVALID_PLAN', '机读未纳入签名的导出必须被拒');
   });
-
-  /* ============================ B 陈旧门 ============================ */
 
   await test('B1 内容变更后未重算机读信息 → 导出被拒（陈旧门）', async () => {
     const { doc, ids } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1 });
@@ -211,8 +190,6 @@ async function main(): Promise<void> {
     assert(pkg.stats.dataElements > 0, '应含机读数据元');
     assertEqual(pkg.stats.textChars > 0, true, '正文应有真实文本');
   });
-
-  /* ============================ C 产物结构 ============================ */
 
   await test('C1 产物结构：入口/文档/页面/机读/签名文件齐备，签名覆盖机读文件', async () => {
     const { session } = await signedSession();
@@ -268,8 +245,6 @@ async function main(): Promise<void> {
     assertEqual(new Set(ids).size > 1, true, '应覆盖多个节点');
   });
 
-  /* ============================ C6–C8 图片真进归档件 ============================ */
-
   await test('C6 图片真进归档件：字节在 Res/MultiMedia、资源清单有 MultiMedia、Content 有 ImageObject', async () => {
     const { session, resRef } = await signedSession({ withImage: true });
     const png = new Uint8Array(readFileSync(IMAGE_FIXTURE));
@@ -279,7 +254,6 @@ async function main(): Promise<void> {
     const pkg = await session.exportOfd(PLAN, { resolveImage: (ref) => (ref === resRef ? png : null) });
     assertEqual(pkg.warnings, [], '正路径不该有告警（图取得到、格式认得出）');
 
-    /* ① 字节本体 */
     const media = pkg.entries.find((entry) => entry.path === 'Doc_0/Res/MultiMedia/1.png');
     assert(!!media, `容器里必须有图片字节。实际条目：${pkg.entries.map((entry) => entry.path).join(' / ')}`);
     const mediaBytes = media?.data;
@@ -287,12 +261,10 @@ async function main(): Promise<void> {
     assertEqual(sameBytes(mediaBytes as Uint8Array, png), true, '容器里的图片必须与源文件**逐字节一致**（不得重编码）');
     assertEqual((mediaBytes as Uint8Array).length, png.length, '图片长度不应变化');
 
-    /* ② 资源清单：少了这一段，Content 里的 ResourceID 就指向空气 */
     const res = String(pkg.entries.find((entry) => entry.path === 'Doc_0/Res/DocumentRes.xml')?.data ?? '');
     assert(res.includes('<ofd:MultiMedia ID="MM_1" Type="Image" Format="PNG">'), '资源清单要声明这张图');
     assert(res.includes('<ofd:MediaFile>MultiMedia/1.png</ofd:MediaFile>'), '资源清单要指向真实文件');
 
-    /* ③ 页面上的图对象 */
     const contents = pkg.entries.filter((entry) => /Content\.xml$/.test(entry.path)).map((entry) => String(entry.data));
     const content = contents.join('\n');
     assert(content.includes('ResourceID="MM_1"'), 'Content.xml 要有指向该资源的 ImageObject');
@@ -303,9 +275,6 @@ async function main(): Promise<void> {
     assert(content.includes('图1 术前定位'), '图注要画在图下方（它是这张图的说明）');
     assert(!content.includes('[图像：'), '不得再出现「[图像：地址]」文本占位 —— 图已经真进归档件了');
 
-    /* ④ 统计口径：图不是文本对象。与"同一份病历不贴图"对比，只应多出**图注**那一行 ——
-       若把图算成文本对象，这里会多 1（那个空文本行），而"对象数比读出来的行数多"
-       正是排查时最容易被绕进去的那种偏差。（页眉页脚在独立装饰层，本就不进这个口径） */
     const plain = await (await signedSession()).session.exportOfd(PLAN);
     assertEqual(pkg.stats.textObjects, plain.stats.textObjects + 1, '图行不得计入 textObjects（只多出图注一行）');
   });
@@ -329,8 +298,8 @@ async function main(): Promise<void> {
     const height = Number(boundary?.[4] ?? '0');
     /* 远超 A4 正文宽（595 − 56×2 = 483）→ 必须被压进版心 */
     assert(width > 0 && width <= 483.5, `图宽应被压进版心（实际 ${width}pt）`);
-    /* 期望比例**从样例本身读**，不要写死尺寸：截图一旦重截（现在这张是 1615×928），
-       写死的那个数就会红成"比例走样"，而真走样的那次反而分不清是哪一次。 */
+    /* 期望比例从样例本身读，不要写死尺寸：截图一旦重截（现在这张是 1615×928），
+       写死的那个数就会红成"比例走样"，而真走样的那次反而分不清是哪一次。  */
     const probedFixture = probeImage(png);
     assert(!!probedFixture, '前置：夹具应能探出尺寸');
     assertEqual(
@@ -370,8 +339,6 @@ async function main(): Promise<void> {
       `验签失败要说清是哪个文件被换了（实际：${JSON.stringify(verdict?.reasons ?? [])}）`,
     );
   });
-
-  /* ============================ D 独立探针验收 ============================ */
 
   await test('D1 独立探针验收：已定稿 OFD-H 全部关键检查通过，round-trip ≥95%', async () => {
     const { session } = await signedSession();
@@ -464,8 +431,6 @@ async function main(): Promise<void> {
     );
   });
 
-  /* ============================ E 确定性 ============================ */
-
   await test('E1 导出确定性：同一文档两次导出字节完全一致（内容寻址与比对的前提）', async () => {
     const { session } = await signedSession();
     const a: OfdPackage = await session.exportOfd(PLAN);
@@ -504,27 +469,22 @@ async function main(): Promise<void> {
       String(pkg.entries.find((entry) => entry.path === `Doc_0/Pages/Page_${index}/Content.xml`)?.data ?? '');
     const first = contentOf(0);
 
-    /* ① 页眉页脚必须在**独立装饰层**：混在正文层的话，导入端只能得到"多了一堆数字"，
-       既无法区分也无法单独处理（这是"可修复"与"不可修复"的分界） */
     assert(first.includes('Layer ID="layer-furniture-header"'), '页眉应在独立装饰层');
     assert(first.includes('Layer ID="layer-furniture-footer"'), '页脚应在独立装饰层');
     assert(first.includes('Layer ID="layer0"'), '正文层必须保持 layer0（导入端按此契约取正文）');
 
-    /* ② 页码必须"当前页 + 总页数"成对出现：只印"第 N 页"无法发现缺页 */
     for (let index = 0; index < pkg.pages; index += 1) {
       const content = contentOf(index);
       assert(
         content.includes(`第 ${index + 1} 页 共 ${pkg.pages} 页`),
         `第 ${index + 1} 页页码应为"第 ${index + 1} 页 共 ${pkg.pages} 页"，实际内容缺失`,
       );
-      /* ③ 每一页都要有页眉页脚 —— 散页归位靠的就是"每张纸都自证归属" */
       assert(
         content.includes('layer-furniture-header') && content.includes('layer-furniture-footer'),
         `第 ${index + 1} 页应同时有页眉与页脚`,
       );
     }
 
-    /* ④ 页眉不得出现患者 ID：纸面最易泄露身份的位置，只印脱敏姓名 */
     assert(!first.includes(doc.patient.patientId), '页眉不得印患者 ID');
   });
 

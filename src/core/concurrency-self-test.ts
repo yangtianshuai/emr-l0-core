@@ -1,32 +1,4 @@
-/**
- * 并发写自测（C1~C6）。
- *
- *   node src/core/concurrency-self-test.ts
- *
- * ## 这条线要钉住的是一个**已经存在的缺口**
- *
- * 进程内的乐观锁（`session.ts` 的 `expectedRev` → `E_REV_CONFLICT`）拦得住同一个
- * `WriteSession` 上的过期写入，**拦不住两个终端各自打开同一份病历**：
- * 两边内存里都自洽，谁都不知道对方改过；而快照是**全量覆盖**，
- * 于是后写的那个静默抹掉前一个 —— 没有报错、没有痕迹、界面上看不出任何异常。
- *
- * C1 是**对照实验**：故意走"不带前置条件"的裸写，把"静默丢更新"这件事复现出来并留在套件里。
- * 它不是为了证明代码正确，而是为了证明**这层保护是必要的** —— 少了它，C2 会退化成 C1。
- * 后面几条则钉住保护本身：真跨进程、陈旧基线被拒且不覆盖、首次落盘只有一个赢家、
- * 崩溃残留的临时文件不干扰判断。
- *
- * ## 为什么用**真的子进程**
- *
- * "两个会话对象"只能证明同一个进程里的两个对象互不知情 —— 那是模拟，不是并发。
- * 这里每次都 `spawn` 一个独立的 node 进程去写同一个文件，并记录它的 pid：
- * 跨进程才是这条保护真正要覆盖的场景（也是落库之前必须先有的证据）。
- *
- * ## 为什么迭代数要显式调低
- *
- * `DEFAULT_PBKDF2_ITERATIONS = 200_000`，纯 JS 的 HMAC-SM3 下**单次派生约 7.6 秒**
- * （进程内有缓存，但子进程各付一次）。用例里显式传 `iterations`，
- * 强度参数**不做成环境变量**（那会被部署脚本顺手带上而无人察觉）。
- */
+// 并发写自测（C1~C6）。
 
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { spawnSync } from 'node:child_process';
@@ -44,16 +16,16 @@ const PASS = 'selftest-concurrency-passphrase';
 /** 测试用迭代数：只为把 7.6 秒的派生压到几十毫秒，不改变任何并发语义 */
 const ITER = 1000;
 
-/** ⚠️ 本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言 */
+/**  本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
 /**
- * ⚠️ 本环境 `node:child_process` 的声明里 `spawnSync` 没有 `env` 选项（运行时支持）。
+ *  本环境 `node:child_process` 的声明里 `spawnSync` 没有 `env` 选项（运行时支持）。
  *
- * 变通是**断言**而不是"改用 `spawn` 或改走文件传参"：子进程必须拿到那几个参数，
+ * 变通是断言而不是"改用 `spawn` 或改走文件传参"：子进程必须拿到那几个参数，
  * 而"为了迁就类型声明去改测试机制"会让用例偏离它要验证的真实调用方式。
  * 同一个 `process.pid` 也缺声明 —— 那也是断言，不是不记录 pid（pid 是"真的跨进程"这句结论的证据）。
- */
+  */
 interface SpawnSyncWithEnv {
   spawnSync: (
     command: string,
@@ -71,7 +43,7 @@ const suite = new TestSuite('并发写自测', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/** 子进程脚本：以**独立的 node 进程**写同一个文件（`-e` 里的代码是纯 JS，动态 import 那个 .ts 模块） */
+/** 子进程脚本：以独立的 node 进程写同一个文件（`-e` 里的代码是纯 JS，动态 import 那个 .ts 模块）  */
 const CHILD_SOURCE = `
 const store = await import(process.env.L0C_STORE_URL);
 const payload = {
@@ -100,7 +72,7 @@ interface WriterResult {
   message?: string;
 }
 
-/** 起一个**独立进程**去写：`expect` 为 `'missing'` / 摘要串 / 省略（= 裸写） */
+/** 起一个独立进程去写：`expect` 为 `'missing'` / 摘要串 / 省略（= 裸写）  */
 function writeFromAnotherProcess(tag: string, expect?: string): WriterResult {
   const result = childProcess.spawnSync(process.execPath, ['--input-type=module', '-e', CHILD_SOURCE], {
     cwd: ROOT,
@@ -145,7 +117,7 @@ async function main(): Promise<void> {
     const base = writeHere('base');
     assert(base.length === 64, '前置：拿到基线摘要');
 
-    /* 两个**独立进程**各自读盘、各自写 —— 它们都认为自己是在"当前这一版"上写的 */
+    /* 两个独立进程各自读盘、各自写 —— 它们都认为自己是在"当前这一版"上写的  */
     const a = writeFromAnotherProcess('A');
     const b = writeFromAnotherProcess('B');
     assert(a.ok && b.ok, `裸写两次都该"成功"（这正是问题所在）：${JSON.stringify({ a, b })}`);
@@ -154,7 +126,7 @@ async function main(): Promise<void> {
 
     const onDisk = writerOnDisk();
     assertEqual(onDisk.writer, 'B', 'A 的内容已经没了');
-    /* 这条断言的意义：**"没有报错"不等于"没丢东西"**。它证明后面那层前置条件不是多余的。 */
+    /* 这条断言的意义："没有报错"不等于"没丢东西"。它证明后面那层前置条件不是多余的。  */
     assertEqual(a.ok, true, 'A 的那次写入当时是"成功"的 —— 丢失发生时没有任何信号');
   });
 
@@ -162,18 +134,16 @@ async function main(): Promise<void> {
     rmSync(FILE, { force: true });
     const d0 = writeHere('base');
 
-    /* 进程 A 基于 d0 写成功 */
     const a = writeFromAnotherProcess('A', d0);
     assertEqual(a.ok, true, `基于当前基线写入应成功：${a.code ?? ''} ${a.message ?? ''}`);
     assert(typeof a.digest === 'string' && a.digest !== d0, '写入后基线必然换新（否则"陈旧"永远检测不出来）');
 
-    /* 进程 B 手上还是 d0（它从旧版本出发）→ 必须被拒 */
     const b = writeFromAnotherProcess('B', d0);
     assertEqual(b.ok, false, '陈旧基线的写入必须被拒绝');
     assertEqual(b.code, SNAPSHOT_CONFLICT_CODE, '应给出可定位的错误码');
     assert(String(b.message ?? '').includes('未写入'), `错误信息要说清"本次未写入"，实际：${b.message ?? ''}`);
-    /* 这条信息会**出现在医生的操作日志里**（不是只躺在服务端），
-       所以不许夹带 markdown 标记 —— 与 A14 对界面字面量的要求同一条纪律。 */
+    /* 这条信息会出现在医生的操作日志里（不是只躺在服务端），
+       所以不许夹带 markdown 标记 —— 与 A14 对界面字面量的要求同一条纪律。  */
     assert(!String(b.message ?? '').includes('**'), `错误信息不得夹带 markdown 标记，实际：${b.message ?? ''}`);
 
     const onDisk = writerOnDisk();
@@ -213,8 +183,8 @@ async function main(): Promise<void> {
     const written = writeHere('base');
     assertEqual(writerOnDisk().digest, written, '写入返回的 digest 必须等于随后读到的 digest，否则基线永远对不上');
 
-    /* 同样的内容再写一遍，摘要**必须不同**：信封里有随机 IV，
-       于是任何一次写入都会换掉基线 —— "陈旧"因此总能被检出。 */
+    /* 同样的内容再写一遍，摘要必须不同：信封里有随机 IV，
+       于是任何一次写入都会换掉基线 —— "陈旧"因此总能被检出。  */
     const again = writeHere('base');
     assert(again !== written, '内容相同也应得到不同摘要（否则两次写入之间的"陈旧"检测不出来）');
   });
