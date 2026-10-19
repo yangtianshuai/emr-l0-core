@@ -13,6 +13,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WriteError, WriteSession, type Actor } from '../core/session.ts';
+import { summarizeRevision } from '../core/revision-summary.ts';
 import { applyWritingTiming } from '../core/writing-timing.ts';
 import { demoTranscript, normalizeSegments, type DictationInput, type TranscriptSegment } from '../core/dictation.ts';
 import { collectCandidates, placedNodeIds, placePastedParagraphs } from '../dictation/placement.ts';
@@ -3164,7 +3165,9 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
         nodeId: element.nodeId,
       })),
     },
-    /* 留痕全量下发（新的在前）：留痕是审计证据，不能只给最近几条 */
+    /* 留痕全量下发（新的在前）：留痕是审计证据，不能只给最近几条。
+       `summary` 是给人看的一句话（"这一版改了什么"）—— 界面靠它做历史版本列表；
+       它不是审计字段，改它不影响验签与验链（那是 hash/patch 的事）。 */
     audit: [...session.auditLog()].reverse().map((revision) => ({
       rev: revision.rev,
       op: revision.op,
@@ -3172,6 +3175,7 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
       at: revision.at,
       targetId: revision.targetId ?? null,
       patchOps: revision.patch?.length ?? 0,
+      summary: summarizeRevision(revision),
       modelId: revision.modelId ?? null,
       confidence: revision.confidence ?? null,
     })),

@@ -43,7 +43,10 @@
          点它先弹一份"能开哪几类文书"的清单（见 ui.js 的 pickTemplate）：这一步只是选，不是写。 -->
     <button id="btnTplCreate" title="新建一份文书：先选文书类型，模板只提供章节骨架与数据元绑定，正文由医生填写">新建</button>
     <button id="btnSaveAll" title="把还没保存的编辑立刻落盘（平时失焦 250ms 会自动保存，这里是手动兜底）">保存</button>
-    <button id="btnUndo" title="撤销最近一次写入">撤销</button>
+    <!-- 「撤销」点开的是历史版本列表（最近 15 次）：一次误操作该撤最近一笔，
+         而"我要回到三小时前那一版"根本不是同一个动作 —— 两件事放在一个弹层里，
+         上面一键撤最近一次，下面按版回退，谁也不会被另一个挡住。 -->
+    <button id="btnUndo" title="撤销 / 历史版本（最近 15 次，可回到任意一版）">撤销</button>
         <!-- 「重置工作区」的入口已从本页撤掉：它两种模式都要求管理员身份，
          而医生端已经没有登录入口，留在顶栏就是一个永远点不动的按钮。
          入口搬到了管理后台的「系统信息 → 工作区」（那里才有登录与会话）；
@@ -173,6 +176,16 @@
       删除它需同步修改 4 处静态断言（ui-self-test 的 A2/A3/A4 扫描源、A6/A20 抽屉结构、B28 身份字段）。
       在此之前它处于惰性状态：<dialog> 没有 open 属性，也没有代码会打开它。
     -->
+    <!-- 历史版本抽屉：撤销按钮打开它。只列最近 15 次（更早的在「指标与留痕」与审计报告里，
+         这里不放全量：一次点开滚动几十行，找的是"哪一版"，不是"翻档案"）。 -->
+    <dialog class="drawer" id="historyDrawer" aria-labelledby="historyDrawerTitle">
+      <div class="drawer-head">
+        <h3 id="historyDrawerTitle">撤销 / 历史版本</h3>
+        <button id="historyClose" aria-label="关闭历史版本" title="关闭（也可按 Esc）">×</button>
+      </div>
+      <div class="pb" id="historyBody"></div>
+    </dialog>
+
     <dialog class="drawer" id="modelDrawer" aria-labelledby="modelDrawerTitle" aria-describedby="modelDrawerDesc">
       <div class="drawer-head">
         <div>
@@ -582,6 +595,7 @@
       <div class="pb">
         <div class="grid2" id="metrics"></div>
         <div class="mt4" id="audit"></div>
+        <div class="mt4" id="revisions"></div>
       </div>
     </section>
   </section>

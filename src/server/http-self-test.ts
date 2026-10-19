@@ -361,7 +361,7 @@ async function main(): Promise<void> {
     assertEqual((await docOf(signedDoc)).status, 'void', '作废完成');
   });
 
-  await test('A11 回到历史版本（K13）：内容回到那一版，且回滚自己占一条留痕', async () => {
+  await test('A11 回到历史版本（K21）：内容回到那一版，且回滚自己占一条留痕', async () => {
     const docId = await createDoc();
     const cmd = (op: string, params: Record<string, unknown> = {}) => call('POST', `/documents/${docId}/commands`, { body: { op, params }, actor: HUMAN });
 
@@ -390,6 +390,19 @@ async function main(): Promise<void> {
       assertEqual(bad.status, 422, `rev=${rev} 应被拒`);
       assertEqual(bad.body.code, 'E_REVERT_TARGET', '错误码应指向"目标不是已有版本"');
     }
+
+    /* 区间里有别人写的内容：403（不许做，不是做不了） */
+    const shared = await createDoc();
+    const write = (actor: { id: string; kind: string }, text: string) =>
+      call('POST', `/documents/${shared}/commands`, { body: { op: 'insertText', params: { nodeId: 'n_t', text } }, actor });
+    await write(HUMAN, 'A');
+    await write({ id: 'DR_B', kind: 'human' }, 'B');
+    const foreign = await call('POST', `/documents/${shared}/commands`, {
+      body: { op: 'revertTo', params: { rev: 2 } },
+      actor: HUMAN,
+    });
+    assertEqual(foreign.status, 403, '跨过他人内容回滚应 403');
+    assertEqual(foreign.body.code, 'E_REVERT_FOREIGN_WRITE', '错误码应指向"这段不是你自己写的"');
   });
 
   await test('B1 工具链 S4 的 26 条契约直连本服务：26/26 全绿（T22 正式验收命令）', () => {

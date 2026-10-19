@@ -693,10 +693,11 @@ function renderDoc() {
   const undo = S.undo;
   const undoButton = $('btnUndo');
   if (undoButton) {
-    undoButton.disabled = !undo;
+    /* 不再禁用：这个按钮现在打开的是历史版本清单 ——
+       没有可撤销的写入时，"看我之前改过什么"依然是合理诉求。 */
     undoButton.title = undo
-      ? `撤销第 ${undo.rev} 条（${undo.op}）`
-      : '没有可撤销的写入（只支持撤销最近一次；签章/解锁之后不可撤销）';
+      ? `撤销 / 历史版本：可撤销第 ${undo.rev} 条（${undo.op}），也能回到最近 15 次里的任意一版`
+      : '历史版本：最近 15 次写入（当前没有可撤销的写入；签章 / 解锁之后不可撤销）';
   }
   /* 派生值重算入口：只在本文书真有派生值时出现。文案要说清"它只改公式算出来的格子"，
      否则医生会担心它把自己的手写内容覆盖掉（而内核本来就不允许覆盖人工内容）。 */
@@ -3408,6 +3409,121 @@ function renderMetrics() {
       <td>${a.patchOps}</td>
       <td>${a.modelId ? `${esc(a.modelId)} / ${a.confidence ?? ''}` : '—'}</td>
     </tr>`).join('')}</tbody></table>`;
+  renderHistory();
+}
+
+/* ------------------------------ 撤销 / 历史版本 ------------------------------
+   「撤销」点开的不是"立刻撤回一笔"，而是一张清单：
+     · 顶上：撤销最近一次（原来那个动作，一键到位）
+     · 下面：最近 15 次写入，每条一句"改了什么"，可点回到那一版
+   为什么不全量列：这个抽屉是给人找"哪一版"的，不是翻档案 ——
+   全量留痕在「指标与留痕」与审计报告里，一条不少。
+--------------------------------------------------------------------------- */
+
+/** 抽屉里最多列多少条（找的是"哪一版"，不是翻档案） */
+const HISTORY_LIMIT = 15;
+
+/** 撤销最近一次（抽屉里的按钮与 Ctrl+Z 共用这一条路径） */
+async function doUndo() {
+  const r = await api('/api/undo', {});
+  docNotice = r.ok
+    ? '已撤销上一次写入；这次撤销本身也写进了留痕（再点一次「撤销」＝重做）。'
+    : `未能撤销：${(r && (r.message || r.code)) || '未知原因'}`;
+  await apply(r);
+}
+
+function openHistory() {
+  const drawer = $('historyDrawer');
+  if (!drawer) return;
+  renderHistory();
+  if (!drawer.open) drawer.showModal();
+  document.body.classList.add('drawer-open');
+  const close = $('historyClose');
+  if (close) close.focus();
+}
+
+function closeHistory() {
+  const drawer = $('historyDrawer');
+  if (!drawer) return;
+  if (drawer.open) drawer.close();
+  document.body.classList.remove('drawer-open');
+  /* 焦点还给触发按钮：否则键盘用户关掉浮层就"掉"回页面顶部 */
+  const opener = $('btnUndo');
+  if (opener) opener.focus();
+}
+
+/* Esc / 点击阴影关闭时浏览器直接关掉 <dialog>，不走 closeHistory ——
+   滚动锁必须在这里解，否则页面从此滚不动 */
+{
+  const drawer = $('historyDrawer');
+  if (drawer) {
+    drawer.addEventListener('cancel', () => {
+      document.body.classList.remove('drawer-open');
+      const opener = $('btnUndo');
+      if (opener) opener.focus();
+    });
+    /* 点阴影关闭：原生 <dialog> 不会替你关，得自己判"点在内容之外" */
+    drawer.addEventListener('click', (event) => {
+      if (event.target === drawer) closeHistory();
+    });
+  }
+}
+
+/** 把服务端的拒绝理由显示在抽屉里（下一次重绘自动清掉） */
+function showHistoryError(message) {
+  const body = $('historyBody');
+  if (!body) return;
+  const old = body.querySelector('.hist-error');
+  if (old) old.remove();
+  const box = document.createElement('div');
+  box.className = 'hist-error';
+  box.textContent = message;
+  body.prepend(box);
+}
+
+function renderHistory() {
+  const body = $('historyBody');
+  if (!body) return;
+  const status = (S.doc && S.doc.status) || 'draft';
+  const latest = (S.doc && S.doc.rev) || 0;
+  const undo = S.undo;
+
+  const blocked =
+    status === 'reviewing'
+      ? '审核中不可回滚：要改先由审核人退回'
+      : status === 'signed'
+        ? '已签章不可回滚：须先「解锁」'
+        : status === 'archived' || status === 'void'
+          ? `已${status === 'archived' ? '归档' : '作废'}：终态不可回滚`
+          : '';
+
+  const shown = (S.audit || []).slice(0, HISTORY_LIMIT);
+  const rows = shown.map((a) => {
+    const at = String(a.at || '').replace('T', ' ').slice(5, 19);
+    const summary = String(a.summary || a.op || '');
+    let action;
+    if (a.rev >= latest) action = '<span class="hist-note">当前版本</span>';
+    else if (blocked) action = `<span class="hist-note">${esc(blocked)}</span>`;
+    else {
+      action = `<button class="hist-btn" data-revert-rev="${a.rev}" title="回到第 ${a.rev} 版">回到这一版</button>`;
+    }
+    return `<div class="hist-row">
+      <span class="hist-rev">#${a.rev}</span>
+      <span class="hist-time">${esc(at)}</span>
+      <span class="hist-sum" title="${esc(summary)}">${esc(summary)}</span>
+      <span class="hist-act">${action}</span>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="hist-top">
+      <button class="hist-undo" data-undo-now="1" ${undo ? '' : 'disabled'}
+        title="${undo ? `撤销第 ${undo.rev} 条（${esc(undo.op)}）` : '没有可撤销的写入（只支持撤销最近一次；签章 / 解锁之后不可撤销）'}">
+        撤销最近一次${undo ? `　#${undo.rev} · ${esc(undo.op)}` : ''}
+      </button>
+    </div>
+    <div class="hist-caption">最近 ${shown.length} 次${(S.audit || []).length > shown.length ? `（共 ${(S.audit || []).length} 次）` : ''}</div>
+    <div class="hist-list">${rows || '<div class="empty">这份病历还没有写入记录。</div>'}</div>`;
 }
 
 /* --------------------------- 折叠面板徽标（收起也能看状态） --------------------------- */
@@ -3565,6 +3681,8 @@ function renderAll() {
   if (panelAlive('export')) renderExport();
   if (panelAlive('log')) renderLog();
   if (panelAlive('metrics')) renderMetrics();
+  /* 抽屉开着时随状态一起重绘（回滚完列表要立刻反映新的一条，而不是停在旧内容） */
+  renderHistory();
   renderPanelBadges();
   updateDirtyBadge();
   autosizeAll();
@@ -4580,6 +4698,25 @@ document.addEventListener('click', async (event) => {
     if (reject) { await apply(await api('/api/reject', { suggestionId: reject, reason: '演示拒绝' })); return; }
     const confirm = el.dataset.confirm;
     if (confirm) { await apply(await api('/api/confirm', { nodeId: confirm })); return; }
+    /* 回到某一版：整份内容会被替换，所以要问一次；但不说"不可恢复"——
+       它自己留痕，也能再退回来（这一点与"删除本段"正好相反）。 */
+    const revertRev = el.dataset.revertRev;
+    if (revertRev) {
+      const ok = await askConfirm(`把整份病历的内容回到第 ${revertRev} 版？当前内容会被替换成那一版的样子。`, {
+        okLabel: '回到这一版',
+      });
+      if (!ok) return;
+      const result = await api('/api/revert-to', { rev: Number(revertRev) });
+      if (!result.ok) {
+        /* 拒绝理由（例如"这段有别人写的内容"）要留在抽屉里：
+           抽屉盖着正文，提示丢在外面等于没说 */
+        showHistoryError(result.message || result.code || '未能回到这一版');
+        return;
+      }
+      closeHistory();
+      await apply(result);
+      return;
+    }
     /* 段落级操作（增 / 移 / 删）：操作单位是段落（服务端从内容节点回溯到段落），
        所以传的是文本节点 id，否则"移一段"会把它的字段落在原地。 */
     const paraInsert = el.dataset.paraInsert;
@@ -4654,11 +4791,14 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.id === 'btnUndo') {
-      const r = await api('/api/undo', {});
-      docNotice = r.ok
-        ? '已撤销上一次写入；这次撤销本身也写进了留痕（再点一次「撤销」＝重做）。'
-        : `未能撤销：${(r && (r.message || r.code)) || '未知原因'}`;
-      await apply(r);
+      /* 点「撤销」先给看历史：一次误操作撤最近一笔，和"我要回到三小时前那一版"
+         不是同一个动作。抽屉里两个都在，谁也不会被另一个挡住。 */
+      openHistory();
+      return;
+    }
+    if (el.id === 'historyClose') { closeHistory(); return; }
+    if (el.dataset.undoNow) {
+      await doUndo();
       return;
     }
     if (el.id === 'btnUnlock') {
@@ -5223,13 +5363,14 @@ document.addEventListener('keydown', (event) => {
   if (accel && !event.altKey && !inField && !inDialog
     && (event.key === 'z' || event.key === 'Z' || event.key === 'y' || event.key === 'Y')) {
     event.preventDefault();
-    const undoButton = $('btnUndo');
-    if (!undoButton || undoButton.disabled) {
+    if (!S.undo) {
       docNotice = '没有可撤销的写入（只支持撤销最近一次；签章 / 解锁之后不可撤销）。';
       renderDoc();
       return;
     }
-    undoButton.click();
+    /* 不再"点按钮"：那个按钮现在打开的是历史版本抽屉。
+       Ctrl+Z 的语义只有一个 —— 撤回刚刚那一笔，别让它变成"弹个窗"。 */
+    void doUndo();
     return;
   }
   const host = event.target && event.target.closest ? event.target.closest('[data-flow-seg]') : null;

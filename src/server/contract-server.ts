@@ -80,6 +80,8 @@ const STATUS_BY_CODE: Record<string, HttpStatus> = {
   /* 回到历史版本：目标不合法与"那一版回不去"都是 422 —— 它们是内容/不可逆性问题，不是请求格式问题 */
   E_REVERT_TARGET: 422,
   E_REVERT_IMPOSSIBLE: 422,
+  /* 区间里有别人的内容：这是"不许做"，不是"做不了" —— 403 让对接方分得清 */
+  E_REVERT_FOREIGN_WRITE: 403,
 };
 
 class HttpError extends Error {

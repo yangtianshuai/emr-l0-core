@@ -1206,6 +1206,32 @@ async function main(): Promise<void> {
     assertEqual(missing, [], '存在"脚本读 dataset、模板却从不输出该 data 属性"的断裂');
   });
 
+  await test('A41 撤销/历史版本抽屉：点「撤销」能选回到某一版，且说得出每一版改了什么', () => {
+    /* 这条守的是"功能有没有出口"：内核能回到任意版本、接口也能调，
+       但界面上没有入口时，它对医生等于不存在（只能由程序员调接口）。 */
+    assert(/<dialog class="drawer" id="historyDrawer"/.test(html), '历史版本应是抽屉（点「撤销」弹出），而不是常驻面板');
+    assert(/id="btnUndo"[^>]*title="撤销 \/ 历史版本/.test(html), '「撤销」要成为历史版本的入口（不再只是撤最近一笔）');
+    assert(/function openHistory\(/.test(script) && /historyDrawer/.test(script), '要真的把抽屉打开（含 Esc 与滚动锁）');
+    assert(/data-undo-now="1"/.test(script), '抽屉里要保留"撤销最近一次"这条快捷路径，否则看历史必须先回滚才能撤一笔');
+    assert(/data-revert-rev="\$\{a\.rev\}"/.test(script), '每一版都要带自己的 rev（事件委托靠它定位回到哪一版）');
+    assert(/\/api\/revert-to/.test(script), '按钮要真的打 /api/revert-to');
+    assert(/const HISTORY_LIMIT = 15/.test(script), '只列最近 15 次（全量在「指标与留痕」与审计报告里）');
+    assert(/slice\(0, HISTORY_LIMIT\)/.test(script), '15 条的上限要真的作用在列表上，不能只是写个常量');
+    /* 摘要：让人认出"这是哪一版"，太长就截断（全文进 title） */
+    assert(/a\.summary/.test(script), '每一行要显示"大概改了什么"（服务端下发的 summary）');
+    assert(/class="hist-sum" title=/.test(script), '摘要要一行截断、全文放 title（长了也不撑破布局）');
+    /* 不能回滚时必须写清原因，而不是给个灰按钮让人猜 */
+    for (const reason of ['审核中不可回滚', '已签章不可回滚', '终态不可回滚']) {
+      assert(script.includes(reason), `缺少拦截说明：${reason}`);
+    }
+    assert(/当前版本/.test(script), '最新一版要标"当前版本"，而不是也给一个点了没用的按钮');
+    /* 点阴影也要能关：原生 <dialog> 不替你关，得自己判"点在内容之外" */
+    assert(/event\.target === drawer/.test(script) && /closeHistory\(\)/.test(script), '点阴影关闭（否则用户只能去找那个 ×）');
+    /* 被拒时理由留在抽屉里：抽屉盖着正文，提示丢在外面等于没说 */
+    assert(/function showHistoryError\(/.test(script) && /hist-error/.test(css), '回滚被拒时，原因要显示在抽屉里');
+    assert(/当前内容会被替换成那一版的样子/.test(script), '确认框只说清后果，不写解释性文案');
+  });
+
   await test('A4 UI 调用的每个 /api 路径，服务端都有对应路由', () => {
     const paths = new Set<string>();
     /* 路径里必须允许数字与斜杠：`/api/export-wst500` 会被 `[a-z-]` 截成 `/api/export-wst`、
@@ -1309,8 +1335,11 @@ async function main(): Promise<void> {
     assert(/L0DocView\.confirmChip/.test(flowScript), '待确认要用卡片模式同一份判词');
     /* 演示模式的内部标识：用生成内容显示，不能写进 DOM 文本（写进去就会被当成正文读回去）  */
     assert(/attr\(data-node-id\)/.test(css) && /flow-mode:not\(\.clinical\)/.test(css), '演示模式要在纸面上显示节点 id 与 rev');
-    /* Ctrl+Z：不拦就会落到浏览器原生撤销上（只改 DOM、不进模型），而落笔重画会清掉原生撤销栈 */
-    assert(/event\.key === 'z'/.test(script) && /undoButton\.click\(\)/.test(script), '流式纸面上要接管 Ctrl+Z 并交给既有撤销路径');
+    /* Ctrl+Z：不拦就会落到浏览器原生撤销上（只改 DOM、不进模型），而落笔重画会清掉原生撤销栈。
+       拦截之后必须走**服务端**撤销那条路（`doUndo`）——
+       不能改成"点撤销按钮"：那个按钮现在打开的是历史版本抽屉，Ctrl+Z 不该弹窗。 */
+    assert(/event\.key === 'z'/.test(script) && /void doUndo\(\)/.test(script), '流式纸面上要接管 Ctrl+Z 并走服务端撤销路径');
+    assert(/async function doUndo\(/.test(script) && /'\/api\/undo'/.test(script), 'Ctrl+Z 与抽屉里的按钮要共用同一条撤销路径（两套实现必然分叉）');
   });
 
   /* run 级来源（`RunProvenance`）是"逐句可回溯"的载体，它必须三处同步：

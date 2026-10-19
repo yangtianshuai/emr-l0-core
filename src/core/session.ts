@@ -212,6 +212,12 @@ export const WRITE_ERRORS = {
    */
   E_REVERT_IMPOSSIBLE: 'E_REVERT_IMPOSSIBLE',
   /**
+   * 区间里有别人的内容修改：只能回到"自己写的"那一版。
+   * 回滚会把别人的修改整段丢掉，而留痕只能事后看出"被回滚过"，
+   * 看不出"那一版原本该是什么" —— 这不是权限洁癖，是不可逆的损失。
+   */
+  E_REVERT_FOREIGN_WRITE: 'E_REVERT_FOREIGN_WRITE',
+  /**
    * 取签名值与提交之间病历被改动：这一次的签名值对应的是另一份内容，必须放弃。
    * 宁可让人重试一次，也不能签下一份正在变的病历。
     */
@@ -1745,6 +1751,24 @@ export class WriteSession {
         但记进留痕的清单按 rev 升序 —— 那是给人读的（"这次回滚动了哪些"，从早到晚看才顺）。 */
     const revertedRevs = entries.slice(toRev).map((entry) => entry.rev);
     const crossed = entries.slice(toRev).reverse();
+
+    /*
+     * 只能回到「自己写的」那一段。
+     *
+     * 判断口径是"被跨过的留痕里有没有别人的内容修改"（`patch` 非空才算内容；
+     * 提交审核 / 裁决 / 签章 / 归档这些不改内容的动作由谁做都无所谓）。
+     * 为什么不做成"谁都能回滚、事后有痕"：回滚是把别人写的那一段整段抹掉，
+     * 留痕只能证明"它被回滚过"，证明不了"被抹掉的原文是什么"——
+     * 那部分内容就真的没有了。这种损失不该由一次误点造成。
+     */
+    const foreign = crossed.filter((entry) => entry.actorId !== actor.id && (entry.patch?.length ?? 0) > 0);
+    if (foreign.length > 0) {
+      const who = [...new Set(foreign.map((entry) => entry.actorId))].join('、');
+      throw new WriteError(
+        WRITE_ERRORS.E_REVERT_FOREIGN_WRITE,
+        `这段区间里有 ${who} 写的内容（${foreign.length} 处）：只能回到自己写的那一版，别人的修改要由本人退回`,
+      );
+    }
     const touched = new Set<NodeId>();
     const inverse: PatchOp[] = [];
     for (const entry of crossed) {
