@@ -88,8 +88,13 @@ const REVISION_KEYS = [
   /* 解锁与撤销的载荷：漏登记不会当场报错，只会在下一次全量校验时以 E_UNKNOWN_FIELD 暴露 */
   'unlock',
   'revert',
+  'revertedTo',
   'confirmedNodeIds',
   'acknowledgedUnconfirmed',
+  'aiSuggestionIds',
+  /* 审签状态机的载荷：结论/理由/作废理由 —— 留痕的载荷字段也是契约的一部分 */
+  'review',
+  'voided',
 ];
 const MACHINE_KEYS = ['generatedAt', 'generator', 'sourceHash', 'modelSchemaVersion', 'dataElements', 'keyContentRefs'];
 const DATA_ELEMENT_KEYS = ['tag', 'value', 'valueText', 'unit', 'nodeId', 'origin', 'confidence'];
@@ -125,7 +130,28 @@ const CONTROL_SHAPE_VALUES = CONTROL_SHAPES as unknown as string[];
 
 /* 控件某格的值与 `dataType` 是否相符那份判据只有一处（`model/control.ts` 的
    `matchesControlCellType`）：写路径与产物校验各写一份的结果是"写得进去、校验不过" */
-const REVISION_OP_VALUES = ['create', 'insert', 'update', 'delete', 'move', 'accept-ai', 'reject-ai', 'sign', 'import', 'migrate', 'external', 'unlock', 'revert'];
+/* op 清单必须与 `types.ts` 的 `RevisionOp` 逐字一致：这里漏一个，
+   结果是"内核写得出、产物校验不过"（形态与 `CONTROL_SHAPE_VALUES` 那道教训同类）。 */
+const REVISION_OP_VALUES = [
+  'create',
+  'insert',
+  'update',
+  'delete',
+  'move',
+  'accept-ai',
+  'reject-ai',
+  'sign',
+  'import',
+  'migrate',
+  'external',
+  'unlock',
+  'revert',
+  /* 审签状态机（K12）：四个状态迁移各占一个 op */
+  'submit',
+  'review',
+  'void',
+  'archive',
+];
 const SIGNER_ROLE_VALUES = ['author', 'reviewer', 'approver', 'patient'];
 const ALIGN_VALUES = ['left', 'center', 'right', 'justify'];
 const DOC_TYPE_SYSTEM_VALUES = ['WST500', 'WS445', 'local', 'custom'];

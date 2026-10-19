@@ -9,8 +9,15 @@
  *   · 配置抽屉用 <dialog>.showModal()（top layer），关闭后焦点还给触发按钮
  *   · 宿主接入点**只有一个**（见下方 `hostBridge` / `api`）：只注入 identity / context /
  *     transport 三件事，且**不得出现任何写语义** —— 留痕、门控、签章都属内核
+ *
+ * 被嵌进医生工作站（iframe）时，宿主注入走 `/host-bridge.js`（`?host=1`，postMessage 协议），
+ * 本页对外广播与应答由 `hostEmit` / `registerHostApi` 那一节收口 —— 改嵌入相关行为时读那一节。
  */
 const $ = (id) => document.getElementById(id);
+/* 部署前缀：被工作站反向代理到某个路径下时，由服务端注入在 `<html data-l0-base>` 上。
+   所有 `/api/...` 都要带上它 —— 不加的话请求会打到工作站自己的根上，
+   症状是"页面能开、每个动作都失败"，而排查方向通常跑到服务端去。 */
+const L0_BASE = (document.documentElement && document.documentElement.dataset.l0Base) || '';
 let S = null;
 /* 脏值追踪：先记录编辑、延迟保存（见文件头说明）。 */
 const pendingEdits = new Map();
@@ -101,9 +108,20 @@ function hostBridge() {
   return (typeof window === 'undefined' ? null : window.__L0_HOST__) || null;
 }
 
+/**
+ * 广播一个事件给宿主（`/host-bridge.js` 那边负责真的发出去）。
+ *
+ * 独立运行时是空操作：那时没有宿主窗口，而"自己发给自己"会造出一条看似来自宿主的
+ * 消息 —— 那是最难排查的一类假象。所以判空写在**这一侧**（所有调用点因此不必各判一次）。
+ */
+function hostEmit(type, payload) {
+  const bridge = typeof window === 'undefined' ? null : window.L0Host;
+  if (bridge && typeof bridge.emit === 'function') bridge.emit(type, payload);
+}
+
 /** 默认传输：同源 fetch。宿主未注入时的行为与引入注入点之前逐字节一致 */
 async function sameOriginFetch(path, body) {
-  const res = await fetch(path, body === undefined
+  const res = await fetch(`${L0_BASE}${path}`, body === undefined
     ? { method: 'GET' }
     : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return res.json();
@@ -476,6 +494,9 @@ function autosizeAll() {
 
 const VISIT_LABEL = { outpatient: '门诊', inpatient: '住院', emergency: '急诊', 'physical-exam': '体检' };
 const GENDER_LABEL = { M: '男', F: '女', U: '未知' };
+/* 文书状态：五个态都要有名字。"审核中"尤其不能显示成"草稿" ——
+   医生以为还能改，改的时候却被告知审核中不可改，那是界面在骗人。 */
+const DOC_STATUS_LABEL = { draft: '草稿', reviewing: '审核中', signed: '已签章', archived: '已归档', void: '已作废' };
 
 function renderHeader() {
   const p = S.patient, e = S.encounter, d = S.doc;
@@ -490,7 +511,7 @@ function renderHeader() {
       <div class="meta">${esc(VISIT_LABEL[e.visitType] || e.visitType || '—')} · ${esc(e.deptName || e.dept || '—')} · ${esc(e.visitDate || '')}${e.visitId ? ' · ' + esc(e.visitId) : ''}</div>
     </div>`;
   /* rev 是内部标识：临床模式不下发到医生视线里（演示模式保留，供排查） */
-  $('docStatus').textContent = `${d.status === 'signed' ? '已签章' : '草稿'}${isClinical() ? '' : ` · rev ${d.rev}`}`;
+  $('docStatus').textContent = `${DOC_STATUS_LABEL[d.status] || d.status}${isClinical() ? '' : ` · rev ${d.rev}`}`;
 }
 
 /* ------------------------------- 病历树（左栏导航） ------------------------------- */
@@ -1853,7 +1874,7 @@ async function runLocalCapture() {
         const form = new FormData();
         /* 字段名与文件名都按采集路由的契约（服务端只认一个 audio 文件分段） */
         form.append('audio', blob, `${localCapture.sessionId}#${meta.index}.wav`);
-        const uploaded = await fetch(`/api/dictation/capture/segment?sessionId=${encodeURIComponent(localCapture.sessionId)}&index=${meta.index}`, {
+        const uploaded = await fetch(`${L0_BASE}/api/dictation/capture/segment?sessionId=${encodeURIComponent(localCapture.sessionId)}&index=${meta.index}`, {
           method: 'POST',
           body: form,
         });
@@ -3572,6 +3593,9 @@ async function apply(result) {
      医生的反应是"再点一次"，而不是"看为什么没生效"。 */
   if (result && result.ok === false) toast(`${result.code || ''} ${result.message || ''}`.trim(), 'danger');
   else if (result) toast('已生效', 'ok');
+  /* 写操作的结果同步给宿主：rev 与签章状态变了而宿主不知道，工作站顶上的"已保存 / 已签章"
+     就会与编辑器里的实际状态对不上 —— 而医生是按工作站那个状态决定"能不能走"的。 */
+  hostEmit('state', hostSnapshot());
   return result;
 }
 
@@ -4527,6 +4551,10 @@ document.addEventListener('click', async (event) => {
         if (agreed) r = await api('/api/sign', { acknowledgeUnconfirmed: true });
       }
       await apply(r);
+      /* 签章单独广播一次：它决定这份病历在院内的效力状态（草稿 / 已签章 / 已归档），
+         工作站顶上的状态章必须跟着变。通用的 state 事件也带 status，但宿主需要一个
+         明确的"签成了"来触发它自己的后续动作（归档、推送、解锁下一步）。 */
+      if (r && r.ok) hostEmit('signed', hostSnapshot());
       return;
     }
     if (el.id === 'btnExport') { await apply(await api('/api/export', {})); return; }
@@ -4771,12 +4799,18 @@ document.addEventListener('blur', (event) => {
   blurTimer = setTimeout(() => { void flushEdits(); }, 250);
 }, true);
 
+/**
+ * 落盘待保存的编辑，返回最后一次写的结果（没有待落笔项时为 `null`）。
+ *
+ * 返回值是给宿主用的：宿主在切换患者 / 关闭面板前要问"能不能走"，而"能不能走"
+ * 取决于这一批写是不是都成了 —— 光看"队列空了"会把"写失败但已出队"读成"已保存"。
+ */
 async function flushEdits() {
   /* 流式模式的改动在另一套 DOM 里（整片纸），先落它：
      卡片模式的待落笔项只能来自输入框，两者不会同时有值，
      但"点任何按钮之前先落笔"这条纪律必须对两种模式一致。 */
   await flushFlow();
-  if (pendingEdits.size === 0) return;
+  if (pendingEdits.size === 0) return null;
   const entries = [...pendingEdits.values()];
   pendingEdits.clear();
   updateDirtyBadge();
@@ -4798,16 +4832,103 @@ async function flushEdits() {
     }
   }
   await apply(last);
+  return last;
 }
 
 function updateDirtyBadge() {
   const el = document.getElementById('dirtyBadge');
-  if (!el) return;
   /* 两种模式的"脏"各有一份来源：卡片是输入框里的待落笔项，流式是动过的可编辑区。
      只算其中一份的后果是"卡片说没改、纸上却是新打的字"。 */
   const dirty = pendingEdits.size > 0 || flowDirty.size > 0;
-  el.style.display = dirty ? 'inline-flex' : 'none';
-  el.textContent = '有未保存编辑（失焦 250ms 自动保存）';
+  if (el) {
+    el.style.display = dirty ? 'inline-flex' : 'none';
+    el.textContent = '有未保存编辑（失焦 250ms 自动保存）';
+  }
+  /* 脏状态也要同步给宿主：宿主要不要拦住"切换患者"，靠的就是这一条
+     （徽标只是给人看的，宿主看不见它） */
+  hostEmit('dirty', { dirty });
+}
+
+/* ====================== 宿主接口（`?host=1` 被嵌入时） ======================
+ *
+ * 这一节回答三件事：**打开哪一份**（初始化输入）、**现在什么状态**（事件）、
+ * **能不能离开**（离开前的最后一次落盘）。
+ *
+ * 边界还是那条：宿主只拿**状态与寻址**，不拿写能力。真正的写（落笔 / 确认 / 签章）
+ * 一律经 `api()` 打到内核 —— 留痕、门控与签章是内核的三条不变量，把它们搬到宿主侧
+ * 重实现一次，等于让同一份病历存在两套真相。
+ */
+
+/** 给宿主的状态摘要：只给"宿主该据以决定界面"的那几个字段，不给整份 S */
+function hostSnapshot() {
+  const p = (S && S.patient) || null;
+  const e = (S && S.encounter) || null;
+  const d = (S && S.doc) || null;
+  return {
+    docId: (S && S.activeDocId) || (d && d.docId) || '',
+    docType: (d && d.docType) || '',
+    status: (d && d.status) || '',
+    rev: (d && typeof d.rev === 'number' ? d.rev : null),
+    dirty: pendingEdits.size > 0 || flowDirty.size > 0,
+    patientId: (p && p.patientId) || '',
+    visitId: (e && e.visitId) || '',
+  };
+}
+
+/**
+ * 宿主注入的初始寻址：`__L0_HOST__.context.docId`。
+ *
+ * 走 `/api/open` 而不是"只改前端状态"：活动病历是**服务端状态**（它决定写路径落到哪份文档），
+ * 前端自己切一份等于让两边对同一件事各持一份答案。
+ */
+async function openFromHostContext() {
+  const ctx = (hostBridge() || {}).context;
+  const docId = ctx && ctx.docId;
+  if (!docId) return;
+  if (S && S.activeDocId === docId) return;
+  await apply(await api('/api/open', { docId }));
+}
+
+/**
+ * 离开前的判定：先落盘，再报告"能不能走"。
+ *
+ * 宿主切换患者 / 卸载 iframe 前必须问这一句 —— 直接卸载的话，医生正在打的那句话
+ * 会在失焦 250ms 的防抖里丢掉，而界面上没有任何痕迹能说明它丢过。
+ */
+async function canLeave() {
+  clearTimeout(blurTimer);
+  const last = await flushEdits();
+  const dirty = pendingEdits.size > 0 || flowDirty.size > 0;
+  const failed = !!(last && last.ok === false);
+  return {
+    ok: !dirty && !failed,
+    dirty,
+    failed,
+    reason: failed ? '有编辑未落盘（服务端拒绝了写入）' : dirty ? '有未保存编辑' : '',
+    state: hostSnapshot(),
+  };
+}
+
+/**
+ * 把能力注册给 `/host-bridge.js`（宿主用 postMessage 调）。
+ *
+ * 注册的是**函数**而不是数据：这些能力要碰 `S`、要发请求，只有界面脚本知道怎么做，
+ * 桥那侧只负责把消息翻成调用。名字就是协议里的 `type`，与桥里的分派一一对应。
+ */
+function registerHostApi() {
+  const bridge = typeof window === 'undefined' ? null : window.L0Host;
+  if (!bridge || typeof bridge.register !== 'function') return;
+  bridge.register({
+    open: (payload) => switchDoc(payload && payload.docId),
+    flush: () => flushEdits(),
+    canLeave: () => canLeave(),
+    getState: () => hostSnapshot(),
+    setContext: async (payload) => {
+      if (window.__L0_HOST__) window.__L0_HOST__ = Object.assign({}, window.__L0_HOST__, { context: payload || {} });
+      await openFromHostContext();
+      return hostSnapshot();
+    },
+  });
 }
 
 /* ============================ 自由流式编辑 ============================
@@ -5314,15 +5435,28 @@ $('fileInput').addEventListener('change', async (event) => {
   });
 })();
 
-/* 能力开关必须在第一次取状态之前落定：晚一步的话，被摘掉的页签会先渲染一帧再消失。
-   它只读宿主注入、不碰服务端，所以放在这里不必等网络。 */
-applyCapabilities();
-
-/* 紧跟着把右栏摆好：先量顶栏（它决定右栏吸附位置），再按条子的实际高度决定
-   哪几项留在条子里、哪几项收进「⋯」。能力开关摘完再量，否则会把已摘掉的位置也算进去。 */
-syncHeaderHeight();
-layoutRailTabs();
-
-/* 启动：取一次状态即可画出整页 —— 本页不再有任何"要先知道身份才能画对"的控件，
-   原先"先问会话、再取状态"的两段式因此收敛成一段（那一段的存在理由是「重置」按钮）。 */
-void refresh();
+/*
+ * 启动链。
+ *
+ * 被嵌入时（`?host=1`）第一句是**等宿主 init**：能力开关、初始文书、传输方式都由它带来，
+ * 早一步取状态就会出现"先按全量画一帧、再被摘掉"的闪烁。独立运行时没有 `L0Host`，
+ * 这一段与改造前逐字一致（这也是注入缺失时行为不变的落点）。
+ *
+ * 顺序不能换：
+ *   ① 能力开关必须落在第一次取状态之前（否则被摘掉的页签会先渲染一帧再消失）；
+ *   ② 右栏要在能力开关摘完再量（否则会把已摘掉的位置也算进去）；
+ *   ③ 初始文书要在取状态之前切好（省一次"先画默认那份"的重绘）；
+ *   ④ 能力注册要在宿主能调用之前，事件广播要等界面真的画出来之后。
+ */
+void (async () => {
+  if (window.L0Host) await window.L0Host.whenReady();
+  applyCapabilities();
+  syncHeaderHeight();
+  layoutRailTabs();
+  registerHostApi();
+  await openFromHostContext();
+  /* 启动：取一次状态即可画出整页 —— 本页不再有任何"要先知道身份才能画对"的控件，
+     原先"先问会话、再取状态"的两段式因此收敛成一段（那一段的存在理由是「重置」按钮）。 */
+  await refresh();
+  hostEmit('ready', hostSnapshot());
+})();

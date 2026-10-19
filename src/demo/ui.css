@@ -1997,3 +1997,14 @@ html.cmdk-open { overflow: hidden; }
 }
 /* 未勾选的删除行：让它看起来"正在被保留"，勾上则恢复正常字色 —— 状态只有一处可见 */
 .sr-row.del input:not(:checked) ~ .sr-text { text-decoration: line-through; color: var(--muted); }
+
+/* ---------------------- ⑬ 宿主模式（`?host=1` 被嵌进医生工作站） ----------------------
+   等宿主 init 的这段时间里页面还没有任何真实内容。不给提示的话，"嵌进去一片空白"
+   分不清是"在等宿主"还是"页面坏了" —— 前者该去看宿主为什么没发 init，后者该去看服务端，
+   处置完全不同。提示由 host-bridge.js 挂上、收到 init 后摘掉。 */
+html.l0-waiting-host body::before {
+  content: '正在等待医生工作站…';
+  position: fixed; inset: 0; z-index: 999;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--muted); font-size: var(--fs-md);
+}

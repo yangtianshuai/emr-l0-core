@@ -36,6 +36,16 @@
     return '';
   }
 
+  /* 部署前缀（页面挂在工作站的某个路径下时，由服务端注入在 `<html data-l0-base>`）。
+     站内地址要带上它，否则 `/res/...` 会打到工作站自己的根上 —— 表现是"图没了"，
+     而病历里的地址本身并没有错。 */
+  const L0_BASE = (document.documentElement && document.documentElement.dataset.l0Base) || '';
+
+  /** 站内地址补前缀；站外地址（http(s)）原样返回 */
+  function withBase(url) {
+    return url !== '' && url.startsWith('/') ? L0_BASE + url : url;
+  }
+
   /**
    * 来源徽标。`system` 要分三种说，否则医生要么以为姓名没带进来、要么以为骨架就是内容：
    *   ① 这一格**已经把系统里的值填进去了**（模板配了"从系统带入"）→ 说清是从哪儿带的；
@@ -173,7 +183,7 @@
       /* 空槽与"地址不合规"要分开写：前者是**还没贴**（该催），后者是**地址不对**（该修）。
          都写成一句"没有地址"，现场就分不清该找医生还是该找配置。 */
       const isEmptySlot = !item.resRef;
-      const url = safeImageUrl(item.resRef);
+      const url = withBase(safeImageUrl(item.resRef));
       const alt = item.altText || '图片';
       const shot = url
         ? `<a class="img-shot" href="${esc(url)}" target="_blank" rel="noopener noreferrer" title="点开看原图"><img src="${esc(url)}" alt="${esc(alt)}" loading="lazy" /></a>`

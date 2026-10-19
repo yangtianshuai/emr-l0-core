@@ -13,6 +13,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WriteError, WriteSession, type Actor } from '../core/session.ts';
+import { applyWritingTiming } from '../core/writing-timing.ts';
 import { demoTranscript, normalizeSegments, type DictationInput, type TranscriptSegment } from '../core/dictation.ts';
 import { collectCandidates, placedNodeIds, placePastedParagraphs } from '../dictation/placement.ts';
 import { resolvePlacements, type ResolvedPlacement } from '../dictation/external-placement.ts';
@@ -369,6 +370,10 @@ const DOC_VIEW_JS_FILE = fileURLToPath(new URL('./doc-view.js', import.meta.url)
 /* 自由流式视图（整页连续书写）：与 doc-view.js 并列的第二套正文画法。
    两者共用同一批视图项与同一条写路径，差别只在"怎么落笔"（见 flow-view.js 文件头）。  */
 const FLOW_VIEW_JS_FILE = fileURLToPath(new URL('./flow-view.js', import.meta.url));
+/* 宿主接入桥（被嵌进医生工作站时的那一层）：与 ui.js 同样 no-store。
+   它是"嵌不进去"这一类问题的第一现场 —— 改一行协议却跑着旧脚本，
+   表现是宿主那边永远等不到 init，而排查方向会跑到服务端去。 */
+const HOST_BRIDGE_JS_FILE = fileURLToPath(new URL('./host-bridge.js', import.meta.url));
 /* 管理后台的独立登录页：未登录访问 `/admin` 会被 302 到这里（见下方路由）。
    登录控件不再与配置体同页，`hidden` 只挡住"看得见"，字段名与占位符照样进响应体。 */
 const LOGIN_FILE = fileURLToPath(new URL('./login.html', import.meta.url));
@@ -377,6 +382,43 @@ const LOGIN_JS_FILE = fileURLToPath(new URL('./login.js', import.meta.url));
    服务端只为它开一个具体路径，不做通用静态目录，通用目录会把整个仓库暴露出去，
    而这里只需要一张图。 */
 const QR_FILE = join(ROOT, 'hongyi-ai-qr.jpg');
+
+/* --------------------------- 部署前缀（挂在工作站某个路径下） ---------------------------
+ *
+ * 被医生工作站反向代理时，本实例不再占据域名的根：`https://ws/emr/` → 本机 8787。
+ * 于是一切**根绝对路径**（页面里的 `/ui.css`、脚本里的 `/api/state`、302 的 `/admin`）
+ * 都会打到工作站自己的根上 —— 症状是"页面能开、脚本与接口全 404"，而排查方向
+ * 通常跑到"是不是没部署"，想不到前缀这一层。
+ *
+ * 处理只做两处，且都收口在这一段：
+ *   ① 进站剥掉前缀 —— 下面几十条路由仍按"自己就是根"写（漏一条就是一个 404）；
+ *   ② 出站补上前缀 —— 页面 HTML 与跳转地址，前端所需的那一份挂在 `<html data-l0-base>`。
+ *
+ * 不给前缀时（默认）行为与引入它之前逐字节一致。
+ */
+const BASE_PATH = normalizeBasePath(process.env.L0_BASE_PATH ?? '');
+
+function normalizeBasePath(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  if (trimmed === '' || trimmed === '/') return '';
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  /* `//` 必须挡掉：拼出来的是协议相对 URL（`//evil.example` 会被浏览器当成站外域名），
+     而它出现在跳转地址里就是一个现成的开放重定向。 */
+  return withSlash.startsWith('//') ? '' : withSlash;
+}
+
+/**
+ * 页面 HTML 的出站处理：资源地址补前缀 + 把前缀交给前端。
+ *
+ * `<base href>` 在这里不管用：它影响文档内的相对 URL，但 `fetch('/api/state')` 是
+ * 绝对路径，不参与 base 解析。所以前缀只能显式传一份给脚本（`<html data-l0-base>`）。
+ */
+function withBase(html: string): string {
+  const out = BASE_PATH === ''
+    ? html
+    : html.replace(/(href|src)="\//g, `$1="${BASE_PATH}/`);
+  return out.replace('<html lang="zh-CN">', `<html lang="zh-CN" data-l0-base="${BASE_PATH}">`);
+}
 
 /** HTML 转义（本文件里只此一处往页面里拼服务端字符串，故不引公共工具） */
 function escapeForHtml(text: string): string {
@@ -1825,7 +1867,9 @@ function accountStatus(): { initialized: boolean; total: number; admins: number;
 }
 
 function entryFor(doc: DocumentModel, fromStore = false): DocEntry {
-  const session = fromStore ? WriteSession.openPersisted(doc) : WriteSession.open(doc);
+  /* 真实时钟：编辑器是给人用的，留痕时间必须是真时间（否则书写时长不可信、痕迹也排不出先后）。
+     自测与回放走默认逻辑时钟 —— 确定性那条路留给机器。 */
+  const session = fromStore ? WriteSession.openPersisted(doc, { clock: 'wall' }) : WriteSession.open(doc, { clock: 'wall' });
   /* 豁免装载 ≠ 当没看见：库里那份的机读信息确实有待重算，就得在启动日志里说出来 ——
      不吭一声的话，"导出怎么被拦了"会成一件没有前因的事。
      只在有机读块且确实陈旧时报（没有块 = 还没派生过，那是另一件事，不必每次都喊）。  */
@@ -3839,7 +3883,8 @@ function persist(entry: DocEntry): PersistStatus {
   try {
     const rev = entry.session.docRev;
     if (entry.storedRev !== rev) {
-      workStore.saveDocument(entry.session.document, metaFromTreeOf(entry.docId));
+      /* 时长随正文一起落盘：它是派生数据，单独存一份迟早与正文对不上 */
+      workStore.saveDocument(applyWritingTiming(entry.session.document, entry.session.timing()), metaFromTreeOf(entry.docId));
       entry.storedRev = rev;
     }
 
@@ -4546,14 +4591,26 @@ function previewOfControl(
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = req.url ?? '/';
-  const path = url.split('?')[0] ?? '/';
+  let path = url.split('?')[0] ?? '/';
+
+  /* 部署前缀：剥掉之后，下面所有路由仍按"自己就是根"写（见 BASE_PATH 那段说明）。
+     落在前缀之外的请求不属于本实例 —— 明确报出来，而不是让它一路走到下面的路由里
+     变成一条莫名其妙的 404（那会让人以为路由写错了）。 */
+  if (BASE_PATH !== '') {
+    if (path === BASE_PATH) path = '/';
+    else if (path.startsWith(`${BASE_PATH}/`)) path = path.slice(BASE_PATH.length);
+    else {
+      json(res, 404, { ok: false, code: 'E_OUTSIDE_BASE', message: `本实例部署在 ${BASE_PATH} 下` });
+      return;
+    }
+  }
 
   if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     // 不缓存：改了界面后必须立刻生效，否则浏览器会继续跑旧脚本（排查问题时极易误判）
     res.setHeader('Cache-Control', 'no-store');
-    res.end(readFileSync(UI_FILE, 'utf8'));
+    res.end(withBase(readFileSync(UI_FILE, 'utf8')));
     return;
   }
 
@@ -4638,6 +4695,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return;
   }
 
+  /* 宿主接入桥：必须在 ui.js 之前加载（顺序由 ui.html 的 script 顺序保证），
+     所以它也要能被单独取到 —— 取不到的话浏览器只会报一个 404，而页面照常启动，
+     于是表现变成"宿主注入没生效"，看不出是脚本没送到。 */
+  if (req.method === 'GET' && path === '/host-bridge.js') {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(readFileSync(HOST_BRIDGE_JS_FILE, 'utf8'));
+    return;
+  }
+
   if (req.method === 'GET' && path === '/capture-web.js') {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/javascript; charset=utf-8');
@@ -4662,14 +4730,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     /* 已登录的人再打开登录页，直接送去后台，否则他会看到"我已经登录了，还要再登一次" */
     if (resolvePrincipal(req).ok) {
       res.statusCode = 302;
-      res.setHeader('Location', '/admin');
+      res.setHeader('Location', `${BASE_PATH}/admin`);
       res.end();
       return;
     }
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
-    res.end(renderLoginPage());
+    res.end(withBase(renderLoginPage()));
     return;
   }
 
@@ -4687,15 +4755,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (req.method === 'GET' && path === '/admin') {
     if (!resolvePrincipal(req).ok) {
       res.statusCode = 302;
-      /* next 用服务端自己生成的常量（不让请求参数参与），编码后的 `/admin` */
-      res.setHeader('Location', '/login?next=%2Fadmin');
+      /* next 用服务端自己生成的常量（不让请求参数参与）；带前缀时 `/admin` 也要带，
+         否则登录成功后会被送回宿主根上的 `/admin` */
+      res.setHeader('Location', `${BASE_PATH}/login?next=${encodeURIComponent(`${BASE_PATH}/admin`)}`);
       res.end();
       return;
     }
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
-    res.end(readFileSync(ADMIN_FILE, 'utf8'));
+    res.end(withBase(readFileSync(ADMIN_FILE, 'utf8')));
     return;
   }
 
@@ -5105,7 +5174,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
            唯一没有别的办法验证的一件事，而自动登录恰好把它跳过去了。 */
         json(res, 200, {
           ok: true,
-          data: { username: created.username, loginUrl: '/login' },
+          data: { username: created.username, loginUrl: `${BASE_PATH}/login` },
           message: '管理员账号已创建，请用该账号与口令登录',
         });
       } catch (err) {
@@ -9772,6 +9841,72 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       return;
     }
 
+    /* 审签状态机（K12）：这四个动作与「签章/解锁」平级，全部经 `act` 留痕。
+       界面上它们是四个按钮，内核里是同一套状态门禁 —— 不存在"界面能跳过审核直接签"这条路。 */
+    case '/api/submit-review': {
+      const entry = current();
+      const note = String(body.note ?? '');
+      const result = act(entry, '提交审核', () =>
+        entry.session.submitForReview(note === '' ? {} : { note }, writeActor(req, entry)),
+      );
+      json(res, 200, { ...result, state: stateFor(req) });
+      return;
+    }
+
+    case '/api/review': {
+      const entry = current();
+      const decision = body.decision === 'reject' ? 'reject' : 'approve';
+      const note = String(body.note ?? '');
+      const params = {
+        decision,
+        ...(note === '' ? {} : { note }),
+        ...(body.acknowledgeUnconfirmed === true ? { acknowledgeUnconfirmed: true } : {}),
+      } as { decision: 'approve' | 'reject'; note?: string; acknowledgeUnconfirmed?: boolean };
+      /* 只有"通过"要签章（走签名后端）；**退回不签章** ——
+         把两者塞进同一条 actAsync，会让"没配签名后端"变身成"不能退回"，
+         而退回本来是审核里最常用的那个动作。 */
+      /* `review` 是 async：退回也必须 await 着走，
+         否则它抛出的 E_REVIEW_NOTE_REQUIRED 会变成没人接的 rejection（实测直接把服务打挂）。 */
+      const result =
+        decision === 'approve'
+          ? await actAsync(entry, '审核通过（即签章）', () => {
+              applySignerNow(entry);
+              return entry.session.review(params, writeActor(req, entry));
+            })
+          : await actAsync(entry, '审核退回', () => entry.session.review(params, writeActor(req, entry)));
+      json(res, 200, { ...result, state: stateFor(req) });
+      return;
+    }
+
+    /* 回到历史版本（K21）：不是"撤销"，是跨过一整段 —— 留痕里会写下回到了哪一版、跨过了哪些。
+       与四个状态机动作同一条纪律：它自己也是一条留痕，且同样要过状态门禁。 */
+    case '/api/revert-to': {
+      const entry = current();
+      const rev = Number(body.rev);
+      const result = act(entry, `回到第 ${Number.isInteger(rev) ? rev : '（未提供）'} 版`, () =>
+        entry.session.revertTo({ rev }, writeActor(req, entry)),
+      );
+      json(res, 200, { ...result, state: stateFor(req) });
+      return;
+    }
+
+    case '/api/void-doc': {
+      const entry = current();
+      const reason = String(body.reason ?? '');
+      const result = act(entry, `作废（理由：${reason.trim() === '' ? '（未填）' : reason.trim()}）`, () =>
+        entry.session.voidDoc({ reason }, writeActor(req, entry)),
+      );
+      json(res, 200, { ...result, state: stateFor(req) });
+      return;
+    }
+
+    case '/api/archive-doc': {
+      const entry = current();
+      const result = act(entry, '归档', () => entry.session.archiveDoc({}, writeActor(req, entry)));
+      json(res, 200, { ...result, state: stateFor(req) });
+      return;
+    }
+
     case '/api/unlock': {
       const entry = current();
       const reason = String(body.reason ?? '');
@@ -10074,6 +10209,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           .filter((item) => item.ok === false && typeof item.code === 'string')
           .map((item) => ({ at: item.at, code: item.code as string, ...(item.action ? { action: item.action } : {}) })),
         invariants: entry.session.verifyInvariants(),
+        /* 书写时长取自当前会话（文档里那份是上次保存时落的，可能已经不是这一版） */
+        writing: entry.session.timing(),
       });
       const jsonPath = join(ARTIFACTS, `${entry.docId}.audit.json`);
       const mdPath = join(ARTIFACTS, `${entry.docId}.audit.md`);

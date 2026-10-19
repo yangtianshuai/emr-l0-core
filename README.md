@@ -7,23 +7,28 @@
 
 - **零运行时依赖**：只用 Node 内置模块，没有 `node_modules`、没有构建步骤
 - **Node ≥ 22.9**（直接用 `node` 执行 `.ts`；实测 Node v24.20.0）
-- **74 个自测脚本 / 1008 条用例**（本机实测 991 通过、17 条红灯，口径与逐条原因见「已知红灯」），
+- **74 个自测脚本 / 1008 条用例**，
   外加独立探针与真实 HTTP 契约验收
 
 ## 快速开始
 
 ```bash
 npm test              # 全量自测：零依赖，直接跑
-                      #   口径：`test` 链 70 个套件；另有 4 个 `test:*` 在链外
-                      #   （audit-import / content-engine-model / client-exe / ui-browser）
-                      #   全部 74 个 `test:*` 合计 1008 条用例 —— 本机实测 991 通过 / 17 红灯
-                      #   ⚠ `test:external` 的 9 条需要外部样例（artifacts/external/*.xml），
-                      #     仓库不带样例 → 它失败并**中断它后面的套件**；本机缺样例时改跑：
-                      #     npm run test:phi-scan && npm run test:ui && npm run test:http
-npm run typecheck     # tsc --noEmit 零错误
+
 npm run demo          # 交互演示 → http://127.0.0.1:8787
 npm run serve         # 契约服务端 → http://127.0.0.1:8801
 ```
+
+## 接入工作站
+
+医生工作站把某个前缀反代到本机（如 `https://ws/emr/` → `127.0.0.1:8787`）时，要告诉本实例它在哪个前缀下：
+
+```bash
+L0_BASE_PATH=/emr npm run serve   # 契约服务端同理
+```
+
+
+这是**前端单独嵌进工作站**的前置：不设它，页面能开，但每个脚本与接口都会连到工作站的URI。
 
 ## 管理后台
 
@@ -43,11 +48,6 @@ npm run serve         # 契约服务端 → http://127.0.0.1:8801
 ```bash
 npm run demo          # 打开 http://127.0.0.1:8787/admin —— 未登录会被送到独立登录页 /login
 ```
-
-### 第一次运行
-
-库是空的时候，`/login` 下发的不是登录表单，而是**初始化表单**。
-建完第一个管理员，这个入口就**永久关闭**（再调 `POST /api/admin/bootstrap` 会被明确拒绝）
 
 ### 忘记口令 / 增删账号
 

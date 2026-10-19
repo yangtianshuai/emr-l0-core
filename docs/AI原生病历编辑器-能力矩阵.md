@@ -45,14 +45,14 @@ v1.0 把这两侧写成了同一张路线图，看起来哪里都有，实际是
 | K2 | 视图与数据分离 + 数据集导出 | ◐ | M/3 | `src/export/wst500.ts:16-17`、`src/import/wst500-import.ts:2-21`（导出→导入逐项一致即验收） | 只有 WS/T 500 最小映射；**WS 445 / 医保数据集无任何代码**；OID 后缀待院方核对 |
 | K3 | 流式排版（动态重排）与分页预览 | ○ | M/5 | 反向证据：`src/export/ofd.ts:584`（`paginatePages` 只在导出端）、`tools/model-check/perf-check.mjs:21`（P11 输入延迟 **SKIP**） | 编辑器内没有排版引擎，正文是节点流；"插入后重排无错位"无可测对象。做与不做要单独决策，不要写在 V1 |
 | K4 | 模板体系与医学表达式控件 | ◐ | M/4 | `src/template/engine.ts:70`（8 类槽位 text/paragraph/field/expression/table/list/control/image）、`src/template/expression.ts:110`（算子仅 add/mul/round/min/max）、`samples/packs/doc.template.builtin.json` | 表达式算子过窄；控件形状/语义是闭集（5 形状 6 语义）；有 3 类内置文书 + 5 个控件，**没有专科包体系** |
-| K5 | 留痕修订（op 闭集 / 快照 diff / 重放 / 撤销） | ✅ | M/3 | `src/model/types.ts:476-512`（13 种 op）、`src/core/session.ts:2259-2320`（before/after 快照自动出 patch）、`tools/model-check/node-diff-check.mjs`（D1–D6 + 5 个 `--inject-*` 反向自证） | `revertTo(rev)` 未实现（只有 `undoLast` 与撤销组）；留痕可回放但不可"回到任意 rev" |
+| K5 | 留痕修订（op 闭集 / 快照 diff / 重放 / 撤销 / 链式账本 / 回到任意 rev） | ✅ | M/3 | `src/model/types.ts`（17 种 op）、`src/core/session.ts`（before/after 快照自动出 patch、`undoLast`/撤销组、`revertTo`）、`src/core/revision-ledger.ts`（append-only 链式账本，SM3）、`src/core/revert-self-test.ts`（V1–V8）、`src/storage/storage-self-test.ts`（D14/D15）、`tools/model-check/node-diff-check.mjs`（D1–D6 + 5 个 `--inject-*` 反向自证） | 已闭环：留痕=>写：写入内核 => 账本=> storage 链式追加（删一条即断链、验链当场发现）=> 回滚=> `revertTo(rev)` 反放 patch。仍缺：外部时间戳锚定（无 TSA），故"防篡改"只能说到"篡改可发现"；界面没有"历史版本"面板 |
 | K6 | OFD-H 原生生成 + 机读信息 | ✅⛔ | M/5 | `src/export/ofd.ts:1-22`（真容器、文本禁路径化）、`src/model/machine.ts:79-156`、`MachineReadable.xml` 命名空间 `urn:cn:ofdh:machine:1.0`、`tools/ofd-check/ofd-roundtrip-check.mjs`（C1–C5） | **不得声称符合 GB/T 48666**：标准正文未公开，`schema/l0-document-model.ts:16` 用 `extensions` 占位；C3 机读检测是启发式 |
 | K7 | 签名与国密（SM2/SM3 + 认证加密信封） | ✅ | M/3 | `src/crypto/sm2.ts`、`sm3.ts`、`envelope.ts`（SM4-CTR + HMAC-SM3，Encrypt-then-MAC）、`signature.ts:71-75`（规范化字节序列有用例锁死） | **SM4 由运行时 OpenSSL 提供，不自研**；自研密码学未经第三方审计 → 生产须换经认证模块（内核留替换点） |
 | K8 | 打印 / 套打 / 屏幕一致 | ○ | S/3 | 反向证据：`src/` 无 `window.print`、无 `@media print`、无套打实现；只有导出端页面家具（见 K11） | 医院归档绕不开打印；一致性无对照用例 |
 | K9 | 信创适配（麒麟/统信、达梦/金仓） | ○ | M/3 | 反向证据：存储走 `node:sqlite`（`src/storage/sqlite.ts`），无国产 OS/DB 适配层，无互认/测试报告 | 需实机验证 + 厂商互认，属资质战不是技术战 |
 | K10 | 多端宿主 | ◐ | S/4 | `src/demo/capture-web.js`（浏览器真麦克风 + 重采样 16k）、`tools/voice-client/VoiceCaptureClient.cs`（Windows 单文件 exe/托盘/开机自启）、`src/dictation/local-capture-client.ts`（Node 本机客户端，**无真实麦克风**） | 无 Electron / 桌面控件形态；"同一内核 3 种宿主行为一致"目前只有语音采集这一条链成立 |
 | K11 | 导出端分页与页面家具（页眉/页脚/页码/装订边/孤行控制） | ✅ | S/3 | `src/export/ofd.ts:34-111,722-755`（页眉页脚走独立 Layer，占位符 `{docType}{patient}{visitId}{page}{pages}{docId}`）、`src/export/ofd-self-test.ts:496,531`（E4/E5） | 只解决"导出件能散页归位"，不解决"屏幕上怎么排"（K3） |
-| K12 | 审签状态机 | ◐ | M/3 | `src/model/types.ts:24`（声明 5 态）、`src/core/session.ts:1643`（只写 `signed`）、`:1716`（只写 `draft`） | **无提交审核 / 审核通过 / 作废 / 归档四个动作**；`reviewing/void` 声明了没有迁移代码。这是 V1 第一优先短板 |
+| K12 | 审签状态机（提交审核 / 裁决 / 作废 / 归档 + 回退拒绝） | ✅ | M/3 | `src/core/session.ts`（`submitForReview`/`review`/`voidDoc`/`archiveDoc`，共用 `performSign` 与状态门禁 `assertMutable`）、`src/core/review-flow-self-test.ts`（R1–R12）、`src/server/http-self-test.ts`（A9/A10）、`src/demo/ui-self-test.ts`（B76） | 状态迁移全部留痕（`submit`/`review`/`void`/`archive` 四个 op 进闭集）；审核中内容冻结；审核通过即签章（签名人 `reviewer`，与自签的 `author` 区分）；**作废/归档是终态**；留痕可还原整条审签流（审计报告「审签流程」小节）。仍缺：撤回提交（submit 之后要撤销只能走退回） |
 | K13 | OFD 导入与版式段落重建 | ✅ | M/3 | `src/import/ofd-import.ts:4-20`（识破路径化文本、抽机读块、判原件/副本）、`src/import/layout.ts:2-19`（行距/缩进/字号/左边界四线索，带 confidence） | 导入件一律 `origin:'imported'`、`humanConfirmed:false`、带 sha256 证据；"只有一段且行距均匀时原理上不可恢复"已如实标注 |
 | K14 | 患者主索引 EMPI | ◐ | S/4 | `src/model/identity.ts:71-200`（register/resolve/merge/snapshot，三原则：不猜/冲突不覆盖/合并可追溯）、`src/model/identity-self-test.ts` | 模块与自测在，**存储层无标识表、演示服务未接**（`src/core/store.ts:50-55` 自述） |
 | K15 | 趋势派生视图 | ✅ | S/3 | `src/model/trend.ts:87-177`（缺采样时刻/单位冲突/未确认点均出 warning，不硬凑） | 不做单位换算、不做"变化是否已写进病程"的语义判断 |
@@ -60,6 +60,8 @@ v1.0 把这两侧写成了同一张路线图，看起来哪里都有，实际是
 | K17 | schema 版本迁移 | ◐ | S/3 | `src/model/migrations.ts:44-73`（链式框架 + 1 条 0.9.0→1.0.0）、`:107-127`（无路径显式抛错） | 框架有、存量迁移库近乎空；上线前必须补"旧数据能开"的实证 |
 | K18 | 存储与密钥生命周期 | ✅ | M/4 | `src/storage/sqlite.ts`（WAL / `synchronous=full` / 每迁移一事务 / 库版本高于程序即拒启）、`sealed.ts`（口令为空直接拒）、`rekey.ts` + `src/core/rekey-cli.ts`、`npm run salt:*` | 无增量同步（整文档读写）；无多实例协调 |
 | K19 | 并发写与冲突语义 | ◐ | M/4 | `src/storage/work-store.ts:68-74`（内容摘要 CAS）、`persistence.ts:71-113`、`src/core/concurrency-self-test.ts` | **缩小而非消除**竞态窗口；无文件锁；`E_CONCURRENT_MODIFICATION` 有界面出路（`/api/reload-sidecars`） |
+| K20 | 真实时间戳 + 书写时长 | ◐ | M/3 | `src/core/writing-timing.ts:69-112`（累计器与口径：有效时长 / 空闲阈值 / 可信标记）、`src/core/session.ts:2115`（`resolveAt`：形状与单调两道门）、`:1920`（一次提交一个时间锚点）、`src/core/writing-timing-self-test.ts`（W1–W11） | 留痕可注入墙钟（`WriteOptions.at`/`SessionOptions.clock:'wall'`），书写时长按"相邻书写间隔 ≤ 空闲阈值"累计、超阈值计入 `idleMs`；**时钟仍为本地 `Date.now()`，无 TSA**，故 `trusted:false` 时不得对外报数（仍受 G9 约束）。书写时长本体落盘只到 `extensions`；留痕账已改为 append-only 链式（见 K5/K21） |
+| K21 | 回到历史版本（`revertTo`）+ 留痕账链式存证 | ✅ | M/3 | `src/core/session.ts`（`revertTo`：反放留痕 patch，`E_REVERT_TARGET`/`E_REVERT_IMPOSSIBLE`）、`src/core/revision-ledger.ts`（每份文书一条 SM3 链，`prev_hash`/`hash`/完整 `payload`）、`src/storage/schema.ts`（迁移 `0008-revision-ledger`）、`src/core/revert-self-test.ts`（V1–V8）、`src/storage/storage-self-test.ts`（D13–D15）、`src/server/http-self-test.ts`（A11）、`src/demo/ui-self-test.ts`（B77） | `revertTo(rev)` 只改内容、不改状态，回滚本身占一条留痕（记着回到哪一版、跨过哪些 rev，回滚后来也还能被回滚回去）；留痕账只追加，删一条/改一条验链当场发现，保存时发现对不上则**显式失败**（不修补、不覆盖）。迁移 `0008` 会把没有链的旧留痕账清零、下次保存时重建。**边界**：篡改可发现 ≠ 不可抵赖（缺第三方时间戳/存证，见 G9）；界面没有"历史版本"入口 |
 
 ## 四、L1 AI 接入与门控（决定能否换模型、能否过合规）
 
@@ -133,24 +135,30 @@ v1.0 把这两侧写成了同一张路线图，看起来哪里都有，实际是
 8. **内涵类质控未接入**（形式类与时限类是本地纯函数，可用）；外部落位服务未接入，未配置即拒。
 9. **无租户隔离、无 TLS/MFA/CA/SSO**；`contract-server` 默认 `trusted` 模式（任何调用方可自称 human，只在响应头标注），**不可直接暴露到网络**；`verified` 模式下读接口仍不要求凭证。
 10. **无排版引擎、无分页预览、无打印/套打**；大文档整文档读写，无增量同步；并发用 CAS 缩小竞态窗口而非消除。
-11. **无时间戳、无第三方存证**；审计链是局部防篡改，非合规级。
+11. **无时间戳、无第三方存证**：管理审计链与文书留痕账都是**局部**链式结构 —— 删一条、改一条当场可发现，
+    但持有库文件的一方仍能整条链重算（无第三方见证、无外部锚定），
+    所以**不得对外称"不可抵赖""已存证""证据保全"**，只能说"内部篡改可被发现"。
 12. **不得对外报采纳率/修改率数字**：有指标口径，无效果评测集。
-13. 演示数据全部为虚构（姓名掩码、身份类号码合成），`artifacts/` 不入库。
+13. **书写时长只在 `trusted:true` 时可报数**：`clock:'wall'` 只是本地 `Date.now()`，无 TSA、无签名时间戳，
+    故不可用于举证；且它是质控线索，**不是绩效考核口径**（挂机刷时长是必然反应）。
+14. 演示数据全部为虚构（姓名掩码、身份类号码合成），`artifacts/` 不入库。
 
 ## 九、V1 范围建议（按现状重排，不再按愿望排）
 
 **已经能对外讲的（拉清单时可直接出示证据）**：
-K1、K5、K6、K7、K11、K13、K18、A6、A7、A8、G1、G8、G10、G11、D5、D6、D7、D8。
+K1、K5、K6、K7、K11、K12、K13、K18、K21、A6、A7、A8、G1、G8、G10、G11、D5、D6、D7、D8。
 
 **V1 必须补的短板（按"缺了就上不了生产"排序）**：
 
 | 序 | 短板 | 最小可用口径 | 为什么排这个位次 |
 |---|---|---|---|
-| 1 | 审签状态机（K12） | `draft → reviewing → signed`、`void`、`archived` 四动作 + 回退拒绝 + 留痕 | 没有它，"AI 建议→医生确认→正式病历"这条链在状态层面是断的；现在是 `draft↔signed` 一跳 |
-| 2 | 逐句回溯出口（G2） | 建议与节点上"查看来源"可点，跳到 evidence 指向的节点/字段 | 数据结构齐，只缺界面；这是共识文件里"可追溯"最容易被验的一条 |
-| 3 | 打印链路（K8） | 屏幕/导出/打印三处页面家具一致 + 静默打印参数 | 医院归档绕不开；现在只有导出件带页面家具 |
-| 4 | 真实 ASR 端点 + 术语包（I1/A3） | 一家可用的院内 ASR + 一张能加载的术语表 | 语音是最高频卖点，却是全表最"演示态"的一格 |
-| 5 | 效果评测集（G5/D3） | 首版 100~200 份、固定口径、可一键回放 | 没有它，上面四项都只能证明"能跑"，不能证明"有用" |
+| 1 | 逐句回溯出口（G2） | 建议与节点上"查看来源"可点，跳到 evidence 指向的节点/字段 | 数据结构齐，只缺界面；这是共识文件里"可追溯"最容易被验的一条 |
+| 2 | 打印链路（K8） | 屏幕/导出/打印三处页面家具一致 + 静默打印参数 | 医院归档绕不开；现在只有导出件带页面家具 |
+| 3 | 真实 ASR 端点 + 术语包（I1/A3） | 一家可用的院内 ASR + 一张能加载的术语表 | 语音是最高频卖点，却是全表最"演示态"的一格 |
+| 4 | 界面补上审签/回滚的入口（K12/K21 后半） | 「提交审核 / 通过 / 退回 / 作废 / 归档」五个按钮 + 一个"历史版本"面板（点一条回到那一版） | 内核、契约层、demo 接口都已通（`ui-self-test` B76/B77 是 HTTP 全链路证据），只差界面；没有界面，"回到历史版本"就只对程序员可用 |
+| 5 | 效果评测集（G5/D3） | 首版 100~200 份、固定口径、可一键回放 | 没有它，其余几项都只能证明"能跑"，不能证明"有用" |
+
+> 变化（2026-10-19）：K12 审签状态机、K5 的留痕账 append-only、K21 回到历史版本三项完成，从本表移出（见第三节 K5/K12/K21 行）。
 
 **明确延后（写在这里是为了以后有人问起时说"是决策不是遗漏"）**：
 流式排版（K3）、内涵类质控接入（I5 后半）、院内 RAG（I8）、多模态/DICOM（I9）、患者版解释（I10）、ICD/DRG 预编码（I4）、EMPI 接库（K14）、租户隔离与信创互认（G4/K9）。
@@ -162,10 +170,11 @@ K1、K5、K6、K7、K11、K13、K18、A6、A7、A8、G1、G8、G10、G11、D5、
 
 拿本表逐项打钩，这四个问题能筛掉大部分"AI 病历"：
 
-1. **审签**：状态机有几个状态、几个动作？能不能当场演示"提交审核 → 审核通过 → 签名 → 作废"？（只有 `draft/signed` 一跳的，和本仓库同一个短板）
+1. **审签**：状态机有几个状态、几个动作？能不能当场演示"提交审核 → 审核通过（即签章）→ 退回 → 作废 → 归档"？只有 `draft/signed` 一跳的，答不出"这份谁审的、凭什么签的"。
 2. **门控**：有没有"关闭门控"的开关？AI 建议落笔后 `humanConfirmed` 是 true 还是 false？关键内容是靠通用标记还是靠诊断/剂量/过敏/术式专用名单？
 3. **可追溯**：界面能不能点一句话跳回来源？跳不回去的，逐句回溯多半只存在于 PPT。
 4. **证据链**：导出的 OFD 是否交给**独立探针**验过（不是自己解自己的包）？契约测试有没有"故意不合规实现必须被识别出来"的鉴别力自证？（D5 那套东西）
+5. **留痕账**：直接问"我把库里的一条留痕删掉/改掉，你们的系统会发现吗？" —— 每次保存都整批重写留痕表的实现发现不了（库里答"从来没有过"）；链式只追加的实现会当场指出断在哪一条，并拒绝继续保存。
 
 补充四个常用陷阱：
 

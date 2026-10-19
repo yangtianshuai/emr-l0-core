@@ -3,7 +3,7 @@
 import type { Migration } from './sqlite.ts';
 
 /** 本程序要求的结构版本。改结构必须同时加一条迁移并把它加一  */
-export const STORAGE_SCHEMA_VERSION = 7;
+export const STORAGE_SCHEMA_VERSION = 8;
 
 /**
  * 迁移清单。只追加，不改历史条目 ——
@@ -244,6 +244,35 @@ export const MIGRATIONS: readonly Migration[] = [
       `create index reading_grants_by_doc on reading_grants (doc_id)`,
       /* 撤销状态要能筛：界面上"哪些授权还生效"是最常问的一句 */
       `create index reading_grants_by_revoked on reading_grants (revoked)`,
+    ],
+  },
+  {
+    id: '0008-revision-ledger',
+    note: '留痕账改链式（只追加）：每条留痕带 prev_hash / hash 与完整载荷 payload',
+    sql: [
+      /*
+       * 旧行不搬：它们没有 `prev_hash`/`hash`，搬过去就是"看起来有账其实没有链" ——
+       * 那比没有账更糟，因为它会被当成证据用。
+       *
+       * 也不需要从旧行重建：留痕的权威来源一直是文书载荷（`revisions`），
+       * 账只是它的可查询副本。下次保存时 `appendRevisions` 会把缺的那些条按链式补回去，
+       * 链是**重建**的，不是继承的 —— 继承一条没链的账，等于继承一个说不清的过去。
+       */
+      `drop table document_revisions`,
+      `create table document_revisions (
+         doc_id text not null references documents(doc_id) on delete cascade,
+         rev integer not null,
+         at text not null,
+         actor_id text not null,
+         op text not null,
+         target_id text,
+         payload text not null,
+         prev_hash text not null,
+         hash text not null,
+         primary key (doc_id, rev)
+       )`,
+      `create index revisions_by_time on document_revisions (at)`,
+      `create index revisions_by_actor on document_revisions (actor_id)`,
     ],
   },
 ];

@@ -3,7 +3,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { DEMO_SIGNING_SEED, WriteError, WriteSession, type Actor, type WriteOptions } from '../core/session.ts';
 import { demoKeyPair, softwareSigner, type Signer } from '../crypto/provider.ts';
-import { errorsOf, validateDocument, type DocumentModel, type NodeId } from '../model/index.ts';
+import { errorsOf, validateDocument, type DocumentModel, type NodeId, type RevisionOp } from '../model/index.ts';
 import { buildMachineReadable } from '../model/machine.ts';
 import type { OfdExportPlan } from '../export/ofd.ts';
 import { AiContextError, buildAiContext } from '../core/ai-context.ts';
@@ -66,6 +66,20 @@ const STATUS_BY_CODE: Record<string, HttpStatus> = {
   E_NODE_TYPE_UNKNOWN: 400,
   E_HAS_CHILDREN: 422,
   E_CYCLE_DETECTED: 422,
+  /* 解锁与撤销：理由缺失是内容合规问题（422），状态不允许是冲突（409） */
+  E_UNLOCK_REASON_REQUIRED: 422,
+  E_UNLOCK_NOT_ALLOWED: 409,
+  E_NOTHING_TO_UNDO: 409,
+  /* 审签状态机（K12）：状态冲突 409；缺理由/空文档是内容合规问题 422 */
+  E_REVIEWING_IMMUTABLE: 409,
+  E_DOC_VOID: 409,
+  E_DOC_STATUS: 409,
+  E_REVIEW_NOTE_REQUIRED: 422,
+  E_VOID_REASON_REQUIRED: 422,
+  E_SUBMIT_EMPTY: 422,
+  /* 回到历史版本：目标不合法与"那一版回不去"都是 422 —— 它们是内容/不可逆性问题，不是请求格式问题 */
+  E_REVERT_TARGET: 422,
+  E_REVERT_IMPOSSIBLE: 422,
 };
 
 class HttpError extends Error {
@@ -229,7 +243,16 @@ const COMMANDS = new Set([
   'moveNode',
   'deleteNode',
   'confirmNode',
+  'confirmNodes',
   'sign',
+  'unlock',
+  /* 审签状态机（K12）：四个动作与内容写入共用同一条命令通道，
+     这样"审核"不是一条独立的旁路，任何对接方都走同一套身份与留痕。 */
+  'submitForReview',
+  'review',
+  'voidDoc',
+  'archiveDoc',
+  'revertTo',
 ]);
 
 type CommandParams = Record<string, unknown>;
@@ -381,7 +404,7 @@ export function createContractServer(options: ContractServerOptions = {}) {
             throw new HttpError('E_BAD_DOC', `初始文档未通过校验（${issues.length} 个错误）：${issues.slice(0, 3).map((issue) => `${issue.code}@${issue.path}`).join(', ')}`, { issues });
           }
         }
-        sessions.set(docId, WriteSession.open(normalized, { signer }));
+        sessions.set(docId, WriteSession.open(normalized, { signer, clock: 'wall' }));
         return { status: 201, payload: { docId } };
       },
     },
@@ -409,10 +432,25 @@ export function createContractServer(options: ContractServerOptions = {}) {
         const actorId = url.searchParams.get('actorId');
         const op = url.searchParams.get('op');
         const targetId = url.searchParams.get('targetId');
+        /* 时间窗交给内核的 `auditQuery`（闭区间口径只有一处），这里只负责把参数传进去 */
         const items = session
-          .auditLog()
-          .filter((revision) => (!actorId || revision.actorId === actorId) && (!op || revision.op === op) && (!targetId || revision.targetId === targetId));
+          .auditQuery({
+            ...(url.searchParams.get('from') ? { from: url.searchParams.get('from') as string } : {}),
+            ...(url.searchParams.get('to') ? { to: url.searchParams.get('to') as string } : {}),
+            ...(actorId ? { actorId } : {}),
+            ...(op ? { op: op as RevisionOp } : {}),
+          })
+          .filter((revision) => !targetId || revision.targetId === targetId);
         return { payload: { items: structuredClone(items) } };
+      },
+    },
+    {
+      method: 'GET',
+      pattern: /^\/documents\/([^/]+)\/timing$/,
+      handler: async (match) => {
+        const timing = requireSession(decodeURIComponent(match[1] as string)).timing();
+        /* `trusted:false` 要随数字一起给出：调用方拿到的如果不是可信值，必须当场看得见 */
+        return { payload: { timing } };
       },
     },
     {
@@ -654,8 +692,22 @@ export function createContractServer(options: ContractServerOptions = {}) {
         return session.deleteNode(params as never, actor, opts);
       case 'confirmNode':
         return session.confirmNode(params as never, actor, opts);
+      case 'confirmNodes':
+        return session.confirmNodes(params as never, actor, opts);
       case 'sign':
         return await session.sign({}, actor, opts);
+      case 'unlock':
+        return session.unlock(params as never, actor, opts);
+      case 'submitForReview':
+        return session.submitForReview(params as never, actor, opts);
+      case 'review':
+        return await session.review(params as never, actor, opts);
+      case 'voidDoc':
+        return session.voidDoc(params as never, actor, opts);
+      case 'archiveDoc':
+        return session.archiveDoc(params as never, actor, opts);
+      case 'revertTo':
+        return session.revertTo(params as never, actor, opts);
       default:
         throw new HttpError('E_UNKNOWN_OP', `未知操作：${op}`);
     }

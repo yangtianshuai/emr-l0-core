@@ -17,7 +17,7 @@
   },
   "status": "signed",
   "createdAt": "2026-10-08T01:00:00Z",
-  "updatedAt": "2026-10-08T01:00:06Z",
+  "updatedAt": "2026-10-08T01:00:05Z",
   "createdBy": "DR_SYN",
   "rootId": "n_root",
   "nodes": {
@@ -345,7 +345,7 @@
     },
     {
       "rev": 2,
-      "at": "2026-10-08T01:00:03Z",
+      "at": "2026-10-08T01:00:02Z",
       "actorId": "DR_T",
       "op": "accept-ai",
       "targetId": "t_3",
@@ -442,7 +442,7 @@
     },
     {
       "rev": 3,
-      "at": "2026-10-08T01:00:04Z",
+      "at": "2026-10-08T01:00:03Z",
       "actorId": "DR_T",
       "op": "update",
       "targetId": "t_3",
@@ -463,7 +463,7 @@
     },
     {
       "rev": 4,
-      "at": "2026-10-08T01:00:06Z",
+      "at": "2026-10-08T01:00:05Z",
       "actorId": "DR_T",
       "op": "sign",
       "targetId": "n_root",
@@ -471,7 +471,7 @@
     }
   ],
   "machineReadable": {
-    "generatedAt": "2026-10-08T01:00:05Z",
+    "generatedAt": "2026-10-08T01:00:04Z",
     "generator": "l0-session/1.0.0",
     "sourceHash": "737ee26e880c37c98a7040d664c3b31d",
     "modelSchemaVersion": "1.0.0",
@@ -580,7 +580,7 @@
       "signatureRef": "sig_doc_synthetic_2x2_4",
       "signerRole": "author",
       "signerId": "DR_T",
-      "signedAt": "2026-10-08T01:00:05Z",
+      "signedAt": "2026-10-08T01:00:04Z",
       "covers": [
         "Document.xml",
         "Pages/Page_0/Content.xml",
@@ -590,8 +590,8 @@
       "provider": "software",
       "publicKeyFingerprint": "8ad8e010fef87e3cb88b28d2b6025c74b1f94f24ddc4a8908ef3761f66fb1cfa",
       "publicKeyBase64": "MFkwEwYHKoZIzj0CAQYIKoEcz1UBgi0DQgAERsOOhd/OP3+BKVNswgAV5Rkb5V9Cu7lk7BlPcpepW5fIaNodDWET0GuCR8yHRO+kkAV2Mf5Mp5w99D0vmJXbfg==",
-      "signedInfoDigest": "a8094261b0e476859559db8850764d33409cb88fedabf9acd4dcb42f9e4aaf7a",
-      "signatureValue": "MEUCIAWQcNiwYJOheC5vY0hg/jDqCPsZPIcxZuCdueXGaSBZAiEA6J+L4E7O4dvLusKeBf8lLXQyCWtH95lbRqzCXHGODcE=",
+      "signedInfoDigest": "9435de867234bf15c354ffefb837ee8a1fca26747289a60e703fcbbca08b4c41",
+      "signatureValue": "MEQCIDMMmX1TLSvwsQ1Oe4shuOpd6RsHyeCP1+xl6JLcEsiLAiBMCa7/cB0fWkYgABIjQvKQxTMLIq0NnwfqR+59/mgEEw==",
       "references": [
         {
           "path": "Document.xml",

@@ -1,7 +1,13 @@
 // 工作数据仓储：患者 / 就诊 / 文书（含留痕）/ 旁挂数据 / 小体量数据集。
 
-import type { DocumentModel } from '../model/types.ts';
+import type { DocumentModel, RevisionEntry } from '../model/types.ts';
 import { inTransaction, countOf, type OpenDatabaseResult, type SqliteDatabase } from './sqlite.ts';
+import {
+  appendRevisions,
+  loadRevisionChain,
+  readRevisionLedger,
+  type RevisionLedgerReport,
+} from '../core/revision-ledger.ts';
 import { sealFor, sealValue, unsealValue, type SealedContent, type SealOptions } from './sealed.ts';
 import { DOCUMENT_FORMAT, SIDECARS_FORMAT, KV_FORMAT } from './formats.ts';
 
@@ -284,16 +290,13 @@ export class WorkStore {
           this.now(),
         );
 
-      /* 留痕：替换而不是追加。撤销会让 rev 变化，逐条追加会留下"已经不存在的那条"；
-         整批重建的代价是可忽略的（一份文书的留痕是几十到几千条），换来的是"库里的留痕
-         与文书里的留痕永远一致"。  */
-      this.db.prepare('delete from document_revisions where doc_id = ?').run(doc.docId);
-      const stmt = this.db.prepare(
-        'insert into document_revisions (doc_id, rev, at, actor_id, op, target_id) values (?, ?, ?, ?, ?, ?)',
-      );
-      for (const revision of doc.revisions) {
-        stmt.run(doc.docId, revision.rev, revision.at, revision.actorId, revision.op, revision.targetId ?? null);
-      }
+      /* 留痕：只追加，不删除、不改写。
+         原先这里是"整批删掉再重写一遍"：那样做，删掉一条留痕在库里不留任何破绽 ——
+         审计问"这条记录怎么没了"，库里答"从来没有过"。改成链式追加之后，
+         删一条 = 链断一节，验链当场发现（见 `core/revision-ledger.ts`）。
+         代价是每次保存要把已入库的那些条再对一遍：留痕是几十到几千条，
+         而保存本来就要把整份文书密封一遍，这点开销在同一量级内。  */
+      appendRevisions(this.db, doc.docId, doc.revisions);
     });
   }
 
@@ -470,6 +473,22 @@ export class WorkStore {
 
   ledgerMark(id: string, note: string): void {
     this.db.prepare('insert or ignore into import_ledger (id, applied_at, note) values (?, ?, ?)').run(id, this.now(), note);
+  }
+
+  /**
+   * 留痕账：验链结果 + 通过校验的那些留痕。
+   *
+   * 这条路径的意义是"不问内容就能答审计"：留痕账在库里是独立一本账，
+   * 不必解开文书载荷就能查。账有断点时如实报（loaded < totalInStore），
+   * 断点之后的条目留在库里、不展示 —— 没能验证 ≠ 没有。
+   */
+  documentRevisionLedger(docId: string): { report: RevisionLedgerReport; entries: RevisionEntry[] } {
+    return readRevisionLedger(this.db, docId);
+  }
+
+  /** 只要验链结果（不读留痕内容） */
+  revisionChainReport(docId: string): RevisionLedgerReport {
+    return loadRevisionChain(this.db, docId);
   }
 
   stats(): { documents: number; revisions: number; sidecars: number; kv: number; patients: number } {

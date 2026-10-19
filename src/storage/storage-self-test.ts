@@ -6,10 +6,18 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
-import type { DocumentModel } from '../model/types.ts';
+import type { DocumentModel, RevisionEntry } from '../model/types.ts';
 import { inTransaction, openDatabase } from './sqlite.ts';
 import { MIGRATIONS, STORAGE_SCHEMA_VERSION } from './schema.ts';
 import { WorkStore, openWorkStore, type StoredDoc, type WorkspaceStructure } from './work-store.ts';
+import {
+  canonicalRevision,
+  E_REVISION_LEDGER_TAMPERED,
+  E_REVISION_LEDGER_TORN,
+  GENESIS_HASH,
+} from '../core/revision-ledger.ts';
+import { DOCUMENT_FORMAT } from './formats.ts';
+import { sealFor } from './sealed.ts';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'storage-selftest');
@@ -42,6 +50,26 @@ function openStore(file: string): { store: WorkStore; applied: string[]; fresh: 
 }
 
 const fixture = (): DocumentModel => buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1 }).doc;
+
+/**
+ * 给文档续几条留痕（`rev` 必须连续 —— 留痕账按 rev 成链）。
+ *
+ * 合成文档的初始留痕是 1 条，验"追加"需要至少三条才知道"只多了新的那几条"。
+ */
+function grow(doc: DocumentModel, count: number): DocumentModel {
+  const revisions = [...doc.revisions] as RevisionEntry[];
+  for (let index = 0; index < count; index += 1) {
+    revisions.push({
+      rev: revisions.length + 1,
+      at: `2026-10-12T00:00:0${index}Z`,
+      actorId: 'DR_A',
+      op: 'update',
+      targetId: 'n_1',
+      patch: [{ op: 'replace', path: '/nodes/n_1/text', value: `第 ${index} 次改`, oldValue: `第 ${index - 1} 次改` }],
+    });
+  }
+  return { ...doc, revisions };
+}
 
 /**
  * 把一份合成文书包成"工作区结构 + 该文书挂在一个住院就诊下"。
@@ -340,8 +368,34 @@ async function main(): Promise<void> {
     const before = new WorkStore(v1.db, PASS, { iterations: ITER });
     const doc = fixture();
     before.saveStructure(structureOf(doc));
-    before.saveDocument(doc);
+    /*
+     * 正文直接落 SQL（模拟**旧版本**写下的那些行），不走 `saveDocument`：
+     * v1 的 `document_revisions` 没有 0008 加的那三列，而当前代码只认最新结构 ——
+     * 结构差异由迁移负责，不靠代码两头兼容（两头兼容的必然结局是"留痕悄悄没写进账"）。
+     */
+    const sealed = sealFor(DOCUMENT_FORMAT, doc, PASS, { iterations: ITER });
+    /* `saveStructure` 已经建了这一行（占位正文），这里把真正文盖上（旧版本走的也是同一句 update） */
+    v1.db
+      .prepare(
+        'update documents set status = ?, updated_at = ?, rev = ?, payload_format = ?, payload_digest = ?, payload_sealed = ?, stored_at = ? where doc_id = ?',
+      )
+      .run(
+        doc.status,
+        doc.updatedAt,
+        doc.revisions.length,
+        sealed.format,
+        sealed.digest,
+        sealed.sealed,
+        '2026-10-12T00:00:00.000Z',
+        doc.docId,
+      );
     before.saveSidecars(doc.docId, { suggestions: { items: [{ id: 'sg-1' }] }, annotations: { items: [] } });
+    /* 旧版本写下的留痕：只有六列，没有链 —— 升级时真实存在的就是这个形态 */
+    for (const revision of doc.revisions) {
+      v1.db
+        .prepare('insert into document_revisions (doc_id, rev, at, actor_id, op, target_id) values (?, ?, ?, ?, ?, ?)')
+        .run(doc.docId, revision.rev, revision.at, revision.actorId, revision.op, revision.targetId ?? null);
+    }
     const statsBefore = before.stats();
     before.close();
 
@@ -358,11 +412,117 @@ async function main(): Promise<void> {
     );
 
     const after = new WorkStore(v2.db, PASS, { iterations: ITER });
-    assertEqual(JSON.stringify(after.stats()), JSON.stringify(statsBefore), '既有数据的条数一条都不能变');
+    /* 正文、旁挂、tokenhash 一条都不能少 */
+    assertEqual(after.countDocuments(), statsBefore.documents, '文书条数不能变');
+    assertEqual(after.stats().sidecars, statsBefore.sidecars, '旁挂数据条数不能变');
+    /* 唯一被清零的是留痕账：旧账没有链，"留着它"等于留一本看起来像账的东西 ——
+       它能被读出来，却答不出"中间的条有没有被抽走过"。这是 0008 的既定代价，
+       必须在这里当场被看见，不能悄悄发生。 */
+    assertEqual(statsBefore.revisions, doc.revisions.length, '前置：旧版本写下的留痕是有的');
+    assertEqual(after.stats().revisions, 0, '没有链的旧留痕账按设计丢弃（留痕的权威来源是文书载荷，不是这张表）');
+
     const loaded = after.loadDocument(doc.docId);
     assert(loaded.ok && loaded.found, `迁移之后文书仍要能读出来：${loaded.ok ? '' : loaded.message}`);
     assertEqual(JSON.stringify(loaded.ok && loaded.found ? loaded.doc : null), JSON.stringify(doc), '内容也要逐字节相同');
+
+    /* 清零不是终点：下次保存时账会按链**重建**成文书里现在的样子 */
+    after.saveDocument(doc);
+    const chain = after.revisionChainReport(doc.docId);
+    assertEqual(chain.problem, null, `重建出来的账要一路验到尾：${JSON.stringify(chain.problem)}`);
+    assertEqual(chain.loaded, doc.revisions.length, '账要与文书里的留痕条数一致（重建，不是继承）');
     after.close();
+  });
+
+  await test('D14 留痕账是链式且只追加：删一条会被发现，改一条也跑不掉', () => {
+    const file = freshDbFile();
+    const opened = open(file);
+    const store = new WorkStore(opened.db, PASS, { iterations: ITER });
+    const doc = grow(fixture(), 3);
+    store.saveStructure(structureOf(doc));
+    store.saveDocument(doc);
+    assertEqual(store.stats().revisions, doc.revisions.length, '首次保存：留痕全进账');
+
+    const first = store.revisionChainReport(doc.docId);
+    assertEqual(first.firstRun, false, '账已开');
+    assertEqual(first.problem, null, `第一次验链应当全绿：${JSON.stringify(first.problem)}`);
+    assertEqual(first.loaded, doc.revisions.length, '验过的条数应等于留痕条数');
+    assert(!!first.head, '链头要能给出（这是这份文书的账"说到哪一句"）');
+
+    /* 第二次保存：追加，而不是重写 —— 已经在账上的那几行一行都不许动。
+       这一段正是本次改动落点：以前是"整批删掉重写"，删一条留痕看不出任何破绽。 */
+    const before = store.stats().revisions;
+    const rowsBefore = opened.db
+      .prepare('select rev, prev_hash, hash from document_revisions where doc_id = ? order by rev asc')
+      .all(doc.docId) as unknown as Array<{ rev: number; prev_hash: string; hash: string }>;
+    const grown = grow(doc, 2);
+    store.saveDocument(grown);
+    const rowsAfter = opened.db
+      .prepare('select rev, prev_hash, hash from document_revisions where doc_id = ? order by rev asc')
+      .all(doc.docId) as unknown as Array<{ rev: number; prev_hash: string; hash: string }>;
+    assertEqual(store.stats().revisions, before + 2, '第二次保存只多了两条');
+    assertEqual(
+      JSON.stringify(rowsAfter.slice(0, rowsBefore.length)),
+      JSON.stringify(rowsBefore),
+      '已有行一字未改（只追加，不重写）',
+    );
+    assertEqual(rowsAfter[0]?.prev_hash, GENESIS_HASH, '首条的 prev_hash 是全零常量');
+    const second = store.revisionChainReport(doc.docId);
+    assertEqual(second.problem, null, `追加之后链仍要全绿：${JSON.stringify(second.problem)}`);
+    assert(second.head !== first.head, '多了两条，链头就该往前走');
+
+    /* 账读出来要与文书里的留痕是同一批内容（"账 = 文书留痕"这条等式的日常体检） */
+    const ledger = store.documentRevisionLedger(doc.docId);
+    assertEqual(ledger.entries.length, grown.revisions.length, '读出来的条数要对');
+    assertEqual(
+      ledger.entries.every((entry, index) => canonicalRevision(entry) === canonicalRevision(grown.revisions[index] as never)),
+      true,
+      '逐条内容要与文书里的留痕一致',
+    );
+
+    /* 改一条：验链要在那一条上停住，并且不许把后面的当好数据 */
+    opened.db
+      .prepare('update document_revisions set payload = ? where doc_id = ? and rev = ?')
+      .run(canonicalRevision({ ...(grown.revisions[1] as RevisionEntry), op: 'delete' }), doc.docId, 2);
+    const tampered = store.revisionChainReport(doc.docId);
+    assertEqual(tampered.problem?.kind, 'tampered', `改过的那条要被点出来：${JSON.stringify(tampered.problem)}`);
+    assertEqual(tampered.problem?.atRev, 2, '断点位置要指到被改的那条');
+    assertEqual(tampered.loaded, 1, '断点之前的那几条仍然可用');
+    assertEqual(tampered.discarded, grown.revisions.length - 1, '断点之后的如实报为"未验证"，而不是丢掉');
+    assertEqual(tampered.head, null, '账有断点时不再声称链头');
+
+    /* 篡改之后还来保存：不许覆盖、不许修补 —— 抛错让调用方知道账已经坏了 */
+    let code2 = 'OK';
+    try {
+      store.saveDocument(grown);
+    } catch (err) {
+      code2 = (err as { code?: string }).code ?? 'UNKNOWN';
+    }
+    assertEqual(code2, E_REVISION_LEDGER_TAMPERED, '账已于文书对不上时必须显式失败（替篡改者把账做平是最坏的结果）');
+    store.close();
+  });
+
+  await test('D15 留痕账：抽掉中间一条 / 留痕被丢弃，都要说得出是哪一类', () => {
+    /* 删掉中间一条（revGap） */
+    const file = freshDbFile();
+    const opened = open(file);
+    const store = new WorkStore(opened.db, PASS, { iterations: ITER });
+    const doc = grow(fixture(), 3);
+    store.saveStructure(structureOf(doc));
+    store.saveDocument(doc);
+    opened.db.prepare('delete from document_revisions where doc_id = ? and rev = 2').run(doc.docId);
+    const gapped = store.revisionChainReport(doc.docId);
+    assertEqual(gapped.problem?.kind, 'revGap', `抽掉中间一条要报序号不连续：${JSON.stringify(gapped.problem)}`);
+    assertEqual(gapped.loaded, 1, '断点之前的那条仍然可用');
+
+    /* 留痕被丢弃（文书里的留痕比账上少）：不是"还没保存"，是账被撕过 */
+    let code2 = 'OK';
+    try {
+      store.saveDocument({ ...doc, revisions: doc.revisions.slice(0, 2) });
+    } catch (err) {
+      code2 = (err as { code?: string }).code ?? 'UNKNOWN';
+    }
+    assertEqual(code2, E_REVISION_LEDGER_TORN, '文书里的留痕比账上少时要显式失败');
+    store.close();
   });
 
   const code = suite.report();

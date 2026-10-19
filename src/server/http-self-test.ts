@@ -104,6 +104,12 @@ async function createDoc(docId?: string): Promise<string> {
   return String(res.body.docId);
 }
 
+/** 读回文档（状态机用例要盯的是 `status` 这个字段） */
+async function docOf(docId: string): Promise<{ status: string }> {
+  const res = await call('GET', `/documents/${docId}`);
+  return res.body.doc as { status: string };
+}
+
 async function startServer(): Promise<void> {
   const spawned = spawn(process.execPath, ['src/server/contract-server.ts', '--port', String(PORT)], { cwd: ROOT, stdio: 'pipe' });
   child = spawned;
@@ -282,6 +288,109 @@ async function main(): Promise<void> {
   });
 
   /* ================= B 端到端：同一套 26 条契约打本服务 ================= */
+
+  await test('A9 审签状态机（K12）：送审 → 退回 → 改 → 通过 → 归档，每一步都在留痕里', async () => {
+    const docId = await createDoc();
+    const cmd = (op: string, params: Record<string, unknown> = {}, actor = HUMAN) =>
+      call('POST', `/documents/${docId}/commands`, { body: { op, params }, actor });
+
+    /* 逐条确认：契约层的文档里有一个关键内容字段，不确认就签不了 */
+    const confirmed = await cmd('confirmNodes', { nodeIds: ['n_t', 'n_f'] });
+    assertEqual(confirmed.status, 200, `逐条确认应成功：${JSON.stringify(confirmed.body)}`);
+
+    const submitted = await cmd('submitForReview', { note: '请主任审核' });
+    assertEqual(submitted.status, 200, `提交审核应成功：${JSON.stringify(submitted.body)}`);
+    assertEqual((await docOf(docId)).status, 'reviewing', '提交后应为审核中');
+
+    /* 审核中改内容 → 409（状态冲突，不是 400） */
+    const frozen = await cmd('insertText', { nodeId: 'n_t', text: 'X' });
+    assertEqual(frozen.status, 409, '审核中改内容应 409');
+    assertEqual(frozen.body.code, 'E_REVIEWING_IMMUTABLE', '错误码应指向"审核中不可改"');
+
+    /* 退回不给理由 → 422；给了理由 → 回到草稿 */
+    const noNote = await cmd('review', { decision: 'reject' });
+    assertEqual(noNote.status, 422, '退回不给理由应 422');
+    assertEqual(noNote.body.code, 'E_REVIEW_NOTE_REQUIRED', '错误码应指向"理由必填"');
+
+    const rejected = await cmd('review', { decision: 'reject', note: '主诉缺持续时间' });
+    assertEqual(rejected.status, 200, `退回应成功：${JSON.stringify(rejected.body)}`);
+    assertEqual((await docOf(docId)).status, 'draft', '退回后应回到草稿');
+
+    await cmd('insertText', { nodeId: 'n_t', text: '；持续三天' });
+    await cmd('confirmNodes', { nodeIds: ['n_t', 'n_f'] });
+    await cmd('submitForReview', {});
+    const approved = await cmd('review', { decision: 'approve' });
+    assertEqual(approved.status, 200, `审核通过应成功：${JSON.stringify(approved.body)}`);
+    assertEqual((await docOf(docId)).status, 'signed', '通过后应为已签章');
+
+    const archived = await cmd('archiveDoc', {});
+    assertEqual(archived.status, 200, `归档应成功：${JSON.stringify(archived.body)}`);
+    assertEqual((await docOf(docId)).status, 'archived', '归档后应为终态');
+
+    /* 留痕要把这条链还原出来 —— 状态和 HTTP 状态码都对了，留痕对不上照样不算数 */
+    const audit = await call('GET', `/documents/${docId}/audit`);
+    const items = audit.body.items as Array<{ op: string; review?: { decision: string; note?: string } }>;
+    const flow = items.filter((item) => ['submit', 'review', 'archive'].includes(item.op));
+    assertEqual(flow.map((item) => item.review?.decision ?? 'archive').join('>'), 'submit>reject>submit>approve>archive', '留痕应还原整条审签流');
+    assertEqual(flow[1]?.review?.note, '主诉缺持续时间', '退回理由要在留痕里读得到');
+  });
+
+  await test('A10 作废：草稿可作废且是终态，已签章的不能直接作废', async () => {
+    const docId = await createDoc();
+    const voided = await call('POST', `/documents/${docId}/commands`, { body: { op: 'voidDoc', params: { reason: '患者未到诊' } }, actor: HUMAN });
+    assertEqual(voided.status, 200, `作废应成功：${JSON.stringify(voided.body)}`);
+    assertEqual((await docOf(docId)).status, 'void', '作废后应为 void');
+
+    const after = await call('POST', `/documents/${docId}/commands`, { body: { op: 'insertText', params: { nodeId: 'n_t', text: 'X' } }, actor: HUMAN });
+    assertEqual(after.status, 409, '作废后不得再改');
+    assertEqual(after.body.code, 'E_DOC_VOID', '错误码应指向"已作废"');
+
+    /* 已签章的文书要先解锁再作废：状态机不提供"绕过一次已生效签章"的通道 */
+    const signedDoc = await createDoc();
+    await call('POST', `/documents/${signedDoc}/commands`, { body: { op: 'confirmNodes', params: { nodeIds: ['n_t', 'n_f'] } }, actor: HUMAN });
+    await call('POST', `/documents/${signedDoc}/commands`, { body: { op: 'sign', params: {} }, actor: HUMAN });
+    const badVoid = await call('POST', `/documents/${signedDoc}/commands`, { body: { op: 'voidDoc', params: { reason: '想作废' } }, actor: HUMAN });
+    assertEqual(badVoid.status, 409, '已签章的文书不能直接作废');
+    assertEqual(badVoid.body.code, 'E_SIGNED_IMMUTABLE', '提示应指向"须先解锁"');
+    assertEqual((await docOf(signedDoc)).status, 'signed', '被拒后状态不变');
+
+    const unlocked = await call('POST', `/documents/${signedDoc}/commands`, { body: { op: 'unlock', params: { reason: '补既往史' } }, actor: HUMAN });
+    assertEqual(unlocked.status, 200, '解锁应成功');
+    const nowVoid = await call('POST', `/documents/${signedDoc}/commands`, { body: { op: 'voidDoc', params: { reason: '作废重开' } }, actor: HUMAN });
+    assertEqual(nowVoid.status, 200, '解锁后可作废');
+    assertEqual((await docOf(signedDoc)).status, 'void', '作废完成');
+  });
+
+  await test('A11 回到历史版本（K13）：内容回到那一版，且回滚自己占一条留痕', async () => {
+    const docId = await createDoc();
+    const cmd = (op: string, params: Record<string, unknown> = {}) => call('POST', `/documents/${docId}/commands`, { body: { op, params }, actor: HUMAN });
+
+    /* 留痕：1 = 建文档（fixture 自带），2/3 = 两次插入 */
+    await cmd('insertText', { nodeId: 'n_t', text: 'A' });
+    await cmd('insertText', { nodeId: 'n_t', text: 'B' });
+    const before = await docOf(docId);
+
+    const reverted = await cmd('revertTo', { rev: 1 });
+    assertEqual(reverted.status, 200, `回到第 1 版应成功：${JSON.stringify(reverted.body)}`);
+    const after = await docOf(docId);
+    assert(after !== before, '内容应回到那一版');
+    assertEqual((await docOf(docId)).status, 'draft', '回滚不改文档状态（状态迁移有各自的动作）');
+
+    const audit = await call('GET', `/documents/${docId}/audit`);
+    const items = audit.body.items as Array<{ op: string; revertedTo?: { toRev: number; revertedRevs: number[] } }>;
+    const last = items.at(-1);
+    assertEqual(last?.op, 'revert', '回滚要单独留一条痕');
+    assertEqual(last?.revertedTo?.toRev, 1, '回到哪一版要读得出来');
+    assertEqual(JSON.stringify(last?.revertedTo?.revertedRevs ?? []), JSON.stringify([2, 3]), '被跨过的 rev 要记全');
+    assertEqual(items.length, 4, '被回滚的那两条留痕仍在账上（历史只能追加）');
+
+    /* 目标不合法：422，且语义明确 */
+    for (const rev of [0, 99]) {
+      const bad = await cmd('revertTo', { rev });
+      assertEqual(bad.status, 422, `rev=${rev} 应被拒`);
+      assertEqual(bad.body.code, 'E_REVERT_TARGET', '错误码应指向"目标不是已有版本"');
+    }
+  });
 
   await test('B1 工具链 S4 的 26 条契约直连本服务：26/26 全绿（T22 正式验收命令）', () => {
     const result = spawnSync(process.execPath, [CHECKER, '--adapter', ADAPTER, '--base-url', BASE], { cwd: ROOT, encoding: 'utf8' });

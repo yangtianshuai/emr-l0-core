@@ -3,6 +3,7 @@
 import { hashNodes } from '../model/hash.ts';
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
 import type { DataElementTag, DocNode, DocumentModel } from '../model/types.ts';
+import { readWritingTiming, type WritingTiming } from './writing-timing.ts';
 
 export interface AuditGateRejection {
   at: string;
@@ -16,6 +17,12 @@ export interface AuditInput {
   generatedAt: string;
   /** 门控拒绝记录（来自服务端日志；不传就注明"未提供"）  */
   gateRejections?: AuditGateRejection[];
+  /**
+   * 书写时长。通常由调用方传 `session.timing()`（会话里的才是当下这一版）；
+   * 不传则从文档的 `extensions` 里读（落盘时写进去的那一份）。
+   * 两者都没有就如实记为"未提供"。
+   */
+  writing?: WritingTiming | null;
   /** 更细致的不变量检查结果（如 `session.verifyInvariants()`）：本模块不重复实现校验器 */
   invariants?: string[];
 }
@@ -75,6 +82,25 @@ export interface AuditReport {
     elementCount: number;
     stale: boolean;
   };
+  /**
+   * 书写时长（来自 `doc.extensions` 里的时长记录；没有就如实记为"未提供"）。
+   *
+   * `trusted:false` 的数字照样给出 —— 但报告里必须写明它不可信：
+   * 藏着"有个数字"而只在不显眼处说不可信，比没有这个数字更容易被人拿去用。
+   */
+  writing: {
+    present: boolean;
+    trusted: boolean;
+    /** 有效编辑时长（毫秒）：相邻书写间隔不超过空闲阈值的那部分 */
+    activeMs: number | null;
+    /** 被判为空闲、未计入的时长（毫秒） */
+    idleMs: number | null;
+    editCount: number | null;
+    firstEditAt: string | null;
+    lastEditAt: string | null;
+    /** 一句话说清这份时长能不能用 */
+    note: string;
+  };
   revisions: Array<{
     rev: number;
     at: string;
@@ -85,6 +111,22 @@ export interface AuditReport {
     confidence?: number;
   }>;
   gateRejections: AuditGateRejection[];
+  /**
+   * 审签流程：这份病历是怎么走到当前这一态的。
+   *
+   * 与"留痕（操作轨迹）"是两件事：那条列的是"每一次写入"，
+   * 这条只列状态迁移 —— 问"这份是怎么到归档的"时，答案在这里，不用去几百条写入里翻。
+   */
+  reviewFlow: Array<{
+    rev: number;
+    at: string;
+    actorId: string;
+    op: 'submit' | 'review' | 'void' | 'archive';
+    decision?: 'submit' | 'approve' | 'reject';
+    note?: string;
+    /** 作废理由（与退回理由分开：两者含义不同，合成一列会让"为什么没了"说不清） */
+    reason?: string;
+  }>;
   checks: AuditCheck[];
   /** 报告自身指纹（覆盖除本字段外的全部内容） */
   reportDigest: string;
@@ -134,6 +176,10 @@ export function buildAuditReport(input: AuditInput): AuditReport {
 
   const gateRejections = input.gateRejections ?? [];
   const gateLogProvided = input.gateRejections !== undefined;
+
+  /* 书写时长优先用调用方给的（会话里的才是当下这一版），没有再从文档里读（落盘时写的那一份）。
+     这里绝不重算：报告是"事后看"，审计要的是当时记下的那个数，不是此刻算出来的数。 */
+  const writing = input.writing ?? readWritingTiming(doc);
 
   const checks: AuditCheck[] = [
     {
@@ -214,6 +260,17 @@ export function buildAuditReport(input: AuditInput): AuditReport {
       pass: (input.invariants ?? []).length === 0,
       detail: input.invariants === undefined ? '未提供不变量检查结果' : input.invariants.join('；'),
     },
+    {
+      id: 'WRITING_DURATION_TRUSTED',
+      description: '书写时长有记录且来自真实时钟（逻辑时钟下算出的时长不可用于对外结论）',
+      pass: writing !== null && writing.trusted,
+      detail:
+        writing === null
+          ? '未提供（文档未记录书写时长）'
+          : writing.trusted
+            ? `有效 ${Math.round(writing.activeMs / 1000)} 秒（另有 ${Math.round(writing.idleMs / 1000)} 秒空闲未计入）`
+            : '不可信：留痕时间含逻辑时钟（每次提交 +1000ms），时长不可作为结论依据',
+    },
   ];
 
   const report: AuditReport = {
@@ -267,6 +324,21 @@ export function buildAuditReport(input: AuditInput): AuditReport {
       elementCount: machine?.dataElements.length ?? 0,
       stale: machineStale,
     },
+    writing: {
+      present: writing !== null,
+      trusted: writing?.trusted === true,
+      activeMs: writing?.activeMs ?? null,
+      idleMs: writing?.idleMs ?? null,
+      editCount: writing?.editCount ?? null,
+      firstEditAt: writing?.firstEditAt ?? null,
+      lastEditAt: writing?.lastEditAt ?? null,
+      note:
+        writing === null
+          ? '未提供：这份文档没有记录书写时长'
+          : writing.trusted
+            ? '可信：留痕时间来自真实时钟，可用于质控与管理统计'
+            : '不可信：留痕时间含逻辑时钟（每次提交 +1000ms），不得作为对外结论依据',
+    },
     revisions: doc.revisions.map((entry) => ({
       rev: entry.rev,
       at: entry.at,
@@ -277,6 +349,17 @@ export function buildAuditReport(input: AuditInput): AuditReport {
       ...(typeof entry.confidence === 'number' ? { confidence: entry.confidence } : {}),
     })),
     gateRejections: gateRejections.map((entry) => ({ at: entry.at, code: entry.code, ...(entry.action ? { action: entry.action } : {}) })),
+    reviewFlow: doc.revisions
+      .filter((entry) => entry.op === 'submit' || entry.op === 'review' || entry.op === 'void' || entry.op === 'archive')
+      .map((entry) => ({
+        rev: entry.rev,
+        at: entry.at,
+        actorId: entry.actorId,
+        op: entry.op as 'submit' | 'review' | 'void' | 'archive',
+        ...(entry.review?.decision ? { decision: entry.review.decision } : {}),
+        ...(entry.review?.note ? { note: entry.review.note } : {}),
+        ...(entry.voided?.reason ? { reason: entry.voided.reason } : {}),
+      })),
     checks,
     reportDigest: '',
   };
@@ -323,6 +406,11 @@ export function renderAuditReportMarkdown(report: AuditReport): string {
     `| 门控拒绝记录 | ${report.facts.gateLogProvided ? `${report.facts.gateRejectionCount} 条` : '未提供（本次未传入日志）'} |`,
     `| 机读信息 | ${report.machineReadable.present ? `${report.machineReadable.elementCount} 条${report.machineReadable.stale ? '（**陈旧**）' : ''}` : '缺失'} |`,
     `| 签名 | ${report.signatures.length} 个 |`,
+    `| 书写时长 | ${
+      report.writing.present
+        ? `${Math.round((report.writing.activeMs ?? 0) / 1000)} 秒（${report.writing.editCount ?? 0} 次书写，剔空闲 ${Math.round((report.writing.idleMs ?? 0) / 1000)} 秒）${report.writing.trusted ? '' : ' —— **不可信**'}`
+        : '未提供'
+    } |`,
     '',
     `## 二、机器可判定项（${passed}/${report.checks.length} 通过）`,
     '',
@@ -366,8 +454,27 @@ export function renderAuditReportMarkdown(report: AuditReport): string {
   }
   lines.push('');
 
+  if (report.reviewFlow.length > 0) {
+    lines.push('## 六、审签流程（这份病历是怎么走到当前这一态的）', '', '| rev | 时间 | 操作人 | 动作 | 结论与说明 |', '|---|---|---|---|---|');
+    for (const item of report.reviewFlow) {
+      const action =
+        item.op === 'submit'
+          ? '提交审核'
+          : item.op === 'review'
+            ? item.decision === 'approve'
+              ? '审核通过（即签章）'
+              : '审核退回'
+            : item.op === 'void'
+              ? '作废'
+              : '归档';
+      const detail = item.op === 'void' ? `理由：${item.reason ?? '—'}` : (item.note ?? (item.decision ? `结论：${item.decision}` : '—'));
+      lines.push(`| ${item.rev} | ${item.at} | ${item.actorId} | ${action} | ${detail} |`);
+    }
+    lines.push('');
+  }
+
   if (report.facts.gateLogProvided) {
-    lines.push('## 六、门控拒绝记录（写路径拦下的操作）', '');
+    lines.push('## 七、门控拒绝记录（写路径拦下的操作）', '');
     if (report.gateRejections.length === 0) {
       lines.push('本次未记录到拒绝。', '');
     } else {

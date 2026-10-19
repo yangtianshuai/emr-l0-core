@@ -9,6 +9,8 @@
  */
 
 const $ = (id) => document.getElementById(id);
+/* 部署前缀（挂在工作站的某个路径下时由服务端注入在 `<html data-l0-base>` 上） */
+const L0_BASE = (document.documentElement && document.documentElement.dataset.l0Base) || '';
 function esc(text) {
   return String(text ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -59,7 +61,7 @@ const FORMAT_LABEL = {
 /* 会话 cookie 由服务端 Set-Cookie 下发（HttpOnly，脚本读不到），
    同源 fetch 默认带 cookie（credentials: 'same-origin'），所以这里不需要手动带任何头。 */
 async function api(path, body) {
-  const res = await fetch(path, body === undefined
+  const res = await fetch(`${L0_BASE}${path}`, body === undefined
     ? { method: 'GET' }
     : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   try {
@@ -101,8 +103,8 @@ const VIEW_META = {
   system: { title: '系统信息', sub: '这台机器上跑的是什么：版本 / 环境 / 目录 / 生效配置指纹。' },
 };
 
-/** 登录页地址：带上 next，登录后能自动回到后台 */
-const LOGIN_URL = '/login?next=%2Fadmin';
+/** 登录页地址：带上 next，登录后能自动回到后台（带部署前缀时两处都要带） */
+const LOGIN_URL = `${L0_BASE}/login?next=${encodeURIComponent(`${L0_BASE}/admin`)}`;
 
 function renderSession() {
   const role = session && session.roleLabel ? `（${session.roleLabel}）` : '';

@@ -7,12 +7,13 @@ import { DOCUMENT_COVERS, documentSignatureTargets, signTargets, signedInfoDiges
 import { hashNodes } from '../model/hash.ts';
 import { controlCellByKey, matchesControlCellType } from '../model/control.ts';
 import { DocumentIndex } from '../model/indexes.ts';
-import { codesOf, errorsOf, validateDocument, type DocumentModel, type DocNode, type EvidenceRef, type JsonValue, type MachineReadableBlock, type NodeId, type NodeType, type PatchOp, type Provenance, type RevisionEntry, type RevisionOp, type RunProvenance, type TextRun } from '../model/index.ts';
+import { codesOf, errorsOf, validateDocument, type DocumentModel, type DocNode, type EvidenceRef, type ISODateTime, type JsonValue, type MachineReadableBlock, type NodeId, type NodeType, type PatchOp, type Provenance, type RevisionEntry, type RevisionOp, type RunProvenance, type TextRun } from '../model/index.ts';
 import { buildMachineReadable, machineReadableStaleness, type StalenessReport } from '../model/machine.ts';
 import { cloneDoc, toJson } from '../model/serialize.ts';
 import { buildOfdPackage, type OfdExportOptions, type OfdExportPlan, type OfdPackage } from '../export/ofd.ts';
 import { buildWst500Xml, type Wst500ExportOptions, type Wst500ExportResult } from '../export/wst500.ts';
-import { jsonDiff } from './patch.ts';
+import { DEFAULT_IDLE_THRESHOLD_MS, WritingTimingAccumulator, type WritingTiming } from './writing-timing.ts';
+import { applyPatch, jsonDiff } from './patch.ts';
 import { applyTextRange, runsFromAiRanges, type AiRange } from './text-runs.ts';
 import { editRatioOf, SuggestionBook, type Suggestion, type SuggestionAttribution, type SuggestionBatchInput, type SuggestionBookSnapshot, type SuggestionGroup, type SuggestionMetrics, type SuggestionStatus } from './suggestions.ts';
 import { normalizeSegments, toSuggestionItems, type TranscriptSegment } from './dictation.ts';
@@ -51,6 +52,18 @@ export interface WriteOptions {
    * 方向是保守的：关掉它只会少一次自动确认，不会少任何校验；默认仍是 `true`。
     */
   implyConfirm?: boolean;
+  /**
+   * 墙钟时刻（UTC，形如 `2026-10-18T09:30:00Z` 或带毫秒）。本次留痕与节点 provenance 都用它。
+   *
+   * 不传则退回逻辑时钟（每次提交 +1000ms，确定性、便于回放与 diff 比对）。
+   * 代价必须讲清楚：逻辑时钟下算出来的「书写时长」是假的，等于"操作序号 × 1 秒"。
+   * 所以只要有一次提交没带 `at`，`timing().clock` 就会如实标成 `logical` 或 `mixed`，
+   * 且 `trusted` 为 false —— 不许拿它对外报数（见能力矩阵 G9：无可信时间戳）。
+   *
+   * 传入值必须单调不减（不得早于上一次提交时刻），否则报 `E_TIME_REGRESS`：
+   * 留痕一旦能往回写，"后改的在先"就没法用时间判了。
+   */
+  at?: ISODateTime;
 }
 
 export interface WriteResult {
@@ -71,7 +84,19 @@ const EDIT_IMPLIES_CONFIRM: ReadonlySet<RevisionOp> = new Set<RevisionOp>(['crea
  * （例如"撤销签章"会把内容退回、状态却仍是 signed）。
  * 遇到这类动过之后，撤销槽位清空，而不是留着一个撤不动的旧槽位。
   */
-const NOT_UNDOABLE: ReadonlySet<RevisionOp> = new Set<RevisionOp>(['sign', 'unlock', 'migrate', 'import']);
+const NOT_UNDOABLE: ReadonlySet<RevisionOp> = new Set<RevisionOp>([
+  'sign',
+  'unlock',
+  'migrate',
+  'import',
+  'submit',
+  'review',
+  'void',
+  'archive',
+]);
+
+/** 文档状态迁移类 op：它们改的是"这份病历现在处于哪一态"，而不是内容本身 */
+const STATUS_OPS: ReadonlySet<RevisionOp> = new Set<RevisionOp>(['submit', 'review', 'void', 'archive']);
 
 /** 会改旁挂数据（建议本）的 op：撤销时要连它一起回滚，否则会出现"内容退回去了、那条建议还是已采纳"  */
 const TOUCHES_SUGGESTIONS: ReadonlySet<RevisionOp> = new Set<RevisionOp>(['accept-ai', 'reject-ai']);
@@ -80,6 +105,10 @@ export const WRITE_ERRORS = {
   E_ACTOR_INVALID: 'E_ACTOR_INVALID',
   E_AI_DIRECT_WRITE_FORBIDDEN: 'E_AI_DIRECT_WRITE_FORBIDDEN',
   E_REV_CONFLICT: 'E_REV_CONFLICT',
+  /** 注入的时刻不是 UTC ISO 串（形如 `2026-10-18T09:30:00Z`）：解析不了的时刻不能进留痕 */
+  E_TIME_INVALID: 'E_TIME_INVALID',
+  /** 注入的时刻早于上一次提交：留痕必须单调，往回写会让"谁先谁后"无法判断 */
+  E_TIME_REGRESS: 'E_TIME_REGRESS',
   E_SIGNED_IMMUTABLE: 'E_SIGNED_IMMUTABLE',
   E_NODE_NOT_FOUND: 'E_NODE_NOT_FOUND',
   E_PARENT_NOT_FOUND: 'E_PARENT_NOT_FOUND',
@@ -155,8 +184,33 @@ export const WRITE_ERRORS = {
   E_UNLOCK_REASON_REQUIRED: 'E_UNLOCK_REASON_REQUIRED',
   /** 当前状态不允许解锁（未签章 / 已归档 —— 归档是终态） */
   E_UNLOCK_NOT_ALLOWED: 'E_UNLOCK_NOT_ALLOWED',
+  /* 审签状态机（K12） */
+  /** 当前状态下这个动作做不了（例如草稿直接审核 / 已归档再归档） */
+  E_DOC_STATUS: 'E_DOC_STATUS',
+  /**
+   * 审核中不允许改内容。
+   *
+   * 这是"审核"这件事本身的要求：审核人在看的是 A 版，作者同时改成 B 版，
+   * 审的东西和签的东西就不是一份。要改就先退回。
+   */
+  E_REVIEWING_IMMUTABLE: 'E_REVIEWING_IMMUTABLE',
+  /** 已作废：作废是终态，需重新书写请新建一份 */
+  E_DOC_VOID: 'E_DOC_VOID',
+  /** 空文档提交审核：什么都没写的东西不值得占用一次审核 */
+  E_SUBMIT_EMPTY: 'E_SUBMIT_EMPTY',
+  /** 审核退回必须给出理由：不给理由的退回，医生改什么全靠猜 */
+  E_REVIEW_NOTE_REQUIRED: 'E_REVIEW_NOTE_REQUIRED',
+  /** 作废必须给出理由（写进留痕）："为什么这份没了"只能由留痕回答 */
+  E_VOID_REASON_REQUIRED: 'E_VOID_REASON_REQUIRED',
   /** 没有可撤销的写入（只支持撤销最近一次；签章/解锁之后不可撤销） */
   E_NOTHING_TO_UNDO: 'E_NOTHING_TO_UNDO',
+  /** 回到历史版本的目标 rev 不是已有留痕（或就是最新一条，等于没退） */
+  E_REVERT_TARGET: 'E_REVERT_TARGET',
+  /**
+   * 那一版回不去：跨过的某条留痕缺可以改变方向的依据。
+   * 半途回滚比不回滚更糟 —— 文档会变成一个从未存在过的样子，所以这里是整体失败。
+   */
+  E_REVERT_IMPOSSIBLE: 'E_REVERT_IMPOSSIBLE',
   /**
    * 取签名值与提交之间病历被改动：这一次的签名值对应的是另一份内容，必须放弃。
    * 宁可让人重试一次，也不能签下一份正在变的病历。
@@ -196,7 +250,27 @@ export interface SessionOptions {
   signingKeySeed?: string;
   /** 签名后端：默认自研 SM2 软件实现 + 演示密钥；生产替换为经认证的密码模块适配器 */
   signer?: Signer;
+  /**
+   * 时钟来源（默认 `logical`）。
+   *
+   * `logical`：每次提交 +1000ms。确定性，回放与 diff 比对需要它，自测默认走这条路 ——
+   * 代价是留痕时间不是真实时间，书写时长不可信（`timing().trusted === false`）。
+   *
+   * `wall`：不传 `at` 时用 `Date.now()`。一次打开会话就不用再逐笔注入，
+   * 适合服务端/客户端这类"本来就该记真实时间"的场景。
+   */
+  clock?: 'logical' | 'wall';
+  /**
+   * 书写时长的「空闲阈值」：相邻两次书写间隔超过它，这段间隔判为空闲、不计入有效时长（默认 120_000ms）。
+   *
+   * 它防的是最容易被钻的空子：挂着页面去查房/吃饭，回来再写两个字 ——
+   * 若按 lastEditAt − firstEditAt 算，那份病历的"书写时长"是三小时。
+   * 调大 = 更宽容（适合门诊连写），调小 = 更严格（适合只想要"纯打字时间"的场景）。
+   */
+  idleThresholdMs?: number;
 }
+
+
 
 /**
  * 不允许通过 updateNodeProps 直接改的字段（结构类字段须走专用接口以触发校验）。
@@ -303,6 +377,22 @@ export class WriteSession {
 
   private clock: number;
 
+  /**
+   * 本次提交的时间锚点。
+   *
+   * 一次提交内部有多处要落时间（节点 provenance、建议本、批注、留痕条目），
+   * 它们必须拿到**同一个**时刻 —— 否则"改了内容"和"留痕"会出现两个不同的时间，
+   * 提交就不再是原子的。注入墙钟时它锁住那个值，逻辑时钟下为 null（照旧递增）。
+   */
+  private pendingAt: ISODateTime | null = null;
+
+  /** 本次提交的时刻是不是真实时钟给的（决定时长能不能信） */
+  private pendingWallClock = false;
+
+  private clockSource: 'logical' | 'wall';
+
+  private readonly timingAcc: WritingTimingAccumulator;
+
   private seq = 0;
 
   private constructor(doc: DocumentModel, options: SessionOptions) {
@@ -314,6 +404,8 @@ export class WriteSession {
     this.signer = options.signer ?? softwareSigner(demoKeyPair(options.signingKeySeed ?? DEMO_SIGNING_SEED).privateKey);
     this.index = DocumentIndex.build(doc.nodes, doc.rootId);
     this.clock = Date.parse(doc.updatedAt);
+    this.clockSource = options.clock ?? 'logical';
+    this.timingAcc = new WritingTimingAccumulator(options.idleThresholdMs ?? DEFAULT_IDLE_THRESHOLD_MS);
   }
 
   /** 打开会话：先校验文档合法，再建索引（非法文档不得进入写路径） */
@@ -353,6 +445,35 @@ export class WriteSession {
 
   auditLog(): RevisionEntry[] {
     return this.doc.revisions;
+  }
+
+  /**
+   * 留痕检索：按时间窗 / 操作人 / op 过滤。
+   *
+   * 痕迹攒到几百条之后，"把整份 revisions 丢给前端自己筛"既慢又容易筛错口径
+   * （尤其是时间窗的闭合区间怎么算）。这里把口径钉死：`from`/`to` 都是闭区间。
+   */
+  auditQuery(filter: { from?: ISODateTime; to?: ISODateTime; actorId?: string; op?: RevisionOp } = {}): RevisionEntry[] {
+    const from = filter.from === undefined ? Number.NEGATIVE_INFINITY : Date.parse(filter.from);
+    const to = filter.to === undefined ? Number.POSITIVE_INFINITY : Date.parse(filter.to);
+    return this.doc.revisions.filter((entry) => {
+      const at = Date.parse(entry.at);
+      if (Number.isFinite(from) && at < from) return false;
+      if (Number.isFinite(to) && at > to) return false;
+      if (filter.actorId !== undefined && entry.actorId !== filter.actorId) return false;
+      if (filter.op !== undefined && entry.op !== filter.op) return false;
+      return true;
+    });
+  }
+
+  /**
+   * 书写时长。
+   *
+   * `trusted` 为 false 时这个数字只能自己看：它来自逻辑时钟（或混用过），
+   * 本质是"操作序号 × 1 秒"，不是医生真花的时间（G9：无可信时间戳）。
+   */
+  timing(): WritingTiming {
+    return this.timingAcc.snapshot();
   }
 
   getNode(id: NodeId): DocNode | null {
@@ -1316,21 +1437,40 @@ export class WriteSession {
     return this.confirmNodes({ nodeIds: ids }, actor, options);
   }
 
-  async sign(params: { acknowledgeUnconfirmed?: boolean } = {}, actor: Actor, options: WriteOptions = {}): Promise<WriteResult> {
-    this.assertHuman(actor, '签章');
-    const acknowledge = params.acknowledgeUnconfirmed === true;
-
+  /**
+   * 签章的共用路径：`sign`（自书自签）与 `review(approve)`（审核通过即签章）都走这里。
+   *
+   * 两条路刻意共用且只共用这一处 —— "签下去的东西是什么、覆盖到哪、留痕记什么"
+   * 一旦有两份实现，迟早会出现"审核通过签的"和"自己签的"行为不一样。
+   * 差别只有签名角色：作者签 `author`，审核人签 `reviewer`。
+   */
+  private async performSign(params: {
+    op: 'sign' | 'review';
+    actor: Actor;
+    options: WriteOptions;
+    acknowledge: boolean;
+    note?: string;
+  }): Promise<WriteResult> {
+    const { op, actor, options, acknowledge, note } = params;
     const gate = this.assessSignGate(acknowledge);
 
-    const at = this.tick();
+    /* 签章要在提交前算签名值，所以时刻得在这里就定下来（与提交内是同一个锚点）。
+       不注入墙钟时这里照旧走逻辑时钟 —— 与改动前的时序完全一致。 */
+    const at = this.resolveAt(options.at);
     const machineReadable = this.machineReadableAt(at);
     const signatureRef = `sig_${this.doc.docId}_${this.doc.revisions.length + 1}`;
-    const meta = { signatureRef, documentId: this.doc.docId, signerRole: 'author' as const, signerId: actor.id, signedAt: at };
+    const meta = {
+      signatureRef,
+      documentId: this.doc.docId,
+      signerRole: (op === 'review' ? 'reviewer' : 'author') as 'author' | 'reviewer',
+      signerId: actor.id,
+      signedAt: at,
+    };
 
     const signature = await signTargets(this.signatureTargetsWith(machineReadable), meta, this.signer);
 
     return this.commit({
-      op: 'sign',
+      op,
       actor,
       options,
       targets: [],
@@ -1350,7 +1490,7 @@ export class WriteSession {
         this.doc.signatureRefs = [
           {
             signatureRef,
-            signerRole: 'author',
+            signerRole: meta.signerRole,
             signerId: actor.id,
             signedAt: at,
             covers: [...DOCUMENT_COVERS],
@@ -1365,16 +1505,144 @@ export class WriteSession {
         ];
         /* 声明放行时把"未逐条确认的清单"写进留痕 —— 这是分级放行的代价记录。
            没有它，分级就退化成静默放行，那才是真正危险的做法  */
-        return {
-          targetId: this.doc.rootId,
-          ...(gate.acknowledgedUnconfirmed ? { extra: { acknowledgedUnconfirmed: gate.acknowledgedUnconfirmed } } : {}),
+        const extra = {
+          ...(op === 'review' ? { review: { decision: 'approve' as const, ...(note ? { note } : {}) } } : {}),
+          ...(gate.acknowledgedUnconfirmed ? { acknowledgedUnconfirmed: gate.acknowledgedUnconfirmed } : {}),
         };
+        return { targetId: this.doc.rootId, ...(Object.keys(extra).length > 0 ? { extra } : {}) };
+      },
+    });
+  }
+
+  /**
+   * 自书自签（单人场景：门诊病历医生自己写完自己签）。
+   * 有审核环节的走 `submitForReview` → `review(approve)`，那条链上的签名人是审核人。
+   */
+  async sign(params: { acknowledgeUnconfirmed?: boolean } = {}, actor: Actor, options: WriteOptions = {}): Promise<WriteResult> {
+    this.assertHuman(actor, '签章');
+    return this.performSign({ op: 'sign', actor, options, acknowledge: params.acknowledgeUnconfirmed === true });
+  }
+
+  /**
+   * 提交审核（`draft → reviewing`）。
+   *
+   * 提交之后内容即冻结（`E_REVIEWING_IMMUTABLE`）：审核人在看 A 版的同时作者改成 B 版，
+   * 审的东西和签的东西就不是一份。这是"审核"这件事成立的前提，不是附加的约束。
+   */
+  submitForReview(params: { note?: string } = {}, actor: Actor, options: WriteOptions = {}): WriteResult {
+    this.assertHuman(actor, '提交审核');
+    /* 门禁先过（"这一态允许哪些动作"只有一处判），再判本动作自己的前提 */
+    this.assertMutable('submit');
+    const content = Object.values(this.doc.nodes).filter((node) => node.type === 'text' || node.type === 'field');
+    if (content.length === 0) {
+      throw new WriteError(WRITE_ERRORS.E_SUBMIT_EMPTY, '空文档不能提交审核：一份没写内容的病历不值得占用一次审核');
+    }
+    return this.commit({
+      op: 'submit',
+      actor,
+      options,
+      targets: [],
+      mutate: () => {
+        this.doc.status = 'reviewing';
+        return { targetId: this.doc.rootId, extra: { review: { decision: 'submit' as const, ...(params.note ? { note: params.note } : {}) } } };
+      },
+    });
+  }
+
+  /**
+   * 审核裁决（`reviewing → signed` 通过 / `reviewing → draft` 退回）。
+   *
+   * 通过即签章（走 `performSign`，签名角色 `reviewer`）：
+   * "审核通过"如果只是改个状态字段，文档就会变成"状态是已签章、却没有签名"，
+   * 那时验签答不出、审计也说不清是谁签的 —— 状态与签名必须一起落地。
+   */
+  async review(
+    params: { decision: 'approve' | 'reject'; note?: string; acknowledgeUnconfirmed?: boolean },
+    actor: Actor,
+    options: WriteOptions = {},
+  ): Promise<WriteResult> {
+    this.assertHuman(actor, '审核');
+    this.assertMutable('review');
+    const { decision } = params;
+    if (decision !== 'approve' && decision !== 'reject') {
+      throw new WriteError(WRITE_ERRORS.E_DOC_STATUS, `审核结论只能是 approve 或 reject，收到：${String(decision)}`);
+    }
+    if (this.doc.status !== 'reviewing') {
+      throw new WriteError(WRITE_ERRORS.E_DOC_STATUS, `当前状态是 ${this.doc.status}，不在审核中：请先把文档提交审核`);
+    }
+    if (decision === 'approve') {
+      return this.performSign({
+        op: 'review',
+        actor,
+        options,
+        acknowledge: params.acknowledgeUnconfirmed === true,
+        ...(params.note ? { note: params.note } : {}),
+      });
+    }
+    const note = (params.note ?? '').trim();
+    if (note === '') {
+      throw new WriteError(
+        WRITE_ERRORS.E_REVIEW_NOTE_REQUIRED,
+        '退回必须给出理由（会写入留痕）：不给理由的退回，医生拿到的只有"被打回了"，改什么全靠猜',
+      );
+    }
+    return this.commit({
+      op: 'review',
+      actor,
+      options,
+      targets: [],
+      mutate: () => {
+        this.doc.status = 'draft';
+        return { targetId: this.doc.rootId, extra: { review: { decision: 'reject' as const, note } } };
+      },
+    });
+  }
+
+  /** 作废（终态）：草稿或审核中的文书可以作废，理由是必填项 */
+  voidDoc(params: { reason: string }, actor: Actor, options: WriteOptions = {}): WriteResult {
+    this.assertHuman(actor, '作废');
+    /* 先过状态门禁：已签章 / 已归档的文书要先解锁再作废，出路由门禁那条消息指；
+       作废本身不另开一条"从 signed 直接作废"的通道 —— 那等于绕过一次已生效的签章。 */
+    this.assertMutable('void');
+    const reason = (params.reason ?? '').trim();
+    if (reason === '') {
+      throw new WriteError(WRITE_ERRORS.E_VOID_REASON_REQUIRED, '作废必须给出理由（会写入留痕）：不给理由的作废等于病历凭空消失');
+    }
+    return this.commit({
+      op: 'void',
+      actor,
+      options,
+      targets: [],
+      mutate: () => {
+        this.doc.status = 'void';
+        return { targetId: this.doc.rootId, extra: { voided: { reason } } };
+      },
+    });
+  }
+
+  /** 归档（终态）：只有已签章的文书能归档 —— 归档不改内容，因此不破坏签名 */
+  archiveDoc(params: { note?: string } = {}, actor: Actor, options: WriteOptions = {}): WriteResult {
+    this.assertHuman(actor, '归档');
+    this.assertMutable('archive');
+    if (this.doc.status !== 'signed') {
+      throw new WriteError(WRITE_ERRORS.E_DOC_STATUS, `当前状态是 ${this.doc.status}：只有已签章的文书能归档`);
+    }
+    return this.commit({
+      op: 'archive',
+      actor,
+      options,
+      targets: [],
+      mutate: () => {
+        this.doc.status = 'archived';
+        return { targetId: this.doc.rootId };
       },
     });
   }
 
   unlock(params: { reason: string }, actor: Actor, options: WriteOptions = {}): WriteResult {
     this.assertHuman(actor, '解锁已签章文档');
+    /* 终态（作废/归档）的出路由状态门禁统一回答，不在这里另说一套 */
+    this.assertMutable('unlock');
     const reason = (params.reason ?? '').trim();
     if (reason === '') {
       throw new WriteError(
@@ -1441,6 +1709,73 @@ export class WriteSession {
         }
         if (sidecars) this.restoreSidecars(sidecars);
         return { targetId: this.doc.rootId, extra: { revert: { revertedRev, revertedOp } } };
+      },
+    });
+  }
+
+  /**
+   * 回到历史版本：把文档内容回到第 `rev` 条留痕**之后**的样子。
+   *
+   * 与 `undoLast`（撤销最近一次）是两件事：那个撤回一条，这个跨过一整段。
+   * 而且**回滚本身也是一条留痕**（op=revert，载荷 `revertedTo` 记着被跨过哪些 rev）——
+   * 病历里没有"悄悄回到过去"这回事：谁在什么时刻把文档退回到哪一版，必须答得出来。
+   *
+   * 回滚的办法是把跨过的那些留痕**反放一遍**：每条留痕都带着改前的值（`oldValue`），
+   * 所以并不需要额外保存历史快照 —— 而"这条留痕能不能反放"因此成为唯一的限制：
+   * 反不了就整体失败（`E_REVERT_IMPOSSIBLE`），绝不反到一半。半途回滚造出的
+   * 是一份从未存在过的病历，比不回滚糟得多。
+   *
+   * 状态迁移类留痕（提交审核 / 裁决 / 作废 / 归档 / 签章 / 解锁）不参与回滚：
+   * 它们改的是文档那一态，不是内容。要改状态有各自的动作，回滚只管内容。
+   */
+  revertTo(params: { rev: number }, actor: Actor, options: WriteOptions = {}): WriteResult {
+    this.assertHuman(actor, '回到历史版本');
+    /* 状态门禁：只有草稿能回到历史版本（已签章的要先解锁 —— 解锁本身就留了痕） */
+    this.assertMutable('revert');
+    const entries = this.doc.revisions;
+    const toRev = params.rev;
+    if (!Number.isInteger(toRev) || toRev < 1 || toRev >= entries.length) {
+      throw new WriteError(
+        WRITE_ERRORS.E_REVERT_TARGET,
+        `回到历史版本的目标必须是已有的留痕、且不能是最新的那条（可选 rev 1~${Math.max(0, entries.length - 1)}），收到 rev=${String(toRev)}`,
+      );
+    }
+
+    /** 被跨过的那些留痕：patch 要从最新往回反放（顺序反了，嵌套的父子节点会先删父再删子），
+        但记进留痕的清单按 rev 升序 —— 那是给人读的（"这次回滚动了哪些"，从早到晚看才顺）。 */
+    const revertedRevs = entries.slice(toRev).map((entry) => entry.rev);
+    const crossed = entries.slice(toRev).reverse();
+    const touched = new Set<NodeId>();
+    const inverse: PatchOp[] = [];
+    for (const entry of crossed) {
+      /* 状态迁移类留痕没有 patch：它们改的不是内容 */
+      if (!entry.patch || entry.patch.length === 0) continue;
+      for (const id of patchNodeIds(entry.patch)) touched.add(id);
+      /* 每条留痕内部也要逆序：正向 patch 是按路径升序排过的（父在子前），
+         反放就得反过来（子在父前）。 */
+      const descending = [...entry.patch].sort((left, right) => (left.path > right.path ? -1 : left.path < right.path ? 1 : 0));
+      inverse.push(...descending.map(inverseOf));
+    }
+
+    /* 先在副本上试算，整条链都反得回去才真改 —— 不做"反到一半" */
+    let nodes: Record<NodeId, DocNode>;
+    try {
+      nodes = applyPatch({ nodes: structuredClone(this.doc.nodes) } as { nodes: Record<NodeId, DocNode> }, inverse).nodes;
+    } catch (err) {
+      throw new WriteError(
+        WRITE_ERRORS.E_REVERT_IMPOSSIBLE,
+        `回到 rev ${toRev} 做不到（${(err as Error).message}）：文档未被改动，也没有留下这次回滚的痕迹`,
+      );
+    }
+
+    return this.commit({
+      op: 'revert',
+      actor,
+      options,
+      targets: [...touched],
+      mutate: () => {
+        this.doc.nodes = nodes;
+        return { targetId: this.doc.rootId, extra: { revertedTo: { toRev, revertedRevs } } };
       },
     });
   }
@@ -1820,12 +2155,13 @@ export class WriteSession {
     if (options.expectedRev !== undefined && options.expectedRev !== this.docRev) {
       throw new WriteError(WRITE_ERRORS.E_REV_CONFLICT, `乐观锁冲突：期望 rev=${options.expectedRev}，当前 rev=${this.docRev}`);
     }
-    if ((this.doc.status === 'signed' || this.doc.status === 'archived') && op !== 'unlock') {
-      throw new WriteError(
-        WRITE_ERRORS.E_SIGNED_IMMUTABLE,
-        `文档已 ${this.doc.status}：须先「解锁」（会留痕并作废原签章）再修改，改完重新签章`,
-      );
-    }
+    this.assertMutable(op);
+
+    /* 时间锚点必须在 `mutate()` 之前定下来：mutate 内部要给节点写 provenance、
+       给建议本/批注落时间，它们都读同一个锚点 —— 一次提交 = 一个时刻。 */
+    const at = this.resolveAt(options.at);
+    this.pendingAt = at;
+    this.pendingWallClock = options.at !== undefined || this.clockSource === 'wall';
 
     /* 快照：始终只快照受影响节点（索引同步与 patch 都依赖它）；
        full 策略额外快照整张节点表，仅用于等价性验证。 */
@@ -1907,7 +2243,6 @@ export class WriteSession {
         : this.localPatch(snapshots, result),
     );
 
-    const at = this.tick();
     this.doc.updatedAt = at;
     const revision: RevisionEntry = {
       rev: this.doc.revisions.length + 1,
@@ -1919,6 +2254,10 @@ export class WriteSession {
       ...(result.extra ?? {}),
     };
     this.doc.revisions = [...this.doc.revisions, revision];
+
+    this.timingAcc.record(op, actor.kind, at, this.pendingWallClock);
+    this.pendingAt = null;
+    this.pendingWallClock = false;
 
     this.syncIndex(snapshots, result);
 
@@ -1979,6 +2318,40 @@ export class WriteSession {
     }
   }
 
+  /**
+   * 状态门禁：哪些动作在这一态下能做。
+   *
+   * 顺序不是随意的 —— 终态（void）先判，再看审核中，最后才是"已签章"：
+   * 审核中的文档还没签章，"必须先解锁才能改"这条提示对它根本不成立，
+   * 真正该说的是"审核中不能改，要改先退回"。
+   */
+  private assertMutable(op: RevisionOp): void {
+    const status = this.doc.status;
+    if (status === 'void') {
+      throw new WriteError(
+        WRITE_ERRORS.E_DOC_VOID,
+        '文档已作废：作废是终态，任何修改都不被接受（需重新书写请新建一份）',
+      );
+    }
+    if (status === 'reviewing' && op !== 'review' && op !== 'void') {
+      throw new WriteError(
+        WRITE_ERRORS.E_REVIEWING_IMMUTABLE,
+        `文档正在审核中（reviewing）：改内容会让"审核人看的"与"最终签的"不是同一份；要修改请先由审核人退回`,
+      );
+    }
+    /* 归档是终态：只有解锁这一条路能开这扇门，而 `unlock` 自己还会再拒一次归档件 */
+    if (status === 'archived' && op !== 'unlock') {
+      throw new WriteError(WRITE_ERRORS.E_SIGNED_IMMUTABLE, '文档已归档：归档是终态，需修改请先解锁再签章');
+    }
+    /* 已签章：可解锁重来，也可归档（归档不改内容，不破坏签名） */
+    if (status === 'signed' && op !== 'unlock' && op !== 'archive') {
+      throw new WriteError(
+        WRITE_ERRORS.E_SIGNED_IMMUTABLE,
+        '文档已签章：须先「解锁」（会留痕并作废原签章）再修改，改完重新签章',
+      );
+    }
+  }
+
   private requireNode(id: NodeId): DocNode {
     const node = this.doc.nodes[id];
     if (!node) throw new WriteError(WRITE_ERRORS.E_NODE_NOT_FOUND, `节点不存在：${id}`);
@@ -1991,10 +2364,54 @@ export class WriteSession {
     }
   }
 
-  /** 逻辑时钟：确定性、单调递增，便于回放与 diff 比对 */
+  /**
+   * 本次提交的时刻。
+   *
+   * 默认走逻辑时钟（+1000ms，确定性、便于回放与 diff 比对）；
+   * 若这次提交注入了墙钟（`WriteOptions.at`），所有落时间的地方都返回那个值 ——
+   * 一次提交只应有一个时刻，否则留痕与内容时间会各说各话。
+   */
   private tick(): string {
+    if (this.pendingAt !== null) return this.pendingAt;
     this.clock += 1000;
     return new Date(this.clock).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  }
+
+  /**
+   * 墙钟：`SessionOptions.clock === 'wall'` 且不逐笔注入 `at` 时走这里。
+   *
+   * `Math.max` 那一下不是多余的：文档可能带着一个"未来"的 `updatedAt`
+   * （例如导入的文书、或服务器时间往前跳了一下），此时硬取 `Date.now()` 会让留痕倒流。
+   */
+  private nowIso(): ISODateTime {
+    const now = Math.max(Date.now(), this.clock);
+    this.clock = now;
+    return new Date(now).toISOString();
+  }
+
+  /** 定本次提交的时间锚点：注入值要先过形状与单调两道门，逻辑时钟则照旧递增 */
+  private resolveAt(injected?: ISODateTime): ISODateTime {
+    if (injected === undefined) {
+      return this.clockSource === 'wall' ? this.nowIso() : this.tick();
+    }
+    if (typeof injected !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(injected)) {
+      throw new WriteError(
+        WRITE_ERRORS.E_TIME_INVALID,
+        `at 必须是 UTC ISO 时刻（形如 2026-10-18T09:30:00Z），收到：${JSON.stringify(injected)}`,
+      );
+    }
+    const parsed = Date.parse(injected);
+    if (!Number.isFinite(parsed)) {
+      throw new WriteError(WRITE_ERRORS.E_TIME_INVALID, `at 无法解析：${JSON.stringify(injected)}`);
+    }
+    if (parsed < this.clock) {
+      throw new WriteError(
+        WRITE_ERRORS.E_TIME_REGRESS,
+        `at 早于上一次提交（${new Date(this.clock).toISOString()}）：留痕必须单调，收到 ${injected}`,
+      );
+    }
+    this.clock = parsed;
+    return injected;
   }
 
   private provenanceFor(actor: Actor): Provenance {
@@ -2043,6 +2460,36 @@ function encodePointer(segment: string): string {
 
 function normalizePatchOrder(ops: PatchOp[]): PatchOp[] {
   return [...ops].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
+/** 取 path 里第一段（即节点 id）：留痕里所有 patch 路径都以 `/nodes/<id>` 开头 */
+function patchNodeIds(patch: readonly PatchOp[]): NodeId[] {
+  const ids: NodeId[] = [];
+  for (const item of patch) {
+    const matched = /^\/nodes\/([^/]+)/.exec(item.path);
+    if (matched) ids.push(matched[1] as NodeId);
+  }
+  return ids;
+}
+
+/**
+ * 一条 patch 的反操作 —— 回滚与撤销都靠它。
+ *
+ * 成立的前提是"每条留痕都带着改前的值"（`localPatch` / `full` 策略都写 `oldValue`）；
+ * 这也是为什么"不写 oldValue 的 diff"在这里等于"永久不可回滚"。
+ * 反操作自己同样带 `oldValue`（等于正向的新值），于是回滚这条留痕本身也能被再回滚回去。
+ */
+export function inverseOf(op: PatchOp): PatchOp {
+  if (op.op === 'add') return { op: 'remove', path: op.path, ...(op.value !== undefined ? { oldValue: op.value } : {}) };
+  if (op.op === 'remove') {
+    return op.oldValue === undefined ? { op: 'add', path: op.path, value: null } : { op: 'add', path: op.path, value: op.oldValue };
+  }
+  return {
+    op: 'replace',
+    path: op.path,
+    value: op.oldValue ?? null,
+    ...(op.value !== undefined ? { oldValue: op.value } : {}),
+  };
 }
 
 /** 把 { id: node } 形式的 diff 路径加上 /nodes 前缀 */

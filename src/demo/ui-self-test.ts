@@ -68,6 +68,9 @@ const FLOW_VIEW_JS = join(ROOT, 'src', 'demo', 'flow-view.js');
 /** 自定义弹框（确认 / 提示 / 一句话）：医生端与管理后台共用的一份经典脚本。
  *  它不在 `frontend` 整体里（那会牵动一批结构断言），涉及它的检查单独读这个文件。  */
 const DIALOG_JS = join(ROOT, 'src', 'demo', 'dialog.js');
+/** 宿主接入桥（被嵌进医生工作站时的那一层）：同样是独立脚本 + 独立静态路由，
+ *  涉及它的检查也单独读这个文件（它不在 `script` 整体里，那会牵动一批结构断言）。  */
+const HOST_BRIDGE_JS = join(ROOT, 'src', 'demo', 'host-bridge.js');
 const SERVER_TS = join(ROOT, 'src', 'demo', 'demo-server.ts');
 const PORT = Number(process.env.L0_UI_SELFTEST_PORT ?? 8799);
 /** 主实例的基地址（`loginAt` / `provisionAccounts` 要按地址打不同实例） */
@@ -1116,6 +1119,44 @@ async function main(): Promise<void> {
     }
   });
 
+  /* 宿主接入（被嵌进医生工作站）单独占一条。
+     它是"独立脚本 + 独立静态路由 + ui.js 侧调用点"三处配合，而三处缺任何一处都不报错：
+     表现只是"宿主注入没生效"，与"宿主根本没发 init"在界面上分不开。
+     另有一条边界必须钉住：桥是**通道**，不是内核 —— 它一旦带上写语义，
+     就等于给同一份病历开了第二套写路径。 */
+  await test('A1e 宿主接入：桥脚本被引用且在 ui.js 之前、服务端提供、可解析、且绝不碰写语义', () => {
+    const file = HOST_BRIDGE_JS;
+    assert(existsSync(file), '应有 src/demo/host-bridge.js（嵌入医生工作站时的接入层）');
+    const source = existsSync(file) ? readFileSync(file, 'utf8') : '';
+    const bridgeTag = html.indexOf('src="/host-bridge.js"');
+    const uiTag = html.indexOf('src="/ui.js"');
+    assert(bridgeTag > 0, 'ui.html 应引用 /host-bridge.js');
+    assert(uiTag > bridgeTag, '/host-bridge.js 必须在 /ui.js 之前加载（它决定启动要不要先等宿主 init）');
+    assert(/path === '\/host-bridge\.js'/.test(serverSource), '服务端应提供 /host-bridge.js（no-store）');
+    assert(/window\.L0Host\s*=/.test(source), '桥要把自己挂到 window.L0Host（ui.js 靠它广播与注册能力）');
+    assert(/L0Host/.test(script), 'ui.js 要真的用它，否则引了也是死代码');
+    /* 独立运行时不得依赖它：没有 ?host=1 时页面照常启动。
+       "嵌不进去"不该变成"打不开" —— 这是注入缺失时行为不变的落点。 */
+    assert(/if \(window\.L0Host\) await window\.L0Host\.whenReady\(\)/.test(script), '启动链必须先判空再等宿主');
+    assert(/hostEmit\('ready'/.test(script), '启动完成要广播 ready（宿主据此收掉自己的加载态）');
+    assert(/registerHostApi\(\);/.test(script), '宿主能力要在启动路径上注册（否则宿主调用一律"不支持"）');
+    /* 宿主切换患者 / 卸载面板前要问"能不能走"：不先落盘就走，医生正在打的那句
+       会丢在失焦 250ms 的防抖里，而界面上不会留下任何痕迹说它丢过。 */
+    assert(/async function canLeave\(\)/.test(script), '要有"能不能离开"的判定（宿主切换患者前问的就是它）');
+    assert(/const last = await flushEdits\(\);/.test(script), 'canLeave 必须先落盘再回答（否则编辑丢在防抖里）');
+    try {
+      new Function(source);
+    } catch (err) {
+      assert(false, `host-bridge.js 存在语法错误：${(err as Error).message}`);
+    }
+    /* 桥里出现任何写路径都意味着宿主侧在替内核落笔 —— 留痕、门控与签章会随之被旁路 */
+    assertEqual(
+      ['/api/edit', '/api/confirm', '/api/sign', '/api/accept', '/api/export'].filter((path) => source.includes(path)),
+      [],
+      '桥里不得出现任何写路径（它只做传输，不落笔）',
+    );
+  });
+
   /* 逐句审阅只有"取舍 → 组合文本 → 带 editedText 落笔"这一条链。
      三条断任何一条，界面都会变成"勾了半天、落笔的还是 AI 原文"—— 而这不会报错，
      只会让修改率偏低，看起来像模型变好了。 */
@@ -1174,7 +1215,7 @@ async function main(): Promise<void> {
     for (const match of script.matchAll(/\/api\/[a-z0-9/-]+/g)) paths.add(match[0]);
     assert(paths.size >= 9, `扫描到的接口过少（${paths.size}）`);
     /* GET 分支不走 switch，故需在白名单里列明 */
-    const passthrough = new Set(['/api/state', '/api/download', '/api/download-wst500', '/api/qc-content-contract']);
+    const passthrough = new Set(['/api/state', '/api/download', '/api/download-wst500', '/api/qc-content-contract', '/api/dictation/capture/records']);
     const missing = [...paths].filter((path) => !passthrough.has(path) && !serverSource.includes(`case '${path}'`));
     assertEqual(missing, [], 'UI 调用了服务端不存在的接口');
   });
@@ -1574,9 +1615,14 @@ async function main(): Promise<void> {
     assert(!/\.tree\s*\{[^}]*overflow/.test(css), '树不应内部滚动');
     assert(!/\.doc\s*\{[^}]*max-height/.test(css), '正文不应限高');
     /* cssNoComments 已在模块顶部统一生成（对 ui.css 剥掉注释）。
-       唯一例外是 `max-height: none`，它解除浏览器对 top-layer dialog 的默认上限，
-       与"限高逼出滚动条/截断内容"方向相反；其余任何带长度的 max-height 仍然禁止。 */
-    const limiting = (cssNoComments.match(/max-height\s*:[^;]+/g) || []).filter((decl) => !/max-height\s*:\s*none\b/.test(decl));
+       两处豁免：
+         · `max-height: none` 解除浏览器对 top-layer dialog 的默认上限，与"限高逼出滚动条 / 截断内容"方向相反；
+         · img 规则里的限高是**缩放**（与被允许的 `max-width: 100%` 同用途）：它裁的是图片、不裁文字，
+           也不会在面板里逼出滚动条，正是 `max-width: 100%` 在纵向的那个对等物。
+           若把它一并禁掉，唯一的合法写法就变成任由大图把版面撑破。
+       其余任何带长度的 max-height 仍然禁止。 */
+    const cssNoImg = cssNoComments.replace(/[^{}]*img[^{}]*\{[^}]*\}/g, '');
+    const limiting = (cssNoImg.match(/max-height\s*:[^;]+/g) || []).filter((decl) => !/max-height\s*:\s*none\b/.test(decl));
     assertEqual(limiting, [], `除抽屉的 max-height:none（解除 UA 上限）外不应出现任何限高声明（限高会逼出滚动条/截断内容），实际：${limiting.join(' | ')}`);
     assert(!/text-overflow: ellipsis/.test(css), '不应以省略号截断文本（导航项也要显示全）');
     assert(/autosizeAll/.test(script) && /scrollHeight/.test(script), '编辑框应随内容自增高度，不能在框内滚动');
@@ -3030,7 +3076,9 @@ async function main(): Promise<void> {
     assertEqual(generated.ok, true, `生成应成功（${generated.code ?? ''} ${generated.message ?? ''}）`);
     const audit = generated.state!.lastAudit!;
     assert(!!audit, 'state 应记录最近一次审计报告摘要');
-    assertEqual(audit.total, 7, '应有 7 项机器可判定检查');
+    /* 8 项：原有 7 项 + 书写时长可信性（WRITING_DURATION_TRUSTED）。
+       数字写死是为了让"新增检查项"这件事被看见 —— 加了检查却没人改这条断言，等于白加。 */
+    assertEqual(audit.total, 8, '应有 8 项机器可判定检查');
     assertEqual(audit.passed + audit.failed.length, audit.total, '通过数 + 失败数应等于总数');
     assertEqual(String(audit.reportDigest).length, 64, '报告应带 64 位指纹');
     assert(existsSync(audit.jsonPath), `JSON 应落盘：${audit.jsonPath}`);
@@ -3100,6 +3148,108 @@ async function main(): Promise<void> {
 
     const sign = await post('/api/sign', {});
     assertEqual(sign.ok, true, `确认后应可签章：${sign.code ?? ''} ${sign.message ?? ''}`);
+  });
+
+  await test('B76 审签状态机（HTTP 全链路）：送审 → 退回 → 改 → 通过，审签流进审计报告', async () => {
+    /* 与 B17 同一条纪律：状态是终态/半终态的动作会改到共享的演示文书，
+       用例结束必须把当前文书切回去，否则后面的用例会莫名撞上"审核中不可改"。 */
+    const before = await state();
+    const activeOnEntry = before.doc.docId;
+    const docs = before.tree.flatMap((patient) => patient.visits).flatMap((visit) => visit.docs);
+    const target = docs.find((doc) => doc.status === 'draft' && doc.docId !== activeOnEntry);
+    assert(!!target, '前置：演示数据里应另有一份草稿文书');
+    assertEqual((await post('/api/open', { docId: target!.docId })).ok, true, '切到那份草稿文书');
+
+    /* 按章节逐条确认（送审前把内容先逐条过一遍） */
+    const clearUnconfirmed = async (): Promise<void> => {
+      const snapshot = await state();
+      const active = snapshot.tree.flatMap((p) => p.visits).flatMap((v) => v.docs).find((doc) => doc.active);
+      for (const section of (active?.sections ?? []).filter((item) => item.hasUnconfirmed)) {
+        await post('/api/confirm-subtree', { nodeId: section.id });
+      }
+    };
+    await clearUnconfirmed();
+
+    const submitted = await post('/api/submit-review', { note: '请主任审核' });
+    assertEqual(submitted.ok, true, `提交审核应成功：${submitted.code ?? ''} ${submitted.message ?? ''}`);
+    assertEqual((await state()).doc.status, 'reviewing', '提交后应为审核中');
+
+    /* 审核中改内容：界面上按钮会在这时被禁用，这里验的是"即使请求直接打过来也被拒" */
+    const s1 = await state();
+    const textItem = s1.items.find((item) => item.kind === 'text');
+    assert(!!textItem, '前置：应有文本节点');
+    const blocked = await post('/api/edit', { nodeId: textItem!.id, text: `${textItem!.text ?? ''}X` });
+    assertEqual(blocked.ok, false, '审核中不得改内容');
+    assertEqual(blocked.code, 'E_REVIEWING_IMMUTABLE', '错误码应指向"审核中不可改"');
+
+    const noNote = await post('/api/review', { decision: 'reject' });
+    assertEqual(noNote.ok, false, '退回不给理由应被拒');
+    assertEqual(noNote.code, 'E_REVIEW_NOTE_REQUIRED', '错误码应指向"理由必填"');
+
+    const rejected = await post('/api/review', { decision: 'reject', note: '主诉缺持续时间' });
+    assertEqual(rejected.ok, true, `退回应成功：${rejected.code ?? ''} ${rejected.message ?? ''}`);
+    assertEqual((await state()).doc.status, 'draft', '退回后应回到草稿（否则医生改不了）');
+
+    /* 退回的意义就是能改：改完再送审，这次能过 */
+    const s2 = await state();
+    const item2 = s2.items.find((entry) => entry.kind === 'text');
+    const edited = await post('/api/edit', { nodeId: item2!.id, text: `${item2!.text ?? ''}；持续三天` });
+    assertEqual(edited.ok, true, `退回后应可修改：${edited.code ?? ''} ${edited.message ?? ''}`);
+    await clearUnconfirmed();
+    await post('/api/submit-review', {});
+
+    const approved = await post('/api/review', { decision: 'approve' });
+    assertEqual(approved.ok, true, `审核通过应成功：${approved.code ?? ''} ${approved.message ?? ''}`);
+    assertEqual((await state()).doc.status, 'signed', '审核通过 = 已签章（状态与签名一起落地）');
+
+    /* 审计报告里要有「审签流程」这一节：问"这份是怎么签上的"，答案应该在报告里，
+       而不是让人去几百条写入留痕里翻状态迁移 */
+    const reported = await post('/api/audit-report', {});
+    const report = (reported.data as unknown as { report?: { reviewFlow?: Array<{ op: string; decision?: string; note?: string }> } }).report;
+    const flow = report?.reviewFlow ?? [];
+    assertEqual(flow.map((entry) => entry.decision ?? entry.op).join('>'), 'submit>reject>submit>approve', '审签流应还原完整顺序');
+    assertEqual(flow[1]?.note, '主诉缺持续时间', '退回理由要能在报告里读到');
+    const mdPath = String((reported.state as { lastAudit?: { mdPath?: string } } | undefined)?.lastAudit?.mdPath ?? '');
+    assert(mdPath !== '', '审计报告应给出 Markdown 产物路径');
+    assert(readFileSync(mdPath, 'utf8').includes('## 六、审签流程'), 'Markdown 应含审签流程小节');
+
+    assertEqual((await post('/api/open', { docId: activeOnEntry })).ok, true, '用例结束后切回原文书');
+  });
+
+  await test('B77 回到历史版本（HTTP 全链路）：退回旧版要留痕，目标不合法要被拒', async () => {
+    const entry = await state();
+    const activeOnEntry = entry.doc.docId;
+    const docs = entry.tree.flatMap((patient) => patient.visits).flatMap((visit) => visit.docs);
+    const target = docs.find((doc) => doc.status === 'draft' && doc.docId !== activeOnEntry);
+    assert(!!target, '前置：演示数据里应另有一份草稿文书');
+    assertEqual((await post('/api/open', { docId: target!.docId })).ok, true, '切到那份草稿文书');
+
+    const s0 = await state();
+    const textItem = s0.items.find((item) => item.kind === 'text');
+    assert(!!textItem, '前置：应有文本节点');
+    const origin = String(textItem!.text ?? '');
+
+    /* 改一笔，然后把文档退回到"这一笔之前" */
+    const edited = await post('/api/edit', { nodeId: textItem!.id, text: `${origin}·后来加的一句` });
+    assertEqual(edited.ok, true, `改一笔应成功：${edited.code ?? ''} ${edited.message ?? ''}`);
+    const grown = (await state()).items.find((item) => item.id === textItem!.id);
+    assert(String(grown?.text ?? '').includes('后来加的一句'), '前置：这一笔已经写进去');
+
+    const reverted = await post('/api/revert-to', { rev: 1 });
+    assertEqual(reverted.ok, true, `回到第 1 版应成功：${reverted.code ?? ''} ${reverted.message ?? ''}`);
+    const after = (await state()).items.find((item) => item.id === textItem!.id);
+    assertEqual(String(after?.text ?? '').includes('后来加的一句'), false, '回滚之后，后来加的那句应消失');
+    assertEqual((await state()).doc.status, 'draft', '回滚不改文档状态');
+
+    /* 回滚必须留痕：demo 的动作账本里要有这一笔（"回到第 N 版"，而不是一笔看不出目的的改动） */
+    const log = (await state()).log as Array<{ action: string; ok: boolean }>;
+    assert(log[0]?.ok === true && /回到第\s*1\s*版/.test(String(log[0]?.action ?? '')), `回滚要进动作账本：${JSON.stringify(log[0])}`);
+
+    const bad = await post('/api/revert-to', { rev: 9999 });
+    assertEqual(bad.ok, false, '目标版本不存在应被拒');
+    assertEqual(bad.code, 'E_REVERT_TARGET', '错误码应指向"目标不是已有的版本"');
+
+    assertEqual((await post('/api/open', { docId: activeOnEntry })).ok, true, '用例结束后切回原文书');
   });
 
   await test('B20 语音落点确认：未落位不生成建议，医生指定落点后才提交（门控不松）', async () => {
@@ -7246,6 +7396,80 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
     const refused = await post('/api/delete-document', { docId: lastOne[0]!.docId });
     assertEqual(refused.ok, false, '最后一份不能删');
     assertEqual(refused.code, 'E_DOC_LAST_ONE', `错误码应为 E_DOC_LAST_ONE，实际 ${refused.code}`);
+  });
+
+  /* 部署前缀：被医生工作站反向代理时，本实例不再占据域名的根。
+     这一条跑的是"带前缀的实例"，因为前缀这件事**只有真起一个实例才看得见**：
+     静态检查只能证明"代码里提到了前缀"，证明不了页面里的 `/ui.js` 真的变成了 `/emr/ui.js`，
+     也证明不了落在前缀之外时会被拒 —— 而那正是嵌进工作站之后最先撞上的两件事。 */
+  await test('B75 部署前缀：页面 / 静态资源 / 接口都在前缀下，落在前缀之外的请求要明说', async () => {
+    const prefixDir = process.env.L0_UI_SELFTEST_PREFIX_STATE_DIR ?? join(ROOT, 'artifacts', 'state-selftest-prefix');
+    const prefixRuntimeDir = process.env.L0_UI_SELFTEST_PREFIX_RUNTIME_DIR ?? join(ROOT, 'artifacts', 'runtime-selftest-prefix');
+    const prefixPort = Number(process.env.L0_UI_SELFTEST_PREFIX_PORT ?? 8811);
+    const PREFIX = '/emr';
+    const rmRecursive = rmSync as unknown as (path: string, options: { recursive: boolean; force: boolean }) => void;
+    for (const dir of [prefixDir, prefixRuntimeDir]) {
+      if (existsSync(dir)) rmRecursive(dir, { recursive: true, force: true });
+    }
+    writeServerConfig({ targetRuntimeDir: prefixRuntimeDir });
+    const spawned = spawn(process.execPath, ['src/demo/demo-server.ts', '--port', String(prefixPort)], {
+      cwd: ROOT,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        L0_BASE_PATH: PREFIX,
+        L0_RUNTIME_DIR: prefixRuntimeDir,
+        L0_STATE_DIR: prefixDir,
+        L0_ADMIN_AUDIT_FILE: join(prefixDir, 'admin-audit.log'),
+        L0_READING_GRANTS_FILE: join(prefixDir, 'reading-grants.json'),
+        L0_PACK_DIR: join(prefixDir, 'knowledge'),
+      },
+    });
+    spawned.stdout?.on('data', () => {});
+    spawned.stderr?.on('data', () => {});
+    const prefixBase = `http://127.0.0.1:${prefixPort}`;
+    try {
+      const deadline = Date.now() + 30000;
+      let ready = false;
+      while (Date.now() < deadline) {
+        try {
+          const res = await fetch(`${prefixBase}${PREFIX}/api/state`);
+          if (res.ok) { ready = true; break; }
+        } catch {
+          /* 还没起来 */
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      assert(ready, `带前缀的实例启动超时（30s）：${prefixBase}${PREFIX}/api/state`);
+
+      const page = await fetch(`${prefixBase}${PREFIX}/`);
+      assertEqual(page.status, 200, '前缀下应能打开医生端');
+      const body = await page.text();
+      assert(body.includes(`src="${PREFIX}/ui.js"`), '页面里的脚本地址必须带前缀（不带就打到工作站自己的根上）');
+      assert(body.includes(`href="${PREFIX}/ui.css"`), '页面里的样式地址必须带前缀');
+      assert(body.includes(`data-l0-base="${PREFIX}"`), '前缀要交给前端：fetch 的绝对路径不认 <base>，只能显式传');
+
+      const asset = await fetch(`${prefixBase}${PREFIX}/ui.js`);
+      assertEqual(asset.status, 200, '静态资源同样要在前缀下可取（否则页面能开、脚本 404）');
+
+      /* 落在前缀之外：必须明确报出来，而不是变成一条"看起来像路由写错了"的 404 */
+      const outside = await fetch(`${prefixBase}/api/state`);
+      assertEqual(outside.status, 404, '前缀之外的路径不属于本实例');
+      assertEqual((await outside.json() as { code?: string }).code, 'E_OUTSIDE_BASE', '要给出明确错误码');
+
+      /* 跳转也要带前缀：未登录访问后台时，Location 与 next 都不带前缀的话，
+         登录成功后会被送回工作站根上的 /admin */
+      const admin = await fetch(`${prefixBase}${PREFIX}/admin`, { redirect: 'manual' });
+      assertEqual(admin.status, 302, '未登录访问后台应重定向到登录页');
+      const location = String(admin.headers.get('location') ?? '');
+      assert(location.startsWith(`${PREFIX}/login`), `重定向必须带前缀，实际 ${location}`);
+      assert(location.includes(encodeURIComponent(`${PREFIX}/admin`)), 'next 也要带前缀（否则登录后回错地方）');
+    } finally {
+      await killAndWait(spawned);
+      for (const dir of [prefixDir, prefixRuntimeDir]) {
+        if (existsSync(dir)) rmRecursive(dir, { recursive: true, force: true });
+      }
+    }
   });
 
   await stopServer();

@@ -9,17 +9,19 @@
  */
 
 const $ = (id) => document.getElementById(id);
+/* 部署前缀（挂在工作站的某个路径下时由服务端注入在 `<html data-l0-base>` 上） */
+const L0_BASE = (document.documentElement && document.documentElement.dataset.l0Base) || '';
 
 /**
  * 登录成功后去哪：`?next=` 是可以被人手改的。
  *
  * 不校验就等于把这个登录页做成开放重定向的跳板，而它长得就像"我们医院的登录页"，
  * 一条 `/login?next=https://evil.example` 的链接足以用来钓口令。
- * 所以只接受站内路径，其余一律回落到 `/admin`。
+ * 所以只接受站内路径，其余一律回落到 `/admin`（带部署前缀时回落到前缀下的 `/admin`）。
  */
 function safeNext() {
   const raw = new URLSearchParams(location.search).get('next') ?? '';
-  return isSafeNext(raw) ? raw : '/admin';
+  return isSafeNext(raw) ? raw : `${L0_BASE}/admin`;
 }
 
 /** 判据独立成函数（故意不写成内联三元：这条逻辑错一次，就是一个钓鱼入口） */
@@ -59,7 +61,7 @@ async function submitLogin(event) {
   setStatus('登录中…');
   let payload;
   try {
-    const res = await fetch('/api/admin/session', {
+    const res = await fetch(`${L0_BASE}/api/admin/session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
@@ -113,7 +115,7 @@ async function submitBootstrap(event) {
   setStatus('创建中…');
   let payload;
   try {
-    const res = await fetch('/api/admin/bootstrap', {
+    const res = await fetch(`${L0_BASE}/api/admin/bootstrap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -133,7 +135,7 @@ async function submitBootstrap(event) {
      "我记得住它"是这次初始化里唯一没有别的办法验证的一件事，而自动登录恰好把它跳过去了。
      带着账号名跳回登录页，并把这件事说清楚。 */
   const next = safeNext();
-  location.href = `/login?next=${encodeURIComponent(next)}&created=${encodeURIComponent(payload.data ? payload.data.username : username)}`;
+  location.href = `${L0_BASE}/login?next=${encodeURIComponent(next)}&created=${encodeURIComponent(payload.data ? payload.data.username : username)}`;
 }
 
 /* ------------------------------ 绑定 ------------------------------ */

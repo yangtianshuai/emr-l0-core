@@ -16,6 +16,10 @@
 <script src="/flow-view.js" defer></script>
 <!-- 命令面板（Ctrl+K）：纯界面件，候选与动作由 ui.js 注入（见 command-palette.js 的文件头） -->
 <script src="/command-palette.js" defer></script>
+<!-- 宿主接入桥：被嵌进医生工作站时的那一层（`?host=1`）。
+     必须在 ui.js 之前 —— 它决定"启动要不要先等宿主注入"，晚一步就会先按全量画一帧再被摘掉。
+     独立运行时它只是个空监听，页面行为与引入它之前一致。 -->
+<script src="/host-bridge.js" defer></script>
 <script src="/ui.js" defer></script>
 </head>
 <body>
@@ -115,6 +119,17 @@
           </span>
         </h2>
         <div class="muted" id="docNotice" aria-live="polite"></div>
+        <!-- 落盘冲突的出路：入口与"影响什么、不影响什么"放在一起（有后果的操作，不能只给裸按钮）。
+             平时整行隐藏，冲突时由 ui.js 按 S.sidecar.conflict 放开。 -->
+        <div class="row hide" id="sidecarConflictRow">
+          <span class="muted" id="sidecarConflictHint" aria-live="polite"></span>
+          <button class="danger" id="btnReloadSidecars" title="接受盘上那一版：放弃本终端尚未落盘的建议与注解处置，正文 / 留痕 / 签名不受影响">重新载入</button>
+        </div>
+        <!-- 派生值重算入口：只在本文书真有派生值时出现（由 ui.js 按 S.derivedCount 切换）。 -->
+        <div class="row hide" id="derivedRow">
+          <span class="muted" id="derivedHint" aria-live="polite"></span>
+          <button id="btnRecompute" title="按控件公式重算派生值：手改过的不动，缺输入的不编数">重算派生值</button>
+        </div>
         <!-- 段内格式工具：只在流式模式下出现（由 ui.js 按编辑范式切换 hidden）。
              为什么放在可编辑区外面：放进去它就成了"纸面的一部分"，
              会被跨段选中一起选中、也会被光标流穿过 —— 而它是操作，不是内容。 -->

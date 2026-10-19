@@ -333,8 +333,20 @@ export type RevisionOp =
   | 'sign'
   | 'import'
   | 'migrate'
+  /** 解锁（作废原签章回到草稿）：必须单独一个 op，否则"改内容"与"作废签章"在留痕里分不开 */
+  | 'unlock'
+  /** 撤销某一次写入（以新 rev 回滚，不篡改历史；载荷 `revert.revertedRev` 指回被撤销那条） */
+  | 'revert'
   /** 系统取数（LIS/HIS 搬运确定性数据）；不在"编辑即确认"白名单里  */
-  | 'external';
+  | 'external'
+  /** 提交审核（draft → reviewing） */
+  | 'submit'
+  /** 审核裁决（reviewing → signed 通过 / reviewing → draft 退回） */
+  | 'review'
+  /** 作废（draft / reviewing → void，终态） */
+  | 'void'
+  /** 归档（signed → archived，终态） */
+  | 'archive';
 
 export interface RevisionEntry {
   rev: RevisionNo;
@@ -346,10 +358,26 @@ export interface RevisionEntry {
   patch?: Array<{ op: 'add' | 'remove' | 'replace'; path: string; value?: JsonValue }>;
   /** 采纳/拒绝 AI 建议时关联，用于计算修改率 */
   aiSuggestionId?: string;
+  /** 一次采纳多条建议时的清单（与 `aiSuggestionId` 并存：单条是常见形态，多条是批量采纳） */
+  aiSuggestionIds?: string[];
   modelId?: string;
   confidence?: number;
   beforeHash?: string;
   afterHash?: string;
+  /** 本次逐条确认过的节点（"改过即确认"的推定不成立时，显式确认要留得下） */
+  confirmedNodeIds?: NodeId[];
+  /** 签章时"已知但未逐条确认"的清单：不是豁免，是把责任落到签名人身上 */
+  acknowledgedUnconfirmed?: { ai: NodeId[]; imported: NodeId[] };
+  /** 解锁（作废原签章回到草稿）：理由 + 被作废的那枚签章 */
+  unlock?: { reason: string; invalidated: Array<{ publicKeyFingerprint: string; signedAt: ISODateTime }> };
+  /** 撤销某一次写入 */
+  revert?: { revertedRev: RevisionNo; revertedOp: RevisionOp };
+  /** 回到历史版本 */
+  revertedTo?: { toRev: RevisionNo; revertedRevs: RevisionNo[] };
+  /** 审核裁决：结论 + 理由（退回理由必填） */
+  review?: { decision: 'submit' | 'approve' | 'reject'; note?: string };
+  /** 作废理由（必填）："为什么这份没了"只能由留痕回答 */
+  voided?: { reason: string };
 }
 
 export interface SignatureRef {

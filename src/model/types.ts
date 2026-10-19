@@ -340,7 +340,20 @@ export type RevisionOp =
    * 载荷 `RevisionEntry.revert.revertedRev` 指回被撤销的那条留痕，两者靠它关联。
     */
   | 'revert'
-  | 'external';
+  | 'external'
+  /**
+   * 提交审核（`draft → reviewing`）。
+   *
+   * 状态迁移一律单独占一个 op，不并入 `update`：留痕要回答的是"谁让它变到这一态"，
+   * 而 `update` 只能说"有东西被改了"。混在一起，"提交审核"和"改了一个字"在审计里就没区别。
+   */
+  | 'submit'
+  /** 审核裁决（`reviewing → signed` 通过 / `reviewing → draft` 退回） */
+  | 'review'
+  /** 作废（`draft` / `reviewing` → `void`，终态） */
+  | 'void'
+  /** 归档（`signed` → `archived`，终态） */
+  | 'archive';
 
 export interface PatchOp {
   op: 'add' | 'remove' | 'replace';
@@ -379,6 +392,30 @@ export interface RevisionEntry {
   revert?: {
     revertedRev: number;
     revertedOp: RevisionOp;
+  };
+  /**
+   * 回到历史版本（`revertTo`）：把文档内容回到第 `toRev` 条留痕之后的样子。
+   *
+   * 与 `revert`（撤销最近一次）是两件事，账上必须分得清：
+   * 那个撤回一条，这个跨过一整段。`revertedRevs` 是被跨过的那些留痕的序号 ——
+   * "回到过去"本身要留痕，否则事后只看得到结果，看不到被放弃的是哪些内容。
+   */
+  revertedTo?: {
+    toRev: number;
+    revertedRevs: number[];
+  };
+  /**
+   * 审核裁决：结论 + 理由。
+   * 退回的理由必填 —— 没有理由的退回，医生拿到的只是"被打回了"，改什么全靠猜。
+   */
+  review?: {
+    /** `submit` 是提交那一笔：它与裁决共用同一条留痕形状，才答得出"这份是谁在何时送审的" */
+    decision: 'submit' | 'approve' | 'reject';
+    note?: string;
+  };
+  /** 作废理由（必填）：作废是终态动作，"为什么这份没了"只能由留痕回答 */
+  voided?: {
+    reason: string;
   };
 }
 
