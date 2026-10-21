@@ -50,7 +50,7 @@ let session = null;
 let S = {};
 
 const VIEW_META = {
-  config: { title: '能力配置', sub: '这里配置的是部署参数：模型地址、签名服务、授权源、落位策略。' },
+  config: { title: '能力配置', sub: '这里配置的是部署参数：模型接入、语音采集与落位、预问诊、签名服务、授权源。' },
   master: { title: '基础数据', sub: '整个部署共用的主数据：科室字典、文书类型、以及规则里的「判定方式」（只读清单）。模板的「适用科室」、就诊科室的显示、「新建文书」的类型选项、规则库里的判定方式都读它们。' },
   accounts: { title: '账号管理', sub: '谁可以进入后台、以什么角色进入。口令只以哈希保存在数据库，任何位置都不回显。' },
   health: { title: '运行状态', sub: '签名服务与模型探测的留档，以及这台机器上现在有多少东西。' },
@@ -3794,6 +3794,235 @@ function readDocTypeRows() {
   return out;
 }
 
+const CONTENT_KIND_TEXT = { phrase: '常用语', 'content-paragraph': '内容段落' };
+const CONTENT_SCOPE_TEXT = { hospital: '全院', dept: '科室' };
+
+let CONTENT_LIB_SCOPE = 'hospital';
+let CONTENT_LIB_DEPT = '';
+let CONTENT_LIB_ITEMS = [];
+let CONTENT_LIB_LIMIT = 200;
+let CONTENT_LIB_DEPTS = null;
+let CONTENT_LIB_EDITING = '';
+let CONTENT_LIB_OPENER = null;
+
+function setContentLibStatus(text) {
+  markCfgStatus($('contentLibStatus'), text);
+}
+
+function setContentLibDrawerStatus(text) {
+  const box = $('contentLibDrawerBody');
+  const line = box ? box.querySelector('[data-contentlib-drawer-status]') : null;
+  if (line) line.textContent = text;
+}
+
+function contentLibScopeText() {
+  return CONTENT_LIB_SCOPE === 'dept' ? `科室（${CONTENT_LIB_DEPT || '未选'}）` : '全院';
+}
+
+/** 请求里要带的作用域。科室层没选科室时返回 null —— 发出去只会换来一句"要指明科室编码" */
+function contentLibTarget() {
+  if (CONTENT_LIB_SCOPE === 'dept') return CONTENT_LIB_DEPT === '' ? null : { scope: 'dept', deptCode: CONTENT_LIB_DEPT };
+  return { scope: 'hospital' };
+}
+
+async function ensureContentLibDepts() {
+  const select = $('contentLibDept');
+  if (!select) return;
+  if (CONTENT_LIB_DEPTS === null) {
+    const r = await api('/api/departments');
+    const items = r && r.ok && r.data && Array.isArray(r.data.items) ? r.data.items : [];
+    CONTENT_LIB_DEPTS = items.filter((item) => item && item.enabled !== false);
+  }
+  const options = CONTENT_LIB_DEPTS
+    .map((item) => `<option value="${esc(item.code)}">${esc(item.name || item.code)}（${esc(item.code)}）</option>`)
+    .join('');
+  select.innerHTML = options === ''
+    ? '<option value="">（科室字典还是空的）</option>'
+    : options;
+  if (CONTENT_LIB_DEPT === '') CONTENT_LIB_DEPT = CONTENT_LIB_DEPTS.length > 0 ? String(CONTENT_LIB_DEPTS[0].code) : '';
+  select.value = CONTENT_LIB_DEPT;
+}
+
+async function loadContentLibrary() {
+  await ensureContentLibDepts();
+  const target = contentLibTarget();
+  if (!target) {
+    renderContentLibrary({ items: [], source: 'empty', error: null });
+    setContentLibStatus('科室字典是空的：先建一个科室，才谈得上"限本科"');
+    return;
+  }
+  const r = await api('/api/content-library-list', target);
+  if (r && r.ok) {
+    renderContentLibrary(r.data);
+    setContentLibStatus('');
+    return;
+  }
+  renderContentLibrary({ items: [], error: (r && (r.message || r.code)) || '未知原因' });
+  setContentLibStatus(`未能读取内容库：${(r && (r.message || r.code)) || '未知原因'}`);
+}
+
+function renderContentLibrary(data) {
+  const view = data && typeof data === 'object' ? data : { items: [], error: null };
+  const items = Array.isArray(view.items) ? view.items : [];
+  CONTENT_LIB_ITEMS = items;
+  if (Number.isFinite(view.limit)) CONTENT_LIB_LIMIT = Number(view.limit);
+  const count = Number.isFinite(view.count) ? Number(view.count) : items.length;
+
+  const chip = $('contentLibChip');
+  if (chip) {
+    chip.textContent = view.error ? '读不出来' : `${count} / ${CONTENT_LIB_LIMIT} 条`;
+    chip.className = `chip${view.error ? ' danger' : count >= CONTENT_LIB_LIMIT ? ' warn' : count === 0 ? ' warn' : ' ok'}`;
+  }
+  const summary = $('contentLibSummary');
+  if (summary) {
+    summary.innerHTML = chips([
+      ['范围', contentLibScopeText(), ''],
+      ['来源', view.source === 'store' ? '数据库（唯一来源）' : '库里还没有条目', view.source === 'store' ? 'ok' : 'warn'],
+      ['最近改动', view.updatedBy ? `${view.updatedBy} · ${fmtShort(view.updatedAt)}` : '—', 'mono'],
+      ['读库情况', view.error || '正常', view.error ? 'danger' : 'ok'],
+    ]);
+  }
+
+  const body = $('contentLibBody');
+  if (!body) return;
+  if (items.length === 0) {
+    body.innerHTML = view.error ? `<div class="muted">读不出来：${esc(view.error)}</div>` : '';
+    return;
+  }
+  body.innerHTML = `<table class="mini tpl-table">
+      <thead><tr><th>类型</th><th>名称</th><th>触发词</th><th>分组</th><th>落笔</th><th>最近改动</th><th>操作</th></tr></thead>
+      <tbody>${items.map((item) => contentLibRowHtml(item)).join('')}</tbody>
+    </table>`;
+}
+
+function contentLibRowHtml(item) {
+  const id = esc(item.id);
+  const place = item.kind === 'phrase' ? '插进当前这一句' : `${Number(item.paragraphCount) || 0} 段`;
+  return `<tr class="tpl-row">
+      <td>${esc(CONTENT_KIND_TEXT[item.kind] || item.kind)}</td>
+      <td><b>${esc(item.name)}</b>${item.preview ? `<div class="muted">${esc(item.preview)}</div>` : ''}</td>
+      <td class="mono">${item.trigger ? `;${esc(item.trigger)}` : '—'}</td>
+      <td>${esc(item.group || '—')}</td>
+      <td>${esc(place)}</td>
+      <td class="mono">${esc(item.updatedBy || '—')} · ${esc(fmtShort(item.updatedAt))}</td>
+      <td class="tpl-ops">
+        <button class="secondary" data-contentlib-edit="${id}">编辑</button>
+        <button class="danger" data-contentlib-delete="${id}">删除</button>
+      </td>
+    </tr>`;
+}
+
+function setContentLibScope(scope) {
+  CONTENT_LIB_SCOPE = scope === 'dept' ? 'dept' : 'hospital';
+  for (const button of document.querySelectorAll('#contentLibScope [data-contentlib-scope]')) {
+    button.setAttribute('aria-pressed', button.dataset.contentlibScope === CONTENT_LIB_SCOPE ? 'true' : 'false');
+  }
+  const select = $('contentLibDept');
+  if (select) select.hidden = CONTENT_LIB_SCOPE !== 'dept';
+  const hint = $('contentLibScopeHint');
+  if (hint) hint.textContent = CONTENT_LIB_SCOPE === 'dept' ? '只对选中科室的医生可见' : '全院条目对所有科室可见';
+  void loadContentLibrary();
+}
+
+function openContentLibDrawer(title, desc) {
+  const dialog = $('contentLibDrawer');
+  if (!dialog) return;
+  const titleEl = $('contentLibDrawerTitle');
+  const descEl = $('contentLibDrawerDesc');
+  if (titleEl) titleEl.textContent = title;
+  if (descEl) {
+    descEl.textContent = desc || '';
+    descEl.hidden = !desc;
+  }
+  CONTENT_LIB_OPENER = document.activeElement;
+  dialog.showModal();
+  syncTplDrawerScrollLock();
+}
+
+function closeContentLibDrawer() {
+  const dialog = $('contentLibDrawer');
+  if (dialog && dialog.open) dialog.close();
+}
+
+function bindContentLibDrawerOnce() {
+  const dialog = $('contentLibDrawer');
+  if (!dialog) return;
+  dialog.addEventListener('close', () => {
+    const body = $('contentLibDrawerBody');
+    if (body) body.innerHTML = '';
+    CONTENT_LIB_EDITING = '';
+    syncTplDrawerScrollLock();
+    if (CONTENT_LIB_OPENER && typeof CONTENT_LIB_OPENER.focus === 'function') CONTENT_LIB_OPENER.focus();
+    CONTENT_LIB_OPENER = null;
+  });
+  dialog.addEventListener('click', (event) => {
+    if (event.target !== dialog) return;
+    const rect = dialog.getBoundingClientRect();
+    const inBox = event.clientX >= rect.left && event.clientX <= rect.right
+      && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if (!inBox) closeContentLibDrawer();
+  });
+}
+
+function renderContentLibForm(seed) {
+  const box = $('contentLibDrawerBody');
+  if (!box) return;
+  const creating = !seed.id;
+  const kind = seed.kind === 'content-paragraph' ? 'content-paragraph' : 'phrase';
+  box.innerHTML = `
+    <div class="tpl-edit-box">
+      <div class="tpl-field">
+        <span class="tpl-label">名称</span>
+        <input type="text" data-clib-input="name" value="${esc(seed.name || '')}"
+          placeholder="如：腹部查体（正常）" />
+      </div>
+      <div class="tpl-field">
+        <span class="tpl-label">类型</span>
+        <select data-clib-input="kind"${creating ? '' : ' disabled'}>
+          <option value="phrase"${kind === 'phrase' ? ' selected' : ''}>常用语</option>
+          <option value="content-paragraph"${kind === 'content-paragraph' ? ' selected' : ''}>内容段落</option>
+        </select>
+      </div>
+      <div class="tpl-field">
+        <span class="tpl-label">触发词</span>
+        <input type="text" data-clib-input="trigger" value="${esc(seed.trigger || '')}" maxlength="12"
+          placeholder="如 fb" />
+      </div>
+      <div class="tpl-field">
+        <span class="tpl-label">分组</span>
+        <input type="text" data-clib-input="group" value="${esc(seed.group || '')}" placeholder="如 查体 / 医嘱沟通" />
+      </div>
+      <div class="tpl-cell">
+        <span class="tpl-label">内容</span>
+        <textarea data-clib-input="paragraphs" rows="8"
+          placeholder="一行 = 一段">${esc((seed.paragraphs || []).join('\n'))}</textarea>
+      </div>
+      <div class="form-actions">
+        <button class="primary" data-contentlib-submit="${creating ? 'create' : 'update'}">${creating ? '建好' : '保存'}</button>
+        <button class="secondary" data-contentlib-cancel="1">取消</button>
+        <span class="muted cfg-status" data-contentlib-drawer-status aria-live="polite"></span>
+      </div>
+    </div>`;
+}
+
+function readContentLibForm() {
+  const box = $('contentLibDrawerBody');
+  const out = { name: '', kind: 'phrase', trigger: '', group: '', paragraphs: '' };
+  if (!box) return out;
+  for (const input of box.querySelectorAll('[data-clib-input]')) {
+    const key = input.dataset.clibInput;
+    if (key) out[key] = String(input.value || '');
+  }
+  return out;
+}
+
+function contentLibParagraphsOf(raw) {
+  return String(raw || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
 function fmtWhen(iso) {
   const time = new Date(String(iso));
   return Number.isNaN(time.getTime()) ? String(iso ?? '—') : time.toLocaleString('zh-CN', { hour12: false });
@@ -4425,10 +4654,91 @@ document.addEventListener('click', async (event) => {
     if (tab.dataset.cfgTab === 'predicates') renderPredicates();
     if (tab.dataset.cfgTab === 'expressions') renderExprCatalog();
     if (tab.dataset.cfgTab === 'ctrlDefs') renderCtrlCatalog();
+    if (tab.dataset.cfgTab === 'contentLib') void loadContentLibrary();
     if (tab.dataset.cfgTab === 'previsit') renderPrevisitAccessPanel();
     return;
   }
   if (!el) return;
+
+  if (el.dataset && el.dataset.contentlibScope) { setContentLibScope(String(el.dataset.contentlibScope)); return; }
+  if (el.id === 'contentLibRefresh') { await loadContentLibrary(); return; }
+  if (el.id === 'btnCreateContentLib') {
+    if (!(await requireSession())) return;
+    if (!contentLibTarget()) { setContentLibStatus('先在页签上选一个科室：科室层的条目必须知道限哪个科'); return; }
+    CONTENT_LIB_EDITING = '';
+    openContentLibDrawer('新建共享内容');
+    renderContentLibForm({ id: '', kind: 'phrase', name: '', trigger: '', group: '', paragraphs: [] });
+    return;
+  }
+  if (el.dataset && el.dataset.contentlibEdit) {
+    if (!(await requireSession())) return;
+    const itemId = String(el.dataset.contentlibEdit);
+    const item = CONTENT_LIB_ITEMS.find((candidate) => candidate.id === itemId);
+    if (!item) { setContentLibStatus(`清单里找不到「${itemId}」：刷新一次再改`); return; }
+    CONTENT_LIB_EDITING = itemId;
+    openContentLibDrawer(`编辑「${item.name}」`, `${contentLibScopeText()}内容库 · ${CONTENT_KIND_TEXT[item.kind] || item.kind}`);
+    renderContentLibForm({
+      id: itemId,
+      kind: item.kind,
+      name: item.name,
+      trigger: item.trigger || '',
+      group: item.group || '',
+      paragraphs: Array.isArray(item.paragraphs) ? item.paragraphs : [],
+    });
+    return;
+  }
+  if (el.dataset && el.dataset.contentlibSubmit) {
+    if (!(await requireSession())) return;
+    const target = contentLibTarget();
+    if (!target) { setContentLibDrawerStatus('先在页签上选一个科室'); return; }
+    const form = readContentLibForm();
+    const name = form.name.trim();
+    if (name === '') { setContentLibDrawerStatus('请填名称：清单里按它挑'); return; }
+    const paragraphs = contentLibParagraphsOf(form.paragraphs);
+    if (paragraphs.length === 0) { setContentLibDrawerStatus('内容不能是空的'); return; }
+    const isCreate = String(el.dataset.contentlibSubmit) === 'create';
+    const payload = {
+      ...target,
+      name,
+      paragraphs,
+      trigger: form.trigger.trim(),
+      group: form.group.trim(),
+    };
+    const r = isCreate
+      ? await api('/api/content-library-create', { ...payload, kind: form.kind })
+      : await api('/api/content-library-update', { ...payload, itemId: CONTENT_LIB_EDITING });
+    if (r && r.ok) closeContentLibDrawer();
+    else setContentLibDrawerStatus(`保存失败：${(r && (r.message || r.code)) || '未知原因'}`);
+    if (r && r.ok) {
+      await loadContentLibrary();
+      setContentLibStatus(isCreate
+        ? `已新建「${name}」：这一层的医生打开个人模板就能看到它`
+        : `已保存「${name}」：下一份打开的文书就会按新内容带入`);
+    }
+    return;
+  }
+  if (el.dataset && el.dataset.contentlibCancel) { closeContentLibDrawer(); return; }
+  if (el.id === 'contentLibDrawerClose') { closeContentLibDrawer(); return; }
+  if (el.dataset && el.dataset.contentlibDelete) {
+    if (!(await requireSession())) return;
+    const target = contentLibTarget();
+    if (!target) { setContentLibStatus('先在页签上选一个科室'); return; }
+    const itemId = String(el.dataset.contentlibDelete);
+    const item = CONTENT_LIB_ITEMS.find((candidate) => candidate.id === itemId);
+    const label = (item && item.name) || itemId;
+    if (!(await askConfirm(
+      `从「${contentLibScopeText()}」内容库删除「${label}」（${itemId}）？\n\n会影响：这一层的医生打开个人模板就看不到它了。\n不影响：已经写进病历的字一个都不动；病历留痕也不动。\n共享内容库不属于任何包，删除没有撤销，但审计里会记一条。`,
+      { okLabel: '删除', tone: 'danger' },
+    ))) return;
+    const r = await api('/api/content-library-delete', { ...target, itemId });
+    if (r && r.ok) {
+      await loadContentLibrary();
+      setContentLibStatus(`已删除「${label}」`);
+    } else {
+      setContentLibStatus(`未能删除「${label}」：${(r && (r.message || r.code)) || '未知原因'}`);
+    }
+    return;
+  }
 
   if (el.id === 'loginBtn') { await login(); return; }
   if (el.id === 'logoutBtn') { await logout(); return; }
@@ -5622,6 +5932,11 @@ document.addEventListener('click', async (event) => {
 
 document.addEventListener('change', async (event) => {
   const el = event.target;
+  if (el && el.id === 'contentLibDept') {
+    CONTENT_LIB_DEPT = String(el.value || '');
+    await loadContentLibrary();
+    return;
+  }
   if (el && el.dataset && el.dataset.ruleInput === 'conditionId') {
     renderRuleConditionSwitch(String(el.value || ''));
     return;
@@ -5686,6 +6001,7 @@ document.addEventListener('change', async (event) => {
   bindTplDrawerOnce();
   bindRuleDrawerOnce();
   bindConditionDrawerOnce();
+  bindContentLibDrawerOnce();
   const r = await api('/api/admin/session');
   if (r.ok) {
     session = { adminId: r.adminId, actorId: r.actorId, role: r.role, roleLabel: r.roleLabel, env: r.env };

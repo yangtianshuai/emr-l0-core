@@ -1050,6 +1050,11 @@ html.dialog-open { overflow: hidden; }
 .dept-row input[type="text"] { min-width: 170px; }
 .dept-row label.check { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .doc-type-row select { min-width: 110px; }
+/* 共享内容库的作用域切换：两层是并列的两份资产，不是同一条的筛选条件，
+   所以用一组按下态按钮；下拉只承载"哪一层"之后的科室。 */
+.contentlib-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.contentlib-scope button[aria-pressed="true"] { background: rgba(127, 127, 127, .22); }
+.contentlib-scope select { min-width: 160px; }
 .tpl-edit-box {
   display: flex; flex-direction: column; gap: 16px;
   margin: 0 0 10px; padding: 16px 18px;
@@ -1601,6 +1606,42 @@ html.l0-waiting-host body::before {
   font-size: 11px; line-height: 1; padding-top: 3px;
 }
 
+dialog.preview {
+  position: fixed; inset: 0; width: 100vw; max-width: 100vw;
+  height: 100vh; height: 100dvh; max-height: none;
+  margin: 0; padding: 0; border: 0;
+  background: var(--desk, #e8e8ec); color: inherit; overflow: hidden;
+}
+dialog.preview::backdrop { background: rgba(15, 23, 42, .55); }
+.preview-head {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: 10px 18px; background: var(--card); border-bottom: 1px solid var(--line);
+}
+.preview-head h3 { margin: 0; font-size: var(--fs-md); letter-spacing: .2px; }
+.preview-head .sub { font-size: var(--fs-sm); color: var(--muted); font-weight: 400; }
+.preview-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.preview-body { height: calc(100% - 49px); overflow: auto; padding: 18px 0 40px; }
+.preview-pages { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+/* 纸面用 pt 写尺寸：与 @page 同单位，打印时不再经过 px 换算，避免多出空白页 */
+.pv-page {
+  position: relative; flex: none; overflow: hidden;
+  background: #fff; color: #111;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .08), 0 12px 32px rgba(0, 0, 0, .18);
+}
+.pv-line { position: absolute; white-space: pre; line-height: 1.15; color: #111; }
+.pv-furniture { color: #444; }
+.pv-guide { position: absolute; border: 1px dashed rgba(0, 0, 0, .10); pointer-events: none; }
+.pv-image {
+  display: flex; align-items: center; justify-content: center;
+  border: 1px dashed rgba(0, 0, 0, .35); background: rgba(0, 0, 0, .03);
+  font-size: 9pt; color: #555; white-space: normal; text-align: center;
+}
+.pv-watermark {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  transform: rotate(-24deg); font-size: 44pt; letter-spacing: 6pt;
+  color: rgba(0, 0, 0, .08); pointer-events: none; user-select: none;
+}
+
 @media print {
   .topbar, .col.left, .col.right, .tabs, .ftools, .ftools-spacer, dialog, .palette, .toast,
   #keysHelp, .doc-head, .dirty { display: none !important; }
@@ -1617,5 +1658,26 @@ html.l0-waiting-host body::before {
   .node, .fp, .sec { break-inside: avoid; page-break-inside: avoid; }
   .pb-before { break-before: page; page-break-before: always; }
   .pb-before::before { content: none !important; border: 0 !important; }
+
+  /* 从预览打印：只留预览容器，纸面尺寸已按 pt 算好，浏览器不得再重排 */
+  body.printing-preview .topbar, body.printing-preview .col.left, body.printing-preview .col.right,
+  body.printing-preview .tabs, body.printing-preview .ftools, body.printing-preview .doc-wrap,
+  body.printing-preview .findbar, body.printing-preview .reject-banner, body.printing-preview .toast,
+  body.printing-preview dialog.drawer { display: none !important; }
+  body.printing-preview #previewDialog {
+    position: static !important; display: block !important;
+    width: auto !important; height: auto !important; max-width: none !important; max-height: none !important;
+    padding: 0 !important; margin: 0 !important; border: 0 !important;
+    background: #fff !important; box-shadow: none !important; overflow: visible !important;
+  }
+  body.printing-preview .preview-head, body.printing-preview .pv-guide { display: none !important; }
+  body.printing-preview .preview-body { height: auto !important; overflow: visible !important; padding: 0 !important; }
+  body.printing-preview .preview-pages { display: block !important; }
+  body.printing-preview .pv-page {
+    box-shadow: none !important; margin: 0 !important;
+    break-after: page; page-break-after: always;
+  }
+  body.printing-preview .pv-page:last-child { break-after: auto; page-break-after: auto; }
+  body.printing-preview .pv-watermark { color: rgba(0, 0, 0, .10); }
 }
 

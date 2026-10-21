@@ -57,7 +57,7 @@
     <header class="admin-head">
       <div>
         <h1 class="admin-title" id="viewTitle">能力配置</h1>
-        <div class="muted" id="viewSub">这里配置的是部署参数：模型地址、签名服务、授权源、落位策略。</div>
+        <div class="muted" id="viewSub">这里配置的是部署参数：模型接入、语音采集与落位、预问诊、签名服务、授权源。</div>
       </div>
         </header>
 
@@ -70,6 +70,7 @@
       <button class="cfg-tab" role="tab" data-cfg-tab="voice" id="cfgTabVoice" aria-controls="cfgPaneVoice" aria-selected="false">语音</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="previsit" id="cfgTabPrevisit" aria-controls="cfgPanePrevisit" aria-selected="false">预问诊</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="templates" id="cfgTabTemplates" aria-controls="cfgPaneTemplates" aria-selected="false">模板库</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="contentLib" id="cfgTabContentLib" aria-controls="cfgPaneContentLib" aria-selected="false">内容库</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="packs" id="cfgTabPacks" aria-controls="cfgPanePacks" aria-selected="false">规则库</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="qc" id="cfgTabQc" aria-controls="cfgPaneQc" aria-selected="false">质控</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="sign" id="cfgTabSign" aria-controls="cfgPaneSign" aria-selected="false">电子签名</button>
@@ -195,6 +196,24 @@
       <div id="tplPackItems"></div>
     </div>
     <div class="form-actions"><span class="muted" id="tplPackStatus"></span></div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="contentLib" role="tabpanel" id="cfgPaneContentLib" aria-labelledby="cfgTabContentLib">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>共享内容库</b><span class="chip" id="contentLibChip">—</span>
+        <button class="push" id="contentLibRefresh">刷新</button>
+        <button class="primary" id="btnCreateContentLib"
+          title="新建一条共享内容：全院级对所有科室可见，科室级只对选中科室可见">新建</button></div>
+      <div class="chiplines" id="contentLibSummary"></div>
+      <div class="contentlib-scope" id="contentLibScope">
+        <button class="secondary" data-contentlib-scope="hospital" aria-pressed="true">全院</button>
+        <button class="secondary" data-contentlib-scope="dept" aria-pressed="false">科室</button>
+        <select id="contentLibDept" aria-label="科室" hidden></select>
+        <span class="muted" id="contentLibScopeHint">全院条目对所有科室可见</span>
+      </div>
+      <div id="contentLibBody"></div>
+      <div class="form-actions"><span class="muted cfg-status" id="contentLibStatus" aria-live="polite"></span></div>
+    </div>
     </div>
 
     <div class="cfg-pane" data-cfg-pane="packs" role="tabpanel" id="cfgPanePacks" aria-labelledby="cfgTabPacks">
@@ -405,6 +424,7 @@
         <div id="conditionBody"></div>
       </div>
       </div>
+
     </div>
 
     <div class="admin-view" data-admin-view-pane="accounts">
@@ -610,6 +630,17 @@
     <button id="conditionDrawerClose" aria-label="关闭" title="关闭（也可按 Esc 或点左侧阴影；没保存的改动不会留下）">×</button>
   </div>
   <div id="conditionDrawerBody"></div>
+</dialog>
+
+<dialog class="drawer" id="contentLibDrawer" aria-labelledby="contentLibDrawerTitle" aria-describedby="contentLibDrawerDesc">
+  <div class="drawer-head">
+    <div>
+      <h3 id="contentLibDrawerTitle">内容库条目</h3>
+      <div class="muted" id="contentLibDrawerDesc"></div>
+    </div>
+    <button id="contentLibDrawerClose" aria-label="关闭" title="关闭（也可按 Esc 或点左侧阴影；没保存的改动不会留下）">×</button>
+  </div>
+  <div id="contentLibDrawerBody"></div>
 </dialog>
 
 <script src="/dialog.js"></script>

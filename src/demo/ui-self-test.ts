@@ -1071,7 +1071,7 @@ async function main(): Promise<void> {
     const paths = new Set<string>();
     for (const match of script.matchAll(/\/api\/[a-z0-9/-]+/g)) paths.add(match[0]);
     assert(paths.size >= 9, `扫描到的接口过少（${paths.size}）`);
-    const passthrough = new Set(['/api/state', '/api/download', '/api/download-wst500', '/api/qc-content-contract', '/api/dictation/capture/records']);
+    const passthrough = new Set(['/api/state', '/api/download', '/api/download-wst500', '/api/qc-content-contract', '/api/dictation/capture/records', '/api/layout']);
     const missing = [...paths].filter((path) => !passthrough.has(path) && !serverSource.includes(`case '${path}'`));
     assertEqual(missing, [], 'UI 调用了服务端不存在的接口');
   });
@@ -1778,6 +1778,49 @@ async function main(): Promise<void> {
     assert(
       /function renderRuleConditionSwitch/.test(adminScript) && /dataset\.ruleInput === 'conditionId'/.test(adminScript),
       '换判定方式要重画参数区（只重画参数区：重画整屏会把刚填的标题与文案一起清掉）',
+    );
+  });
+
+  await test('A42 能力配置·内容库：全院 / 科室两层共享内容由管理端维护，个人作用域不进管理端', () => {
+    const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
+    const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
+    const serverSource = readFileSync(join(ROOT, 'src', 'demo', 'demo-server.ts'), 'utf8');
+    const pane = adminMarkup.slice(
+      adminMarkup.indexOf('data-cfg-pane="contentLib"'),
+      adminMarkup.indexOf('data-cfg-pane="packs"'),
+    );
+    const tabs = [...adminMarkup.matchAll(/data-cfg-tab="([^"]+)"/g)].map((match) => match[1]);
+    assertEqual(tabs.indexOf('contentLib'), tabs.indexOf('templates') + 1, '「内容库」页签要紧随「模板库」之后');
+    assert(pane.includes('id="contentLibBody"'), '面板里要有清单挂载的容器');
+    assert(pane.includes('id="contentLibChip"'), '要有一格显示"已用 / 上限"（等第 201 条才报错，等于没提示）');
+    assert(pane.includes('id="contentLibStatus"'), '面板里要有自己的状态行（写在别的页签上等于写在看不见的地方）');
+    assert(
+      /data-contentlib-scope="hospital"/.test(pane) && /data-contentlib-scope="dept"/.test(pane),
+      '两层要各有一个入口：全院与科室是两份不同的资产，不是同一条的两个筛选项',
+    );
+    assert(/id="contentLibDept"/.test(pane), '科室层要能选科室：限哪个科不能靠猜');
+    assert(/id="contentLibDrawer"/.test(adminMarkup), '新建 / 编辑走抽屉（与其它页签同一套做法）');
+    assert(/function loadContentLibrary\(\)/.test(adminScript), '要有这一页的载入函数');
+    assert(/function renderContentLibrary\(/.test(adminScript), '要有这一页的渲染函数');
+    assert(
+      /\/api\/content-library-list/.test(adminScript)
+      && /\/api\/content-library-create/.test(adminScript)
+      && /\/api\/content-library-update/.test(adminScript)
+      && /\/api\/content-library-delete/.test(adminScript),
+      '四个接口都要真的被界面调用（否则按钮点了没反应）',
+    );
+    assert(
+      /tab\.dataset\.cfgTab === 'contentLib'[\s\S]{0,80}loadContentLibrary\(\)/.test(adminScript),
+      '切到该页签要载入',
+    );
+    assert(
+      /function sharedContentTarget\([\s\S]{0,320}scope !== 'dept' && scope !== 'hospital'/.test(serverSource),
+      '共享内容库的服务端入口只认 dept / hospital：personal 只能由医生端按登录身份写',
+    );
+    assert(
+      /'\/api\/content-library-list': 'pack\.toggle'/.test(serverSource)
+      && /'\/api\/content-library-delete': 'pack\.toggle'/.test(serverSource),
+      '改了全科室 / 全院都能看到的内容，权限要与知识资产同级（pack.toggle）',
     );
   });
 
@@ -2952,6 +2995,39 @@ async function main(): Promise<void> {
     const patchPlan = readFileSync(join(ROOT, 'src', 'demo', 'patch-plan.js'), 'utf8');
     assert(!/IGNORE_FIELDS = new Set\(\[[^\]]*'presentation'/.test(patchPlan),
       'presentation 不能留在忽略名单：纸张视图与打印都消费它');
+  });
+
+  await test('B83 分页预览：界面只消费服务端排版结果，打印不再由浏览器重排', async () => {
+    const script = readFileSync(UI_JS, 'utf8');
+    const pageHtml = readFileSync(UI_HTML, 'utf8');
+    const css = readFileSync(UI_CSS, 'utf8');
+    const serverSource = readFileSync(SERVER_TS, 'utf8');
+
+    assert(/id="btnPreview"/.test(pageHtml), '顶栏要有分页预览入口');
+    assert(/id="previewDialog"/.test(pageHtml) && /id="previewPrint"/.test(pageHtml), '预览浮层与打印按钮要在页面上');
+    assert(/function openPreview\(/.test(script) && /api\('\/api\/layout'\)/.test(script),
+      '预览的页与行必须来自服务端排版结果，不能在界面上另算一套');
+    assert(/function previewLine\(/.test(script) && /pt`/.test(script),
+      '行位置要按 pt 绝对定位（交给浏览器重排就又分叉了）');
+    assert(/printing-preview/.test(script) && /body\.printing-preview #previewDialog/.test(css),
+      '打印时必须只保留预览容器');
+    assert(/function ensurePreviewPageRule\(/.test(script) && /margin: 0; }/.test(script),
+      '预览打印的 @page 要现生成且边距归零（纸面边距已在坐标里）');
+    assert(/pv-watermark/.test(css), '草稿水印必须在样式里');
+    assert(/'\/api\/layout': 'doc\.export'/.test(serverSource), '排版结果按导出权限放行');
+
+    const res = (await getAuth('/api/layout')) as {
+      ok?: boolean;
+      code?: string;
+      message?: string;
+      data?: { pages?: Array<{ footer: string; lines: Array<{ x: number; y: number; text: string }> }> };
+    };
+    assert(res.ok === true, `排版接口应可达：${res.code ?? ''} ${res.message ?? ''}`);
+    const pages = res.data?.pages;
+    assert(Array.isArray(pages) && pages.length >= 1, '服务端必须下发页数组');
+    assert(/第 1 页/.test(pages?.[0]?.footer ?? ''), '页脚要有真实页码');
+    const line = pages?.[0]?.lines.find((item) => item.text.length > 0);
+    assert(!!line && typeof line.x === 'number' && typeof line.y === 'number', '行必须带纸面坐标与文字');
   });
 
   await test('B20 语音落点确认：未落位不生成建议，医生指定落点后才提交（门控不松）', async () => {
@@ -6810,6 +6886,127 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
         if (existsSync(dir)) rmRecursive(dir, { recursive: true, force: true });
       }
     }
+  });
+
+  await test('B82 内容库：全院 / 科室两层由管理端维护，医生端抽屉看得到，个人层不从这里写', async () => {
+    await adminLogin();
+    const NAME_H = '自测·全院常用语';
+    const NAME_D = '自测·科室常用语';
+    const TRIGGER_H = 'tsfull';
+
+    const deptPayload = (await getAuth('/api/departments')).data as { items?: Array<{ code: string; enabled?: boolean }> };
+    const deptCode = (deptPayload.items ?? []).find((item) => item.enabled !== false)?.code ?? '';
+    assert(deptCode !== '', '前置：科室字典里应有至少一个启用的科室（科室层要有"限哪个科"）');
+
+    const itemsOf = (payload: ApiResponse): Array<{ id: string; name: string; scope?: string; trigger?: string }> => {
+      const data = payload.data as { items?: Array<{ id: string; name: string; scope?: string; trigger?: string }> } | undefined;
+      return Array.isArray(data?.items) ? data!.items : [];
+    };
+    const removeByName = async (target: Record<string, unknown>, name: string) => {
+      for (const item of itemsOf(await post('/api/content-library-list', target)).filter((entry) => entry.name === name)) {
+        await post('/api/content-library-delete', { ...target, itemId: item.id });
+      }
+    };
+    await removeByName({ scope: 'hospital' }, NAME_H);
+    await removeByName({ scope: 'dept', deptCode }, NAME_D);
+
+    const created = await post('/api/content-library-create', {
+      scope: 'hospital',
+      kind: 'phrase',
+      name: NAME_H,
+      paragraphs: ['腹部查体（正常）'],
+      trigger: TRIGGER_H,
+    });
+    assertEqual(created.ok, true, `全院级应能新建：${created.code ?? ''} ${created.message ?? ''}`);
+    const itemId = String((created.data as { item?: { id?: string } }).item?.id ?? '');
+    assert(itemId !== '', '新建应返回条目 id');
+
+    const listed = await post('/api/content-library-list', { scope: 'hospital' });
+    assertEqual(listed.ok, true, `全院清单应能读：${listed.code ?? ''}`);
+    const listedData = listed.data as { items?: Array<{ id: string; scope?: string }>; limit?: number; label?: string };
+    assert((listedData.items ?? []).some((item) => item.id === itemId), '新建的条目应出现在全院清单里');
+    assertEqual(listedData.limit, 200, '清单要带上限：界面靠它显示"已用 / 上限"');
+    assertEqual(listedData.label, '全院', '要带这一层的中文名');
+    assertEqual(
+      (listedData.items ?? []).every((item) => item.scope === 'hospital'),
+      true,
+      '全院清单里不该混进别的层',
+    );
+
+    const doctorView = await post('/api/content-list', {});
+    assert(
+      itemsOf(doctorView).some((item) => item.id === itemId),
+      '医生端抽屉要能看到这条全院内容（否则管理端建了等于没建）',
+    );
+
+    const clash = await post('/api/content-library-create', {
+      scope: 'hospital',
+      kind: 'phrase',
+      name: `${NAME_H}·撞触发词`,
+      paragraphs: ['x'],
+      trigger: TRIGGER_H,
+    });
+    assertEqual(clash.ok, false, '同一层里两个条目共用一个触发词必须被拒');
+    assertEqual(clash.code, 'E_CONTENT_DUPLICATE_TRIGGER', '错误码要指向"触发词撞车"');
+
+    const deptCreated = await post('/api/content-library-create', {
+      scope: 'dept',
+      deptCode,
+      kind: 'content-paragraph',
+      name: NAME_D,
+      paragraphs: ['第一段', '第二段'],
+    });
+    assertEqual(deptCreated.ok, true, `科室级应能新建：${deptCreated.code ?? ''} ${deptCreated.message ?? ''}`);
+    const deptId = String((deptCreated.data as { item?: { id?: string } }).item?.id ?? '');
+    assert(
+      !itemsOf(await post('/api/content-library-list', { scope: 'hospital' })).some((item) => item.id === deptId),
+      '科室级条目不得出现在全院清单里',
+    );
+    assert(
+      itemsOf(await post('/api/content-library-list', { scope: 'dept', deptCode })).some((item) => item.id === deptId),
+      '科室清单要能读到刚建的那条',
+    );
+
+    const ghostDept = await post('/api/content-library-create', {
+      scope: 'dept',
+      deptCode: 'DEPT_NOT_IN_DICTIONARY',
+      name: '自测·幽灵科室',
+      paragraphs: ['x'],
+    });
+    assertEqual(ghostDept.ok, false, '不在科室字典里的科室要当场拒');
+    assertEqual(ghostDept.code, 'E_CONTENT_INVALID', '错误码应指向作用域 / 科室编码不合法');
+
+    const personal = await post('/api/content-library-create', {
+      scope: 'personal',
+      kind: 'phrase',
+      name: '自测·个人层',
+      paragraphs: ['x'],
+    });
+    assertEqual(personal.ok, false, '管理端不得写个人作用域');
+    assertEqual(personal.code, 'E_CONTENT_INVALID', '错误码应指向"作用域不对"');
+
+    const renamed = `${NAME_H}（改名）`;
+    const updated = await post('/api/content-library-update', { scope: 'hospital', itemId, name: renamed, trigger: '' });
+    assertEqual(updated.ok, true, `应能改名与清掉触发词：${updated.code ?? ''} ${updated.message ?? ''}`);
+    const afterUpdate = itemsOf(await post('/api/content-library-list', { scope: 'hospital' })).find((item) => item.id === itemId);
+    assertEqual(afterUpdate?.name, renamed, '改名要落到库里');
+    assertEqual(afterUpdate?.trigger, undefined, '触发词留空要能清掉（删掉一条近路是常见动作）');
+
+    const removed = await post('/api/content-library-delete', { scope: 'hospital', itemId });
+    assertEqual(removed.ok, true, `应能删除：${removed.code ?? ''} ${removed.message ?? ''}`);
+    assert(
+      !itemsOf(await post('/api/content-library-list', { scope: 'hospital' })).some((item) => item.id === itemId),
+      '删掉之后全院清单里不该还有它',
+    );
+    assert(!itemsOf(await post('/api/content-list', {})).some((item) => item.id === itemId), '删掉之后医生端抽屉里也要看不到');
+    await post('/api/content-library-delete', { scope: 'dept', deptCode, itemId: deptId });
+
+    /* 审计视图是平铺的（`{ok, entries, counts}`），不像其它接口那样包在 data 里 */
+    const audit = await getAuth('/api/admin/audit') as { entries?: Array<{ subject?: string }> };
+    assert(
+      (audit.entries ?? []).some((entry) => String(entry.subject ?? '').includes('全院内容库')),
+      '共享内容库的新增 / 修改 / 删除要进管理端审计（它会影响全院的医生）',
+    );
   });
 
   await stopServer();

@@ -117,7 +117,140 @@ function printDoc() {
   window.print();
 }
 
-window.addEventListener('beforeprint', ensurePrintPageRule);
+let previewLayout = null;
+
+function ensurePreviewPageRule() {
+  const style = $('printPageRule');
+  if (!style || !previewLayout) return;
+  style.textContent = `@page { size: ${previewLayout.widthPt}pt ${previewLayout.heightPt}pt; margin: 0; }`;
+}
+
+function previewLine(line, extraClass) {
+  const el = document.createElement('div');
+  el.className = extraClass ? `pv-line ${extraClass}` : 'pv-line';
+  el.style.left = `${line.x}pt`;
+  el.style.top = `${line.y - line.size}pt`;
+  el.style.fontSize = `${line.size}pt`;
+  if (line.bold) el.style.fontWeight = '600';
+  if (line.image) {
+    el.classList.add('pv-image');
+    el.style.width = `${line.image.widthPt}pt`;
+    el.style.height = `${line.image.heightPt}pt`;
+    el.textContent = line.image.altText || '［图片］';
+    return el;
+  }
+  el.textContent = line.text;
+  return el;
+}
+
+function previewFormal() {
+  const status = (S && S.doc && S.doc.status) || (previewLayout && previewLayout.status) || 'draft';
+  return status === 'signed' || status === 'archived';
+}
+
+function renderPreview() {
+  const host = $('previewPages');
+  if (!host || !previewLayout) return;
+  const layout = previewLayout;
+  host.textContent = '';
+  const formal = previewFormal();
+
+  for (const page of layout.pages) {
+    const sheet = document.createElement('div');
+    sheet.className = 'pv-page';
+    sheet.style.width = `${layout.widthPt}pt`;
+    sheet.style.height = `${layout.heightPt}pt`;
+
+    const guide = document.createElement('div');
+    guide.className = 'pv-guide';
+    guide.style.left = `${layout.content.left}pt`;
+    guide.style.top = `${layout.content.top - layout.lineHeightPt}pt`;
+    guide.style.width = `${layout.content.maxWidth}pt`;
+    guide.style.height = `${layout.content.bottom - layout.content.top + layout.lineHeightPt}pt`;
+    sheet.appendChild(guide);
+
+    if (page.header) {
+      sheet.appendChild(previewLine({ x: layout.furniture.x, y: layout.furniture.headerY, size: layout.furniture.size, text: page.header }, 'pv-furniture'));
+    }
+    if (page.footer) {
+      sheet.appendChild(previewLine({ x: layout.furniture.x, y: layout.furniture.footerY, size: layout.furniture.size, text: page.footer }, 'pv-furniture'));
+    }
+    for (const line of page.lines) sheet.appendChild(previewLine(line));
+    if (!formal) {
+      const mark = document.createElement('div');
+      mark.className = 'pv-watermark';
+      mark.textContent = '草稿 · 未生效';
+      sheet.appendChild(mark);
+    }
+    host.appendChild(sheet);
+  }
+
+  const meta = $('previewMeta');
+  if (meta) meta.textContent = `${layout.pages.length} 页 · 正文 ${layout.stats.lines} 行 · 纸面 ${layout.widthPt}×${layout.heightPt}pt`;
+  const chip = $('previewState');
+  if (chip) {
+    chip.className = formal ? 'chip ok' : 'chip warn';
+    chip.textContent = formal ? '正式件' : '草稿件（打印件不是正式病历）';
+  }
+}
+
+async function openPreview() {
+  const dialog = $('previewDialog');
+  if (!dialog) return;
+  const res = await api('/api/layout');
+  if (!res || res.ok !== true || !res.data) {
+    toast(`分页预览失败：${(res && (res.message || res.code)) || '服务端没有返回排版结果'}`, 'danger');
+    return;
+  }
+  previewLayout = res.data;
+  renderPreview();
+  if (!dialog.open) dialog.showModal();
+  document.body.classList.add('preview-open');
+  const button = $('previewPrint');
+  if (button) button.focus();
+}
+
+function closePreview() {
+  const dialog = $('previewDialog');
+  if (!dialog) return;
+  if (dialog.open) dialog.close();
+  document.body.classList.remove('preview-open');
+  const opener = $('btnPreview');
+  if (opener) opener.focus();
+}
+
+function printPreview() {
+  if (!previewLayout) return;
+  ensurePreviewPageRule();
+  document.body.classList.add('printing-preview');
+  window.print();
+}
+
+{
+  const dialog = $('previewDialog');
+  if (dialog) {
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) closePreview();
+    });
+    dialog.addEventListener('close', () => document.body.classList.remove('preview-open'));
+  }
+  const opener = $('btnPreview');
+  if (opener) opener.addEventListener('click', () => { void openPreview(); });
+  const closer = $('previewClose');
+  if (closer) closer.addEventListener('click', closePreview);
+  const printer = $('previewPrint');
+  if (printer) printer.addEventListener('click', printPreview);
+}
+
+window.addEventListener('beforeprint', () => {
+  if (document.body.classList.contains('printing-preview')) ensurePreviewPageRule();
+  else ensurePrintPageRule();
+});
+
+window.addEventListener('afterprint', () => {
+  document.body.classList.remove('printing-preview');
+  if (previewLayout) ensurePrintPageRule();
+});
 
 function markDirty(kind, id, value) {
   pendingEdits.set(kind + ':' + id, { kind, id, value });
@@ -3348,7 +3481,7 @@ function renderContentTarget() {
   if (!el) return;
   const caret = contentTargetCaret;
   if (!caret || !caretAlive(caret)) {
-    el.textContent = '没有落点：先点进正文某一段，再打开这里（不猜位置，也不往最后一段里塞）';
+    el.textContent = '没有落点：先点进正文某一段，再打开这里';
     el.classList.add('warn');
     return;
   }
@@ -4907,8 +5040,15 @@ function paletteCommands() {
   });
   commands.push({
     group: '命令',
-    label: '打印',
-    detail: '只打印正文；纸张与页边距与导出件同源',
+    label: '分页预览',
+    detail: '按排版结果分页显示纸面；打印走这一份，页数与换行与归档件同源',
+    keywords: 'preview 预览 分页 纸 打印 pagination',
+    run: () => openPreview(),
+  });
+  commands.push({
+    group: '命令',
+    label: '打印当前视图',
+    detail: '按当前视图打印（无页眉页脚与页码）；正式打印请用「分页预览」',
     keywords: 'print 打印 输出 纸质 纸',
     run: () => printDoc(),
   });

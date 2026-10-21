@@ -296,6 +296,7 @@ import {
 } from '../previsit/previsit-access.ts';
 import { minimalEditSpan } from '../core/text-runs.ts';
 import { DEFAULT_FURNITURE, DEFAULT_LAYOUT, type OfdExportPlan } from '../export/ofd.ts';
+import { contentArea, imageBoxResolver, layoutDocument } from '../layout/page-layout.ts';
 import { buildWorkspace, DEPARTMENTS, DOC_TYPES, type DemoWorkspace, type WorkspacePatient, type WorkspaceVisit } from './demo-doc.ts';
 import { compareVisits, type VisitCompare } from '../compare/visit-compare.ts';
 
@@ -432,6 +433,10 @@ const ROUTE_ACTIONS: Record<string, Action> = {
   '/api/qc-condition-create': 'pack.toggle',
   '/api/qc-condition-update': 'pack.toggle',
   '/api/qc-condition-delete': 'pack.toggle',
+  '/api/content-library-list': 'pack.toggle',
+  '/api/content-library-create': 'pack.toggle',
+  '/api/content-library-update': 'pack.toggle',
+  '/api/content-library-delete': 'pack.toggle',
   '/api/reset': 'workspace.reset',
   '/api/knowledge-pack-load': 'pack.toggle',
   '/api/departments': 'config.write',
@@ -518,6 +523,7 @@ const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
   '/api/sign': 'doc.sign',
   '/api/unlock': 'doc.sign',
   '/api/export': 'doc.export',
+  '/api/layout': 'doc.export',
   '/api/export-json': 'doc.export',
   '/api/export-wst500': 'doc.export',
   '/api/qc-form-check': 'qc.run',
@@ -1279,13 +1285,12 @@ function noteContentUsed(req: IncomingMessage, entry: DocEntry, item: ContentIte
   }
 }
 
-function contentScopeOf(req: IncomingMessage, entry: DocEntry, body: Record<string, unknown>): ContentScopeRef {
-  const scope = body.scope === undefined ? 'personal' : String(body.scope);
-  if (!isContentScope(scope)) {
-    throw new ContentError('E_CONTENT_INVALID', `作用域只能是 personal / dept / hospital，收到：${scope}`);
+/** 共享内容库（科室 / 全院）的定位：医生端的写入与管理端的维护共用这一份校验 */
+function sharedContentTarget(body: Record<string, unknown>): ContentScopeRef {
+  const scope = String(body.scope ?? '');
+  if (scope !== 'dept' && scope !== 'hospital') {
+    throw new ContentError('E_CONTENT_INVALID', `共享内容库只有 dept / hospital 两层，收到：${scope === '' ? '（空）' : scope}`);
   }
-  if (scope === 'personal') return { scope, owner: contentActorId(req, entry) };
-  guard(req, 'pack.toggle');
   if (scope === 'hospital') return { scope };
   const deptCode = String(body.deptCode ?? '').trim();
   if (deptCode === '') {
@@ -1298,6 +1303,16 @@ function contentScopeOf(req: IncomingMessage, entry: DocEntry, body: Record<stri
     );
   }
   return { scope, owner: deptCode };
+}
+
+function contentScopeOf(req: IncomingMessage, entry: DocEntry, body: Record<string, unknown>): ContentScopeRef {
+  const scope = body.scope === undefined ? 'personal' : String(body.scope);
+  if (!isContentScope(scope)) {
+    throw new ContentError('E_CONTENT_INVALID', `作用域只能是 personal / dept / hospital，收到：${scope}`);
+  }
+  if (scope === 'personal') return { scope, owner: contentActorId(req, entry) };
+  guard(req, 'pack.toggle');
+  return sharedContentTarget(body);
 }
 
 function docTypesNow(): LoadedDocTypes {
@@ -4022,6 +4037,35 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   if (req.method === 'GET' && path === '/api/state') {
     json(res, 200, { ok: true, state: stateFor(req) });
+    return;
+  }
+
+  if (req.method === 'GET' && path === '/api/layout') {
+    try {
+      guard(req, 'doc.export');
+    } catch (err) {
+      json(res, 200, {
+        ok: false,
+        code: (err as { code?: string }).code ?? 'E_AUTH_REQUIRED',
+        message: (err as Error).message,
+      });
+      return;
+    }
+    const entry = current();
+    const plan = { furniture: { header: DEFAULT_FURNITURE.header, footer: DEFAULT_FURNITURE.footer } };
+    const layout = layoutDocument(entry.session.document, {
+      ...plan,
+      imageBoxOf: imageBoxResolver(contentArea(plan), readResourceBytes),
+    });
+    json(res, 200, {
+      ok: true,
+      data: {
+        ...layout,
+        docId: entry.docId,
+        status: entry.session.document.status,
+        rev: entry.session.document.revisions.length,
+      },
+    });
     return;
   }
 
@@ -9220,6 +9264,143 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         json(res, 200, {
           ok: true,
           data: { itemId, remaining: loaded.items.length, scope: target.scope, owner: target.owner ?? null },
+          state: stateFor(req),
+        });
+      } catch (err) {
+        json(res, 200, {
+          ok: false,
+          code: (err as { code?: string }).code ?? 'E_CONTENT_INVALID',
+          message: (err as Error).message,
+          state: stateFor(req),
+        });
+      }
+      return;
+    }
+
+    /* 管理端的共享内容库（科室 / 全院）。个人作用域不走这里：
+       那是医生自己攒的清单，管理员对它只有"删与改"两种动作，两种都是负收益 */
+    case '/api/content-library-list': {
+      try {
+        guard(req, 'pack.toggle');
+        const target = sharedContentTarget(body);
+        const loaded = loadContent(CONFIG_KV, target);
+        json(res, 200, {
+          ok: true,
+          data: {
+            scope: target.scope,
+            owner: target.owner ?? null,
+            label: CONTENT_SCOPE_LABELS[target.scope],
+            items: loaded.items.map((item) => describeContent(item)),
+            count: loaded.items.length,
+            limit: CONTENT_LIMITS.itemsPerScope,
+            source: loaded.source,
+            updatedAt: loaded.updatedAt ?? null,
+            updatedBy: loaded.updatedBy ?? null,
+          },
+          state: stateFor(req),
+        });
+      } catch (err) {
+        json(res, 200, {
+          ok: false,
+          code: (err as { code?: string }).code ?? 'E_CONTENT_INVALID',
+          message: (err as Error).message,
+          state: stateFor(req),
+        });
+      }
+      return;
+    }
+
+    case '/api/content-library-create': {
+      try {
+        const actor = guard(req, 'pack.toggle').actorId;
+        const target = sharedContentTarget(body);
+        const kind = body.kind ?? 'content-paragraph';
+        if (kind !== 'phrase' && kind !== 'content-paragraph') {
+          throw new ContentError('E_CONTENT_INVALID', 'kind 只能是 phrase（常用语，插进当前这一句）或 content-paragraph（内容段落，另起段落）');
+        }
+        const { item, loaded } = addContent(
+          CONFIG_KV,
+          target,
+          {
+            kind,
+            name: String(body.name ?? ''),
+            paragraphs: (body.paragraphs ?? '') as string[] | string,
+            ...(body.trigger !== undefined ? { trigger: String(body.trigger) } : {}),
+            ...(body.group !== undefined ? { group: String(body.group) } : {}),
+          },
+          actor,
+        );
+        recordAdminAudit({
+          actor,
+          subject: `${CONTENT_SCOPE_LABELS[target.scope]}内容库`,
+          kind: '变更',
+          note: `新增${CONTENT_KIND_LABELS[item.kind]}「${item.name}」（${item.id}${target.owner ? ` · ${target.owner}` : ''}）`,
+        });
+        json(res, 200, {
+          ok: true,
+          data: { item: describeContent(item), count: loaded.items.length, limit: CONTENT_LIMITS.itemsPerScope },
+          state: stateFor(req),
+        });
+      } catch (err) {
+        json(res, 200, {
+          ok: false,
+          code: (err as { code?: string }).code ?? 'E_CONTENT_INVALID',
+          message: (err as Error).message,
+          state: stateFor(req),
+        });
+      }
+      return;
+    }
+
+    case '/api/content-library-update': {
+      try {
+        const actor = guard(req, 'pack.toggle').actorId;
+        const target = sharedContentTarget(body);
+        const itemId = String(body.itemId ?? '');
+        const patch: Record<string, unknown> = {};
+        /* 类型不给改：换类型等于换一条内容（落笔方式不同），改名换不来这个语义 */
+        for (const key of ['name', 'paragraphs', 'trigger', 'group']) {
+          if (body[key] !== undefined) patch[key] = body[key];
+        }
+        const { item, loaded } = patchContent(CONFIG_KV, target, itemId, patch as never, actor);
+        recordAdminAudit({
+          actor,
+          subject: `${CONTENT_SCOPE_LABELS[target.scope]}内容库`,
+          kind: '变更',
+          note: `修改${CONTENT_KIND_LABELS[item.kind]}「${item.name}」（${item.id}）：${Object.keys(patch).join(' / ')}`,
+        });
+        json(res, 200, {
+          ok: true,
+          data: { item: describeContent(item), count: loaded.items.length, limit: CONTENT_LIMITS.itemsPerScope },
+          state: stateFor(req),
+        });
+      } catch (err) {
+        json(res, 200, {
+          ok: false,
+          code: (err as { code?: string }).code ?? 'E_CONTENT_INVALID',
+          message: (err as Error).message,
+          state: stateFor(req),
+        });
+      }
+      return;
+    }
+
+    case '/api/content-library-delete': {
+      try {
+        const actor = guard(req, 'pack.toggle').actorId;
+        const target = sharedContentTarget(body);
+        const itemId = String(body.itemId ?? '');
+        const before = loadContent(CONFIG_KV, target).items.find((candidate) => candidate.id === itemId);
+        const loaded = removeContent(CONFIG_KV, target, itemId, actor);
+        recordAdminAudit({
+          actor,
+          subject: `${CONTENT_SCOPE_LABELS[target.scope]}内容库`,
+          kind: '变更',
+          note: `删除${CONTENT_KIND_LABELS[before?.kind ?? 'content-paragraph']}「${before?.name ?? itemId}」（${itemId}${target.owner ? ` · ${target.owner}` : ''}）`,
+        });
+        json(res, 200, {
+          ok: true,
+          data: { itemId, count: loaded.items.length, limit: CONTENT_LIMITS.itemsPerScope },
           state: stateFor(req),
         });
       } catch (err) {

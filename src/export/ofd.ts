@@ -3,6 +3,7 @@ import { utf8 } from '../crypto/sm3.ts';
 import type { Signer } from '../crypto/provider.ts';
 import { parseSignaturesXml, signaturesXml } from '../crypto/ofd-signature-xml.ts';
 import { orderedNodeIds } from '../model/machine.ts';
+import { breakBeforeOf } from '../model/presentation.ts';
 import { controlCellsOf } from '../model/control.ts';
 import { IMAGE_EXTENSION, pixelsToPt, probeImage, type ImageMime } from '../media/image-probe.ts';
 import type { ControlNode, DataElementTag, DocNode, DocumentModel, MachineReadableBlock, NodeId } from '../model/types.ts';
@@ -399,6 +400,7 @@ export function paginatePages(
   lines: RenderLine[],
   layout: Required<Omit<OfdLayoutPlan, 'textAsPath'>>,
   area: ContentBox = contentBox(layout),
+  breakBefore: ReadonlySet<NodeId> = new Set<NodeId>(),
 ): PlacedLine[][] {
   const pages: PlacedLine[][] = [];
   let page = 0;
@@ -411,6 +413,10 @@ export function paginatePages(
   };
 
   for (const line of lines) {
+    if (breakBefore.has(line.nodeId) && y > area.top + 0.01) {
+      page += 1;
+      y = area.top;
+    }
     const atPageTop = y <= area.top + 0.01;
     const blockChanged = previousBlock !== null && previousBlock !== line.nodeId;
     if (blockChanged && !atPageTop) {
@@ -477,6 +483,28 @@ export function renderFurniture(template: string, vars: FurnitureVars): string {
     .replace(/\{page\}/g, String(vars.page))
     .replace(/\{pages\}/g, String(vars.pages))
     .trim();
+}
+
+export interface PageFurniture {
+  header: string;
+  footer: string;
+  headerHeightPt: number;
+  footerHeightPt: number;
+}
+
+/** 页眉页脚高度只算一次：版心、预览、导出三处都从这里取，免得各算一套 */
+export function pageFurniture(
+  layout: Required<Omit<OfdLayoutPlan, 'textAsPath'>>,
+  plan?: OfdFurniturePlan,
+): PageFurniture {
+  const header = plan?.header ?? DEFAULT_FURNITURE.header;
+  const footer = plan?.footer ?? DEFAULT_FURNITURE.footer;
+  return {
+    header,
+    footer,
+    headerHeightPt: header === '' ? 0 : layout.headerHeightPt > 0 ? layout.headerHeightPt : layout.lineHeightPt * 1.5,
+    footerHeightPt: footer === '' ? 0 : layout.footerHeightPt > 0 ? layout.footerHeightPt : layout.lineHeightPt * 1.5,
+  };
 }
 
 function textObjectXml(text: string, x: number, y: number, size: number, bold: boolean, idPrefix: string, index: number): string {
@@ -673,12 +701,10 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
   const block = doc.machineReadable;
   if (!block) throw new Error('文档缺少 machineReadable，导出前必须先派生机读信息');
 
-  const furniture: Required<OfdFurniturePlan> = {
-    header: plan.furniture?.header ?? DEFAULT_FURNITURE.header,
-    footer: plan.furniture?.footer ?? DEFAULT_FURNITURE.footer,
-  };
-  const headerHeightPt = furniture.header === '' ? 0 : layout.headerHeightPt > 0 ? layout.headerHeightPt : layout.lineHeightPt * 1.5;
-  const footerHeightPt = furniture.footer === '' ? 0 : layout.footerHeightPt > 0 ? layout.footerHeightPt : layout.lineHeightPt * 1.5;
+  const pageParts = pageFurniture(layout, plan.furniture);
+  const furniture: Required<OfdFurniturePlan> = { header: pageParts.header, footer: pageParts.footer };
+  const headerHeightPt = pageParts.headerHeightPt;
+  const footerHeightPt = pageParts.footerHeightPt;
   const furnitureVars = {
     docType: doc.docType.display,
     /* 只印脱敏姓名；缺失时写"（未脱敏）"，绝不回落到 patientId  */
@@ -723,7 +749,7 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
   };
 
   const lines = renderLines(doc, { imageBoxOf });
-  const pages = paginatePages(lines, layout, pageArea);
+  const pages = paginatePages(lines, layout, pageArea, breakBeforeOf(doc));
   const pageCount = pages.length;
   const placed = pages.flat();
 
