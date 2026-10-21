@@ -1,5 +1,3 @@
-// 序列化 / 反序列化。
-
 import { canonicalize } from './hash.ts';
 import { isDocumentModel, isPlainObject } from './guards.ts';
 import { migrate, type RawDoc } from './migrations.ts';
@@ -83,12 +81,10 @@ export function parseDocument(input: string | unknown, options: ParseOptions = {
   return { doc: current, issues, migrated };
 }
 
-/** 便捷函数：解析并返回文档；失败抛 DocumentError */
 export function fromJson(input: string | unknown, options: ParseOptions = {}): DocumentModel {
   return parseDocument(input, options).doc;
 }
 
-/** 仅做迁移但不校验（用于"离线批量升级存量文档"场景） */
 export function migrateOnly(input: string | unknown, targetVersion?: string): { doc: RawDoc; applied: string[] } {
   let raw: unknown = input;
   if (typeof input === 'string') {

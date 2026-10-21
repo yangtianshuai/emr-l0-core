@@ -1,10 +1,7 @@
-// T04 · 机读信息（machineReadable）派生与陈旧判定。
-
 import { hashNodes } from './hash.ts';
 import { controlCellsOf } from './control.ts';
 import type { DataElementTag, DocNode, DocumentModel, MachineDataElement, MachineReadableBlock, NodeId, ProvenanceOrigin } from './types.ts';
 
-/** 机读块的生成器标识（各实现不同，跨实现比对时应排除该字段） */
 export const MACHINE_GENERATOR = 'l0-session/1.0.0';
 
 export interface DeriveOptions {
@@ -18,7 +15,6 @@ export interface BuildMachineOptions extends DeriveOptions {
   generator?: string;
 }
 
-/** 按文档顺序（父 → 子，order 升序，同序按 id）遍历节点；无法到达的节点按 id 追加，避免丢数据 */
 export function orderedNodeIds({ nodes, rootId }: DeriveOptions): NodeId[] {
   const children = new Map<NodeId | null, DocNode[]>();
   for (const node of Object.values(nodes)) {
@@ -35,7 +31,7 @@ export function orderedNodeIds({ nodes, rootId }: DeriveOptions): NodeId[] {
   const visited = new Set<NodeId>();
   const out: NodeId[] = [];
   const walk = (id: NodeId): void => {
-    if (visited.has(id)) return; // 防御：非法数据里的环
+    if (visited.has(id)) return;
     visited.add(id);
     out.push(id);
     for (const child of children.get(id) ?? []) walk(child.id);
@@ -53,7 +49,6 @@ function originOf(node: DocNode): ProvenanceOrigin {
   return origin ?? 'system';
 }
 
-/** 派生数据元清单（不含 generatedAt/sourceHash 等元信息，便于跨实现比较） */
 export function deriveDataElements({ nodes, rootId }: DeriveOptions): {
   dataElements: MachineDataElement[];
   keyContentRefs: Array<{ nodeId: NodeId; tag?: DataElementTag; present: boolean }>;
@@ -138,7 +133,6 @@ function hasValue(node: DocNode): boolean {
   return true;
 }
 
-/** 依据节点树重建整个机读块（含 sourceHash 与 schemaVersion 锚点） */
 export function buildMachineReadable(options: BuildMachineOptions): MachineReadableBlock {
   const { dataElements, keyContentRefs } = deriveDataElements(options);
   return {
@@ -156,14 +150,6 @@ export interface StalenessReport {
   reasons: string[];
 }
 
-/**
- * 陈旧判定。任何一条成立即为陈旧：
- *   - 机读块缺失；
- *   - `modelSchemaVersion` 与文档 `schemaVersion` 不一致（迁移后必须重算）；
- *   - 有 `sourceHash` 且与当前节点指纹不一致（按内容判定，因此签章等只改文档级字段的操作不会误报）；
- *   - 无 `sourceHash` 时退化为时间戳判定（`generatedAt` 早于 `updatedAt`）；
- *   - 引用了不存在的节点。
-  */
 export function machineReadableStaleness(doc: Pick<DocumentModel, 'machineReadable' | 'nodes' | 'schemaVersion' | 'updatedAt'>): StalenessReport {
   const reasons: string[] = [];
   const block = doc.machineReadable;
@@ -187,7 +173,6 @@ export function machineReadableStaleness(doc: Pick<DocumentModel, 'machineReadab
   return { stale: reasons.length > 0, reasons };
 }
 
-/** 反向抽取视图：把机读块转成"标签 → 值"列表（用于验收 round-trip 完整率） */
 export function machineToExpectation(block: MachineReadableBlock): Array<{ code: string; system: string; valueText: string; nodeId: NodeId }> {
   return block.dataElements.map((element) => ({
     code: element.tag.code,

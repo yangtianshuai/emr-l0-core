@@ -1,26 +1,18 @@
-// 会话存储：把"登录过"变成一件有寿命、可吊销、且不落明文的事。
-// 供"改口令就踢掉全部旧会话"这类处置。绝对过期（无论多活跃，到点必须重登）没有做，
-
 import { randomBytes } from 'node:crypto';
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
 import { AUTH_ERRORS, type Principal } from './principal.ts';
 
-/** 会话里的身份（比 `Principal` 多一个展示名） */
 export interface SessionPrincipal extends Principal {
-  /** 展示用（如"王医生"），不进正文、不进留痕 */
   label?: string;
 }
 
 export interface SessionRecord extends SessionPrincipal {
   createdAt: number;
-  /** 绝对时刻（毫秒）：`now >= expiresAt` 即失效 */
   expiresAt: number;
   lastSeenAt: number;
-  /** 认领次数：用于"这个会话还在用吗"的判断（不含业务含义） */
   seen: number;
 }
 
-/** 只回指纹的展示形态（管理后台用；没有 id 原文）  */
 export interface SessionSummary extends Omit<SessionRecord, never> {
   fingerprint: string;
 }
@@ -66,15 +58,10 @@ export class SessionStore {
     this.maxRecords = options.maxRecords ?? 4096;
   }
 
-  /** 会话寿命（毫秒）：界面要能如实告诉用户"多久要重登" */
   get ttl(): number {
     return this.ttlMs;
   }
 
-  /**
-   * 签发会话。唯一返回 id 原文的地方 —— 调用方必须立刻把它写进 cookie，
-   * 不要存进日志、不要进审计（审计里不该出现能换取权限的东西）。
-    */
   issue(principal: SessionPrincipal): { id: string; record: SessionRecord } {
     const id = hex(randomBytes(32));
     const now = this.now();
@@ -90,22 +77,6 @@ export class SessionStore {
     return { id, record: { ...record } };
   }
 
-  /**
-   * 认领：会话 id → 记录。
-   *
-   * 三种结果分开报：
-   *   - `E_AUTH_REQUIRED`：没给 id，或这个 id 从来没签发过（不猜）；
-   *   - `E_SESSION_EXPIRED`：确实签发过、但已经到点 —— 与"没登录"分开，否则医生刚登录就被说成没登录，
-   *     会去反复重登而不是去查时间；
-   *   - ok：并（在滑动模式下）续期。
-   *
-   * 过期记录不在这里删：删了之后第二次请求只能报"没登录"，把"过期"这件事盖掉。
-   * 清理由 `sweep()` 在宽限期之后做。
-   *
-   * 有人会问：区分"已过期"与"从未存在"是不是泄露信息？会话 id 是 256 位随机值，
-   * 攻击者猜不出一个存在的 id，所以这个区分不构成可利用的探测；
-   * 换来的是医生界面上"会话已过期，请重新登录"这句准确的话。
-    */
   resolve(id: string | null | undefined): ResolveResult {
     if (!id) return { ok: false, code: AUTH_ERRORS.E_AUTH_REQUIRED };
     const record = this.byFingerprint.get(fingerprintOf(id));
@@ -118,13 +89,11 @@ export class SessionStore {
     return { ok: true, record: { ...record } };
   }
 
-  /** 吊销一个会话。返回是否确实存在过（不存在也返回 false，不报错 —— 登出应幂等）  */
   revoke(id: string | null | undefined): boolean {
     if (!id) return false;
     return this.byFingerprint.delete(fingerprintOf(id));
   }
 
-  /** 踢掉某个身份的全部会话（改口令、降权、发现异常时用）。返回踢掉几个 */
   revokeAllFor(actorId: string): number {
     let removed = 0;
     for (const [fingerprint, record] of [...this.byFingerprint]) {
@@ -136,7 +105,6 @@ export class SessionStore {
     return removed;
   }
 
-  /** 当前有效会话数（不含已过期） */
   get size(): number {
     const now = this.now();
     let live = 0;

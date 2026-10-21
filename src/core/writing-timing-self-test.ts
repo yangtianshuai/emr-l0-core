@@ -1,10 +1,3 @@
-// 书写时长与真实时间戳自测（W1~W10）。
-//
-// 这两件事被做成用例而不是注释，是因为它们都很容易"看起来实现了"：
-//   · 时间戳：留痕里本来就有 `at` 字段，长得跟真的一样 —— 但它来自逻辑时钟（每次提交 +1000ms）；
-//   · 书写时长：拿 lastEditAt − firstEditAt 一减就有数 —— 但那把挂机三小时也算成工作量。
-// 用例里钉死的是口径，不是数字好看。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WRITE_ERRORS, WriteSession, type Actor } from './session.ts';
 import { applyWritingTiming, readWritingTiming, WRITING_TIMING_KEY, type WritingTiming } from './writing-timing.ts';
@@ -37,7 +30,6 @@ function fixture(options: Parameters<typeof WriteSession.open>[1] = {}): Fixture
   };
 }
 
-/** 注入墙钟写一笔，返回注入的时刻 */
 function writeAt(session: WriteSession, textId: NodeId, at: string, actor: Actor = HUMAN): void {
   session.insertText({ nodeId: textId, text: `·${at}` }, actor, { at });
 }
@@ -64,8 +56,6 @@ async function main(): Promise<void> {
     const log = session.auditLog();
     assertEqual(log[log.length - 1]?.at, '2026-10-18T09:00:30Z', '留痕的 at 必须是注入的墙钟');
     assertEqual(session.document.updatedAt, '2026-10-18T09:00:30Z', '文档 updatedAt 跟着墙钟走');
-    /* 一次提交内部有多处落时间（节点 provenance / 留痕），它们必须是同一个时刻：
-       否则"改了内容"和"留痕"会各说各话，提交就不再是原子的。 */
     const node = session.getNode(textId);
     assertEqual(node?.provenance.at, '2026-10-18T09:00:30Z', '节点 provenance 的时间必须与留痕一致');
     assertEqual(session.timing().clock, 'wall', '全程注入墙钟 → wall');
@@ -92,14 +82,11 @@ async function main(): Promise<void> {
     }
     assertEqual(code, WRITE_ERRORS.E_TIME_REGRESS, '时间往回写必须拒绝：留痕一旦能倒流，"谁先谁后"就没法判了');
 
-    /* 被拒的两次都不该留下痕迹 —— 拒绝要拒绝得干净。
-       夹具自带 1 条"创建根节点"的初始留痕（`testing/synthetic.ts`），所以比的是增量。 */
     assertEqual(session.auditLog().length, 2, '校验失败不得产生留痕（开局的 1 条 + 成功那 1 条）');
   });
 
   await test('W4 有效编辑时长：挂机三小时不算三小时工作量', () => {
     const { session, textId } = fixture();
-    /* 09:00 → 09:00:30 → 09:01:00 连着写；然后去查房，09:41 回来写第四笔 */
     writeAt(session, textId, '2026-10-18T09:00:00Z');
     writeAt(session, textId, '2026-10-18T09:00:30Z');
     writeAt(session, textId, '2026-10-18T09:01:00Z');

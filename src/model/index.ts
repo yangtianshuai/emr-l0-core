@@ -1,5 +1,3 @@
-// L0 模型层对外出口（barrel）。
-
 export * from './types.ts';
 export * from './hash.ts';
 export * from './guards.ts';

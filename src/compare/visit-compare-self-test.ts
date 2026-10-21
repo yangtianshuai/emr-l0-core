@@ -1,5 +1,3 @@
-// 跨次就诊对比自测（C1~C6）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { SCHEMA_VERSION, type DataElementTag, type DocNode, type DocumentModel, type NodeId } from '../model/types.ts';
 import { compareVisits } from './visit-compare.ts';
@@ -97,7 +95,6 @@ async function main(): Promise<void> {
     assertEqual(chief?.added[0], '反复发热三天，伴咳嗽、咳痰。', '本次新增（改写后的那段）');
     assertEqual(chief?.removed[0], '发热3天，伴咳嗽。', '上次有、这次没了');
     assertEqual(result.changedSections, 1, '只有主诉一章有差异');
-    /* 诊断章两侧逐字相同 → same，不该被算成差异 */
     assertEqual(result.sections.find((row) => row.key === 'diagnosis')?.state, 'same', '诊断章未改动');
   });
 

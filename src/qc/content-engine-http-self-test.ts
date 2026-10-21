@@ -1,5 +1,3 @@
-// 内涵类质控 HTTP 传输层自测（H1~H8）。
-
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
@@ -29,7 +27,6 @@ function sampleRequest(): ContentQcRequest {
   });
 }
 
-/** 起一个本机假引擎（端口取 0，由系统分配），跑完就关 */
 async function withFakeEngine(
   handler: (req: IncomingMessage, res: ServerResponse, body: string) => void,
   run: (endpoint: string) => Promise<void>,
@@ -51,10 +48,6 @@ async function withFakeEngine(
   }
 }
 
-/**
- *  本环境 `node:http` 的类型声明不全：`ServerResponse` 缺 `writeHead`（运行时存在）。
- * 按仓库既有做法做局部断言，而不是换一种写法绕开。
-  */
 interface RawResponse {
   writeHead(status: number, headers: Record<string, string>): void;
   end(body?: string): void;
@@ -66,7 +59,6 @@ const json = (res: ServerResponse, status: number, payload: unknown): void => {
   raw.end(typeof payload === 'string' ? payload : JSON.stringify(payload));
 };
 
-/** 合法产出的形状（假引擎按它回答；具体内容各用例自己改） */
 const goodResponse = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   api: CONTENT_ENGINE_API,
   engine: { id: 'fake-engine', kind: 'rules', version: '1' },
@@ -96,7 +88,6 @@ async function main(): Promise<void> {
     assert(code.includes('病历内容'), `理由要说清"这一步会把病历内容发出去"，实际：${code}`);
     assert(code.includes('https://'), '要给出可行的改法（改 https 或部署在本机）');
 
-    /* 本机明文、以及任意 https 都允许（前者是开发/内网自测的常态，后者是生产的常态） */
     assert(!!createHttpContentEngine({ endpoint: 'http://127.0.0.1:9/x' }), '本机明文应允许');
     assert(!!createHttpContentEngine({ endpoint: 'http://localhost:9/x' }), 'localhost 视同本机');
     assert(!!createHttpContentEngine({ endpoint: 'https://qc.example.com/x' }), 'https 应允许');
@@ -116,7 +107,6 @@ async function main(): Promise<void> {
     await withFakeEngine(
       (req, res, body) => {
         seenBody = body;
-        /* 头可能是 string 或 string[]（本环境声明如此）：断言只关心值，故统一成字符串 */
         const auth = req.headers.authorization;
         seenAuth = Array.isArray(auth) ? auth.join(',') : auth;
         json(res, 200, goodResponse());
@@ -125,7 +115,6 @@ async function main(): Promise<void> {
         const engine = createHttpContentEngine({ endpoint, token: 'secret-token', expectEngineId: 'fake-engine' });
         const request = sampleRequest();
         const produced = await engine.run(request, { timeoutMs: 3000 });
-        /* 传输层交回的是原始产出：校验在调用方（这条分工是刻意的）  */
         const validated = validateEngineOutput(produced, request);
         assertEqual(validated.ok, true, `合法产出应通过校验：${validated.ok ? '' : validated.message}`);
         assertEqual(validated.ok ? validated.findings.length : -1, 1, '一条发现');
@@ -224,7 +213,6 @@ async function main(): Promise<void> {
   });
 
   await test('H8 端到端分工：传输层不修补，**夹带建议的被整份拒、引文幻觉的被逐条丢**', async () => {
-    /* 两条坏引擎，走同一条真实通路（HTTP → 传输层 → 校验）。  */
     await withFakeEngine(
       (_req, res) =>
         json(
@@ -239,8 +227,6 @@ async function main(): Promise<void> {
                 title: '未给出鉴别依据',
                 rationale: '提到了鉴别诊断但没写依据',
                 quote: '需与肺结核鉴别',
-                /* ← 想夹带一条"可落笔的建议"。它过不了类型，但类型过不了 JSON，
-                   所以真正拦住它的是运行时校验。  */
                 suggestion: '建议补充：结核接触史阴性、PPD 阴性。',
               },
             ],

@@ -1,5 +1,3 @@
-// T17 验收自测：OFD / OFD-H 导出。
-
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -48,18 +46,9 @@ interface ProbeReport {
   checks: ProbeCheck[];
 }
 
-/** 图片夹具：仓库里那张真 PNG（1615×928）。用真图而不是手搓字节——
- *  能顺带证明"探测头读得懂、归档件里的字节不需要重编码"。
- *  位置在 `docs/images/`：截图统一归档在那里，不要再搬回仓库根。  */
 const IMAGE_FIXTURE = join(ROOT, 'docs', 'images', 'flow-mode.png');
 const IMAGE_RES_REF = '/res/flow-mode.png';
 
-/**
- * 构造一份"已定稿"的门诊病历：含字段、关键内容、AI 采纳内容、签章。
- *
- * `withImage` 会在签章之前往第一段里贴一张图：图必须在签章前进来，
- * 因为签章之后文档就不可改了 —— 而"图片进不进签名覆盖"正是要验的东西。
-  */
 async function signedSession(options: { withImage?: boolean } = {}): Promise<{
   session: WriteSession;
   textId: NodeId;
@@ -73,8 +62,6 @@ async function signedSession(options: { withImage?: boolean } = {}): Promise<{
 
   let resRef = '';
   if (options.withImage === true) {
-    /* 图挂在段落下（与医生端贴图的挂法一致）：段落那一支走的是内联拼接，
-       不特殊处理就会被压成一行 `[图像：地址]` 文本，图本身一个字都进不了归档件。  */
     const paragraphId = doc.nodes[textId]?.parentId;
     if (!paragraphId) throw new Error('前置：文本节点应挂在段落上');
     resRef = IMAGE_RES_REF;
@@ -88,13 +75,8 @@ async function signedSession(options: { withImage?: boolean } = {}): Promise<{
     );
   }
 
-  // 关键内容：主诉段落
   session.updateNodeProps({ nodeId: textId, patch: { keyContent: true } }, HUMAN);
-  /* 先打标签、再让 AI 写：标签来自模板（人工），内容来自 AI。
-     顺序反了的话，人工续改会把 origin 变成 human（+derivedFrom），
-     机读块里就只剩"人写的"，AI 参与度在数据元层面丢失。 */
   session.updateNodeProps({ nodeId: textId, patch: { tags: [{ system: 'WST500', code: 'WST500.2.001', display: '主诉' }] } }, HUMAN);
-  // AI 起草 + 人改 + 确认（走完整门控）
   const { suggestionId } = session.suggestText(
     {
       nodeId: textId,
@@ -283,7 +265,6 @@ async function main(): Promise<void> {
     const { session, resRef } = await signedSession({ withImage: true });
     const png = new Uint8Array(readFileSync(IMAGE_FIXTURE));
 
-    /* 图行不带文字：带文字就会与图重叠，而"谁压着谁"取决于阅读器 */
     const imageLine = renderLines(session.document, {
       imageBoxOf: (ref) => (ref === resRef ? { widthPt: 100, heightPt: 50, resourceId: 'MM_1' } : null),
     }).find((line) => line.image !== undefined);
@@ -298,8 +279,6 @@ async function main(): Promise<void> {
     const height = Number(boundary?.[4] ?? '0');
     /* 远超 A4 正文宽（595 − 56×2 = 483）→ 必须被压进版心 */
     assert(width > 0 && width <= 483.5, `图宽应被压进版心（实际 ${width}pt）`);
-    /* 期望比例从样例本身读，不要写死尺寸：截图一旦重截（现在这张是 1615×928），
-       写死的那个数就会红成"比例走样"，而真走样的那次反而分不清是哪一次。  */
     const probedFixture = probeImage(png);
     assert(!!probedFixture, '前置：夹具应能探出尺寸');
     assertEqual(
@@ -308,7 +287,6 @@ async function main(): Promise<void> {
       '缩放必须等比（宽高比不许走样）',
     );
 
-    /* 缺图：纸面留占位 + warnings 说清。静默少一块，审计时才发现，是最难查的一类缺页 */
     const missing = await session.exportOfd(PLAN, { resolveImage: () => null });
     assertEqual(missing.warnings.length, 1, `缺图必须回一条告警（实际 ${JSON.stringify(missing.warnings)}）`);
     assert(missing.warnings[0].includes('取不到'), `告警要说清是"取不到"（实际：${missing.warnings[0]}）`);
@@ -326,8 +304,6 @@ async function main(): Promise<void> {
     assert(signatures.includes('Doc_0/Res/MultiMedia/1.png'), '图片字节必须在签名覆盖清单里（否则图可换而签名不破）');
     assert(signatures.includes('Doc_0/Res/DocumentRes.xml'), '资源清单同样要覆盖（否则可把 ResourceID 改指向别的文件）');
 
-    /* 真换一次图：验签必须失败。只断言"清单里有"是不够的 ——
-       清单里写了但没真去算摘要，照样验得过。 */
     const tampered = pkg.entries.map((entry) => (
       entry.path === 'Doc_0/Res/MultiMedia/1.png' ? { ...entry, data: new Uint8Array([1, 2, 3, 4]) } : entry
     ));
@@ -347,7 +323,6 @@ async function main(): Promise<void> {
     assert(existsSync(file), `产物未落盘：${file}`);
     assert(info.pages >= 1, '应写出页数');
 
-    // 用文档自带的机读块生成"期望清单"，再让探针反向抽取比对
     const expect = machineToExpectation(session.document.machineReadable!);
     const expectFile = join(ARTIFACTS, 'demo-signed.machine.json');
     writeFileSync(expectFile, `${JSON.stringify(expect, null, 2)}\n`, 'utf8');
@@ -381,7 +356,6 @@ async function main(): Promise<void> {
   });
 
   await test('D3 对照：路径化"换壳"产物会被探针判为失败（证明探针有鉴别力）', async () => {
-    // 手工构造一个只有路径对象、没有真实文本的 OFD，验证探针能识破
     const bytes = buildZip([
       { path: 'OFD.xml', data: '<?xml version="1.0"?><ofd:OFD xmlns:ofd="http://www.ofd.org/OFD"><ofd:DocBody><ofd:DocRoot>Doc_0/Document.xml</ofd:DocRoot></ofd:DocBody></ofd:OFD>' },
       { path: 'Doc_0/Document.xml', data: '<?xml version="1.0"?><ofd:Document xmlns:ofd="http://www.ofd.org/OFD"><ofd:Pages><ofd:Page ID="Page_0" BaseLoc="Pages/Page_0/Content.xml"/></ofd:Pages></ofd:Document>' },
@@ -393,8 +367,6 @@ async function main(): Promise<void> {
     assertEqual(exitCode, 1, '路径化产物必须判为失败');
     assertEqual(report.checks.find((check) => check.id === 'C2')?.pass, false, 'C2 文本真实性应失败');
   });
-
-  /* ==================== C9 列表项：编号是位置函数 ==================== */
 
   await test('C9 列表项：无序打点、有序按兄弟位置编号（编号不由节点自带，改一项之后要跟着变）', () => {
     const { doc } = buildSyntheticDoc({ sections: 1, paragraphsPerSection: 1, fieldsPerParagraph: 0 });
@@ -489,7 +461,6 @@ async function main(): Promise<void> {
   });
 
   await test('E5 打印加固：标题不落在页底（孤行控制）；装订边与页眉页脚压缩正文区', async () => {
-    /* 每段恰好一行 → 标题密集出现，孤行控制最容易露馅 */
     const { doc } = buildSyntheticDoc({ sections: 12, paragraphsPerSection: 1, fieldsPerParagraph: 0 });
     const session = WriteSession.open(doc);
     session.exportMachineReadable();
@@ -503,7 +474,6 @@ async function main(): Promise<void> {
       return /<ofd:Layer ID="layer0">([\s\S]*?)<\/ofd:Layer>/.exec(content)?.[1] ?? '';
     };
 
-    /* 孤行控制：任何一页的最后一个文本对象都不能是标题（黑体 F2 = 标题/加粗） */
     for (let index = 0; index < boxed.pages; index += 1) {
       const objects = bodyOf(boxed, index).match(/<ofd:TextObject[^>]*>/g) ?? [];
       const last = objects[objects.length - 1] ?? '';

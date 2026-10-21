@@ -1,5 +1,3 @@
-// T18 验收自测：真实国密签章（SM2-SM3）与验签。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { DEMO_SIGNING_SEED, WriteSession, type Actor } from './session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -247,7 +245,6 @@ async function main(): Promise<void> {
     assert(!!fa && !!fb && fa !== fb, '不同密钥应产生不同指纹');
     assertEqual(a.verifySignature().ok, true, '注入种子的会话仍应自洽可验');
 
-    /* 模拟"接入了密码设备"：上层无需改动，元数据如实记录后端 */
     const device: Signer = { ...softwareSigner(demoKeyPair('hsm-simulated').privateKey), provider: 'hsm-simulated' };
     const c = WriteSession.open(cloneDoc(doc), { signer: device });
     await c.sign({}, HUMAN);
@@ -276,9 +273,6 @@ async function main(): Promise<void> {
     assert(!!pkg.signature, '已签章文档导出后应带容器级签名');
     const result = verifyOfdEntries(pkg.entries);
     assertEqual(result?.ok, true, `容器级验签应通过，实际：${result?.reasons.join('；')}`);
-    /* 期望里必须有 `Doc_0/Res/DocumentRes.xml`：资源清单与图片字节是导出过程生成的，
-       文档签章那一刻它们还不存在，不可能写进 `covers` —— 所以导出层补签它们（见 ofd.ts）。
-       漏掉它的后果很实在：把 ResourceID 改成指向另一张图，签名照样验得过。  */
     assertEqual(
       pkg.signature!.references.map((reference) => reference.path),
       ['Doc_0/Document.xml', 'Doc_0/MachineReadable.xml', 'Doc_0/Pages/Page_0/Content.xml', 'Doc_0/Res/DocumentRes.xml'],
@@ -301,15 +295,12 @@ async function main(): Promise<void> {
     const session = await signedSession();
     let message = '';
     try {
-      /* 模拟"某个调用点忘了传 signer"：直接走导出层。
-         必须 await —— 导出已是异步的，不 await 就抓不到它的拒绝（那样这条用例会假装通过）  */
       await buildOfdPackage(session.document, PLAN);
     } catch (err) {
       message = (err as Error).message;
     }
     assert(message.includes('未提供签名后端'), `应明确说明缺少签名后端，实际：${message}`);
 
-    /* 对照：传了 signer 就能导出且可验签 */
     const ok = await buildOfdPackage(session.document, PLAN, { signer });
     assertEqual(verifyOfdEntries(ok.entries)?.ok, true, '提供 signer 后导出应可验签');
   });

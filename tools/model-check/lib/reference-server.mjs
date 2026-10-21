@@ -1,20 +1,4 @@
 #!/usr/bin/env node
-/**
- * L0 参考服务端（零依赖 HTTP）：把 doc-store 的契约暴露为 REST 接口。
- *
- * 目的：
- *  1) 把"逻辑接口"钉成"线上协议"（路径 / 方法 / 请求体 / 响应体 / 错误码 / HTTP 状态码）；
- *  2) 作为后端实现的验收靶子：后端写好后，用同一套 S4 用例 + --adapter 直连验收；
- *  3) 在没有后端时，让端到端联调与 CI 可以先行跑起来。
- *
- * 独立运行：
- *   node reference-server.mjs --port 8790
- *
- * 协议要点（详见 docs/L0-节点操作API清单.md 的"HTTP 绑定"一节）：
- *   身份：请求头 X-Actor-Id / X-Actor-Kind(human|ai|system)
- *   写操作：POST /documents/:id/commands  { op, params, clientOpId?, expectedRev? }
- *   错误：HTTP 状态码表达类别，响应体统一为 { code, message, extra? }
- */
 
 import { createServer } from 'node:http';
 import { ContractError, createStore, ERR } from './doc-store.mjs';
@@ -91,7 +75,6 @@ export function createReferenceServer(options = {}) {
   };
 
   const routes = [
-    // 建文档：客户端把初始文档整体提交（便于测试与演示；生产应改为服务端生成）
     {
       method: 'POST',
       pattern: /^\/documents$/,
@@ -263,7 +246,6 @@ export function createReferenceServer(options = {}) {
   };
 }
 
-/* CLI 模式 */
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
 if (isMain) {
   const argv = process.argv.slice(2);

@@ -1,5 +1,3 @@
-// 患者主索引（EMPI）自测。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { PatientIndex, type PatientIdentifier } from './identity.ts';
 
@@ -29,7 +27,6 @@ async function main(): Promise<void> {
       AT,
       'admin',
     );
-    /* 任意一个标识都应解析到同一个人 —— 这正是"不同系统各带各的号"要解决的问题 */
     for (const identifier of [id('outpatient-no', 'M2026001'), id('inpatient-no', 'Z2026123'), id('id-card', '110101198103120011')]) {
       assertEqual(index.resolve(identifier), { status: 'matched', masterId: 'P_001' }, `${identifier.system} 应命中同一患者`);
     }
@@ -63,8 +60,6 @@ async function main(): Promise<void> {
     const index = new PatientIndex();
     index.register('P_001', [id('outpatient-no', 'M001')], AT, 'admin');
     index.register('P_002', [id('outpatient-no', 'M002')], AT, 'admin');
-    /* 同名同生日在医院里真实存在（尤其常见姓名）。靠概率匹配代替主索引，
-       会把两个人的病历粘在一起，而且这种错误看起来像正常数据，几乎无法发现。  */
     assertEqual(index.resolve(id('outpatient-no', 'M002')), { status: 'matched', masterId: 'P_002' }, '不同号是不同患者');
     assertEqual(index.size(), 2, '不得自动合并');
   });

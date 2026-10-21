@@ -1,5 +1,3 @@
-// 外部落位服务适配器（V2）：`strategy: 'external'` 时把"段落位"这件事交给外部服务。
-
 import type { NodeId } from '../model/types.ts';
 import type { TranscriptSegment } from '../core/dictation.ts';
 import {
@@ -20,7 +18,6 @@ export interface PlacementTransportRequest {
 
 export interface PlacementTransportResponse {
   status: number;
-  /** 响应体文本；只在内存里用于解析，不写日志、不进留痕、不放进错误信息  */
   body: string;
 }
 
@@ -35,7 +32,6 @@ export type ExternalPlacementErrorCode =
 
 export class ExternalPlacementError extends Error {
   code: ExternalPlacementErrorCode;
-  /** HTTP 状态码（仅状态码，不含响应体） */
   status?: number;
 
   constructor(code: ExternalPlacementErrorCode, message: string, status?: number) {
@@ -46,12 +42,6 @@ export class ExternalPlacementError extends Error {
   }
 }
 
-/**
- * 解析后的外部落位配置：`endpoint` 必填、`timeoutMs` 已填默认。
- *
- * 不含密钥：密钥不在配置里，它由 `placement-store.ts` 从库里的单独一行解出来，
- * 经 `createExternalPlacement` 的 `apiKey` 参数直接递进来（配置会被打印、会被写进库行）。
-  */
 export interface ResolvedExternalConfig {
   endpoint: string;
   timeoutMs: number;
@@ -64,12 +54,10 @@ export interface ExternalPlacementRequest {
 }
 
 export interface ExternalPlacementResult extends PlacementOutcome {
-  /** 外部服务如实报告的标识（写进建议的 `modelId`，答得出"这条落点是谁给的"） */
   modelId: string;
   latencyMs: number;
 }
 
-/** 策略分派的结果：多带"这套落点是谁给的"，供界面与留痕区分本地策略与外部服务 */
 export interface ResolvedPlacement extends PlacementOutcome {
   source: 'local' | 'external';
   modelId?: string;
@@ -86,13 +74,6 @@ const defaultTransport: PlacementTransport = async (request) => {
   return { status: response.status, body: await response.text() };
 };
 
-/**
- * 从服务输出里提取 JSON。
- *
- * 容错是必要的（同 `http-adapter.ts`）：即使协议说了"只输出 JSON"，服务实现仍常包一层
- * ```json 围栏或加一句说明。为此直接判失败，会让接入第一天就不可用。
- * 但容错到此为止 —— 提取出的结构仍要过 `validatePlacements`。
-  */
 function extractJson(text: string): unknown {
   const trimmed = text.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
   try {
@@ -156,7 +137,6 @@ export function createExternalPlacement(
   options: {
     transport?: PlacementTransport;
     fetchImpl?: typeof fetch;
-    /** 密钥直接给出（由调用方从库里的 `config.placement.apiKey` 解出来）；不进日志  */
     apiKey?: string;
   } = {},
 ): { id: string; place(request: ExternalPlacementRequest): Promise<ExternalPlacementResult> } {
@@ -171,15 +151,12 @@ export function createExternalPlacement(
       const timer = setTimeout(() => controller.abort(), config.timeoutMs);
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-      /* 请求体只带这次要落位的文本段与候选集：不把整篇文档发出去（那是"数据找人"的边界）  */
       const body = JSON.stringify({
         ...(request.traceId ? { traceId: request.traceId } : {}),
         segments: request.segments.map((segment) => ({ index: segment.index, text: segment.text })),
         candidates: request.candidates.nodeIds,
       });
 
-      /* 超时不能只靠 transport 自觉响应 abort：一个不理会 signal 的实现会让请求永远挂着，
-         而"挂着的请求"在现场表现为"落位没反应"，排查方向会完全跑偏（同 http-adapter.ts）。  */
       const timedOut = new Promise<never>((_, reject) => {
         controller.signal.addEventListener('abort', () =>
           reject(new ExternalPlacementError('E_PLACEMENT_TIMEOUT', `落位服务调用超时（${config.timeoutMs}ms）已中止，未产生任何落点`)),
@@ -233,12 +210,6 @@ export function createExternalPlacement(
   };
 }
 
-/**
- * 策略分派：`external` 走外部服务，其余三种走本地纯函数。
- *
- * 这是唯一的异步入口 —— `placeSegments()` 只处理本地策略（它会拒绝 external 配置），
- * 于是"哪些代码会发网络请求"在调用点上就看得见。
- */
 export async function resolvePlacements(
   params: { segments: TranscriptSegment[]; candidates: CandidateSet; traceId?: string },
   config: DictationPlacementConfig,

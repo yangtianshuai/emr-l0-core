@@ -9,15 +9,9 @@ export interface ProbedImage {
   mime: ImageMime;
   width: number;
   height: number;
-  /**
-   * 图片自报的 DPI。读不到时按 96（浏览器与 Office 的默认值）。
-   * 它是"像素 → pt"的唯一依据：不按 DPI 换算，一张 300 DPI 的 20mm 超声图
-   * 会被画成 160mm 宽，而一张 96 DPI 的截图会被画得像邮票。
-   */
   dpi: number;
 }
 
-/** 允许的扩展名（与 MIME 一一对应）：文件落盘时用 MIME 定扩展名，不采信上传方给的文件名 */
 export const IMAGE_EXTENSION: Record<ImageMime, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -31,7 +25,6 @@ const MIME_BY_EXTENSION: Record<string, ImageMime> = {
   webp: 'image/webp',
 };
 
-/** 扩展名 → MIME；认不出来返回 null（静态资源路由据此拒绝下发） */
 export function mimeOfExtension(ext: string): ImageMime | null {
   return MIME_BY_EXTENSION[ext.toLowerCase()] ?? null;
 }
@@ -65,10 +58,6 @@ function startsWith(bytes: Uint8Array, signature: readonly number[]): boolean {
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-/**
- * PNG：IHDR 必在第一个块；DPI 在可选的 pHYs 里。
- * pHYs 的 unit=1 表示"每米像素"，换算 dpi = ppu × 0.0254。
- */
 function probePng(bytes: Uint8Array): ProbedImage | null {
   if (!startsWith(bytes, PNG_SIGNATURE)) return null;
   if (bytes.length < 24) return null;
@@ -80,7 +69,6 @@ function probePng(bytes: Uint8Array): ProbedImage | null {
   if (width <= 0 || height <= 0) return null;
 
   let dpi = DEFAULT_DPI;
-  /* 逐个块扫 pHYs：块结构 = 长度(4) + 类型(4) + 数据 + CRC(4) */
   let offset = 8;
   while (offset + 8 <= bytes.length) {
     const length = u32be(bytes, offset);
@@ -100,10 +88,6 @@ function probePng(bytes: Uint8Array): ProbedImage | null {
   return { mime: 'image/png', width, height, dpi };
 }
 
-/**
- * JPEG：SOF 段里是宽高；APP0/JFIF 里是 DPI。
- * 必须跳过每个段，不能按固定偏移读 —— 段长可变，且 EXIF 段可能很长。
-  */
 function probeJpeg(bytes: Uint8Array): ProbedImage | null {
   if ((bytes[0] ?? 0) !== 0xff || (bytes[1] ?? 0) !== 0xd8) return null;
   let dpi = DEFAULT_DPI;
@@ -121,7 +105,6 @@ function probeJpeg(bytes: Uint8Array): ProbedImage | null {
       offset += 1;
       continue;
     }
-    /* 无长度的独立 marker（RSTn / SOI / EOI / TEM） */
     if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
       offset += 2;
       continue;
@@ -134,7 +117,6 @@ function probeJpeg(bytes: Uint8Array): ProbedImage | null {
       if (isJfif) {
         const unit = bytes[offset + 11] ?? 0;
         const xDensity = u16be(bytes, offset + 12);
-        /* unit=1 是 dpi，unit=2 是"每厘米" */
         if (xDensity > 0 && unit === 1 && xDensity >= 24 && xDensity <= 1200) dpi = xDensity;
         if (xDensity > 0 && unit === 2) {
           const computed = Math.round(xDensity * 2.54);
@@ -142,7 +124,6 @@ function probeJpeg(bytes: Uint8Array): ProbedImage | null {
         }
       }
     }
-    /* SOF0..SOF15，排除 DHT(C4) / JPG(C8) / DAC(CC) */
     const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
     if (isSof && length >= 7) {
       height = u16be(bytes, offset + 5);
@@ -155,7 +136,6 @@ function probeJpeg(bytes: Uint8Array): ProbedImage | null {
   return { mime: 'image/jpeg', width, height, dpi };
 }
 
-/** WebP：VP8X 有 24 位宽高；VP8 与 VP8L 各自一套紧凑编码 */
 function probeWebp(bytes: Uint8Array): ProbedImage | null {
   if (bytes.length < 30) return null;
   if (String.fromCharCode(...bytes.subarray(0, 4)) !== 'RIFF') return null;
@@ -186,10 +166,6 @@ function probeWebp(bytes: Uint8Array): ProbedImage | null {
   return null;
 }
 
-/**
- * 探测一张图。认不出来（非 PNG/JPEG/WebP、头部被截断、尺寸为 0）返回 null ——
- * 调用方必须把 null 当成拒绝，不要退回"按默认尺寸收下"。
-  */
 export function probeImage(bytes: Uint8Array): ProbedImage | null {
   if (bytes.length < 16) return null;
   return probePng(bytes) ?? probeJpeg(bytes) ?? probeWebp(bytes);

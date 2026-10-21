@@ -1,5 +1,3 @@
-// 医生端「能力开关」的运行时验收 —— 在真实 Chromium 里跑，读 DOM。
-
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,21 +7,17 @@ import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SERVER_TS = join(ROOT, 'src', 'demo', 'demo-server.ts');
 const ARTIFACTS = join(ROOT, 'artifacts');
-/** 独立端口：不复用自测的 8799 / demo 的 8787，免得三者在同一台机器上互相踩 */
 const PORT = 8949;
 const BASE = `http://127.0.0.1:${PORT}`;
 const RUN_STAMP = `${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffff).toString(36)}`;
 const stateDir = join(ARTIFACTS, `state-browser-selftest-${RUN_STAMP}`);
 const runtimeDir = join(ARTIFACTS, `runtime-browser-selftest-${RUN_STAMP}`);
 const INIT_SCRIPT = join(ARTIFACTS, `browser-selftest-init-${RUN_STAMP}.js`);
-/** CLI 调用的序号：给每次调用的输出文件起唯一名字（理由同 RUN_STAMP） */
 let cliSeq = 0;
 
 const SESSION = `l0ui-${RUN_STAMP}`;
 
-/** 能力缺席时应当被摘掉的东西（与 ui.html 上的 `data-capability` 一一对应） */
 const DISABLED = { qc: false, finalize: false, log: false, metrics: false, import: false };
-/** 注入之后还剩哪些页签：常驻四个高频入口 + 机读信息 */
 const TABS_AFTER = ['ai', 'voice', 'qc', 'machine'];
 
 const suite = new TestSuite('医生端能力开关 · 浏览器运行时验收', [
@@ -33,31 +27,10 @@ const suite = new TestSuite('医生端能力开关 · 浏览器运行时验收',
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/**
- * 阶段进度。
- *
- * 这条用例整体要几十秒（要拉真实 Chromium），而报告只在最后一次性打印 ——
- * 静默的长任务分不清"在跑"与"卡住了"，而这两者该做的处置完全不同
- * （前者等，后者要去看谁占着浏览器/端口）。所以每个阶段各打一行。
- */
 function step(message: string): void {
   process.stdout.write(`  [浏览器验收] ${message}\n`);
 }
 
-/**
- * 跑一条 agent-browser 命令。
- *
- * 必须走 shell：Windows 上 npm 全局装出来的是 `.cmd` / `.ps1` 垫片，
- * 不经过 shell 起不来（Node 从 18.20 起也不再允许直接 exec `.cmd`）。
- */
-/**
- * 走 shell 跑一条命令。
- *
- * 与 `ui-self-test.ts` 里 `rmRecursive` 同一处境：编辑器注入的 node 语言垫片把
- * `spawnSync` 的选项类型收成了 `{ encoding, cwd, windowsHide }`，没有 `shell`，
- * 而真实运行时是支持的。这里按真实语义转一次类型，而不是为了过检查去掉 `shell: true`
- * —— 去掉之后 `.cmd` 垫片在当前 Node 上根本起不来（表现是"命令找不到"，不是"参数不对"）。
-  */
 const runSync = spawnSync as unknown as (
   command: string,
   args: string[],
@@ -69,7 +42,6 @@ const CLI_TIMEOUT_MS = 120_000;
 
 function runCli(command: string): { ok: boolean; stdout: string; stderr: string } {
   mkdirSync(ARTIFACTS, { recursive: true });
-  /* 每次调用换一对文件名，而不是覆盖同一对：覆盖需要先删，而删除在这台机器上会抛错 */
   cliSeq += 1;
   const outFile = join(ARTIFACTS, `browser-selftest-cli-${RUN_STAMP}-${cliSeq}.out`);
   const errFile = join(ARTIFACTS, `browser-selftest-cli-${RUN_STAMP}-${cliSeq}.err`);
@@ -90,7 +62,6 @@ function runCli(command: string): { ok: boolean; stdout: string; stderr: string 
   };
 }
 
-/** 本用例的所有 agent-browser 调用都收在自己的会话里（理由见 SESSION） */
 function ab(args: string): string {
   return `agent-browser --session ${SESSION} ${args}`;
 }
@@ -99,31 +70,15 @@ function agentBrowserAvailable(): boolean {
   return runCli('agent-browser --version').ok;
 }
 
-/**
- * 递归删目录。
- *
- * 与 `ui-self-test.ts` 里同一处写法一样要转一次类型：编辑器注入的 node 语言垫片
- * 把 `rmSync` 的选项类型收成了 `{force}`，而真实签名是支持 `recursive` 的。
- * 不转的话类型检查过不去，转了才是"按真实运行时的语义用"。
- */
 const rmRecursive = rmSync as unknown as (path: string, options: { recursive: boolean; force: boolean }) => void;
 
-/** 尽力删除：删不掉不算失败（见 RUN_STAMP 的说明），但也不假装删过 */
 function tryRemove(path: string): void {
   try {
     rmRecursive(path, { recursive: true, force: true });
   } catch {
-    /* 垫片把删除变成了"移到回收站"，它失败时不该拖垮用例 */
   }
 }
 
-/**
- * 把一段页面代码交给浏览器执行，取回它返回的 JSON。
- *
- * 页面代码里不得出现双引号：命令要经 cmd.exe，参数里的双引号会被吃掉或截断，
- * 而那时的表现是 `SyntaxError` 或莫名其妙的 `xxx is not defined` —— 与真正的失败
- * 分不开。所以这里把它变成一条硬约束，而不是靠写的时候记得。
-  */
 function evalInPage(js: string): Record<string, unknown> {
   assert(!js.includes('"'), '页面代码里不得出现双引号（Windows 下要经 cmd.exe，参数里的双引号会被吃掉）');
   const run = runCli(ab(`eval "${js}"`));
@@ -137,7 +92,6 @@ function evalInPage(js: string): Record<string, unknown> {
     .filter((line) => line.length > 0);
   const last = lines.at(-1);
   assert(last !== undefined, '浏览器没有返回任何内容（stdout 为空）');
-  /* CLI 会把页面返回的字符串再 JSON 编码一次，所以这里可能要解两层 */
   let once: unknown;
   try {
     once = JSON.parse(last);
@@ -147,7 +101,6 @@ function evalInPage(js: string): Record<string, unknown> {
   return (typeof once === 'string' ? JSON.parse(once) : once) as Record<string, unknown>;
 }
 
-/** 页面侧通用探针：页签、能力入口、菜单、活动页签，以及状态投影的形状。 */
 function probeJs(): string {
   return [
     '(function(){',
@@ -207,7 +160,6 @@ function writeInitScript(): void {
 }
 
 function closeBrowser(): void {
-  /* 无论成功失败都要关：留着就是常驻 daemon + 一个 Chromium 进程 */
   runCli(ab('close'));
 }
 
@@ -254,7 +206,6 @@ async function main(): Promise<void> {
 
     await test('B1 起一个独立实例（独立库 + 独立运行目录）', async () => {
       step(`启动独立实例（端口 ${PORT}，独立库与运行目录）…`);
-      /* 不需要"先清空"：目录名带 RUN_STAMP，天然是从空库出发的 */
       instance = spawn(process.execPath, ['src/demo/demo-server.ts', '--port', String(PORT)], {
         cwd: ROOT,
         stdio: 'pipe',
@@ -280,8 +231,6 @@ async function main(): Promise<void> {
       const seen = evalInPage(probeJs());
       step(`基线取回：${(seen.tabs as string[]).length} 个页签 / ${seen.markedCount} 个能力入口`);
       const tabs = seen.tabs as string[];
-      /* 8 = 五个高频 + 三个低频（定稿 / 日志 / 指标）。低频那三项住在「⋯」菜单的标记里，
-         但 `[data-tab]` 在 DOM 里一直都在（页签栏或菜单，两者都算"页面上的页签"）。 */
       assertEqual(tabs.length, 8, `未注入时应有 8 个页签（否则 B3 的"变少了"可能只是页面本身坏了）`);
       assertEqual(seen.markedCount, 9, '未注入时 9 个 data-capability 入口都应还在');
       assertEqual(seen.moreButton, true, '未注入时「⋯」按钮应在');
@@ -291,7 +240,6 @@ async function main(): Promise<void> {
     await test('B3 启动路径注入：页签只剩 4 个、9 个入口全摘、活动页签回退、「⋯」菜单清空', () => {
       step('注入：--init-script 在首次导航之前注册，并把活动页签预置成即将被摘掉的 log…');
       closeBrowser();
-      /* 关键：`--init-script` 注册在首次导航之前，且活动页签预置成将被摘掉的 `log`  */
       openAppPage(`--init-script "${INIT_SCRIPT}" `);
       const seen = evalInPage(probeJs());
       step(`注入后取回：${(seen.tabs as string[]).length} 个页签 / ${seen.markedCount} 个能力入口 / 活动页签 ${seen.activeTab}`);

@@ -1,5 +1,3 @@
-// T01 验收自测（零依赖，可直接运行）：。
-
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +30,6 @@ function readJson(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')) as Record<string, unknown>;
 }
 
-/** 递归反转对象键序（用于证明 canonical 化不依赖键序） */
 function reverseKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(reverseKeys);
   if (value !== null && typeof value === 'object') {
@@ -67,7 +64,7 @@ async function main(): Promise<void> {
   });
 
   await test('序列化往返：签章产物语义零差异', () => {
-    if (!existsSync(SIGNED)) return; // 夹具尚未生成时跳过（由 S4 --emit 产出）
+    if (!existsSync(SIGNED)) return;
     const doc = fromJson(readJson(SIGNED));
     assertEqual(fromJson(toJson(doc)), doc, '签章产物往返应完全一致');
   });

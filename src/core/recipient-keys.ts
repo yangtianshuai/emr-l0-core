@@ -1,6 +1,3 @@
-// T18d 接收方公钥目录：谁持有私钥、公钥长什么样、怎么交换。
-// 那是纯演示（私钥可被任何人推导）。真实场景需要：接收方自己生成密钥对，把公钥交给发送方，
-
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
@@ -14,11 +11,8 @@ import {
 
 export interface RecipientKey {
   keyId: string;
-  /** 人类可读的标签（"张医生"/"会诊终端A"）——只是标签，不构成身份证明  */
   label: string;
-  /** SM2 公钥 SPKI（DER）的 base64；私钥永不入库  */
   spkiBase64: string;
-  /** SM3(SPKI) 指纹（完整值，不截断） */
   fingerprint: string;
   algorithm: 'SM2';
   createdAt: string;
@@ -46,10 +40,6 @@ export type ParseResult =
 const PEM_BEGIN = '-----BEGIN PUBLIC KEY-----';
 const PEM_END = '-----END PUBLIC KEY-----';
 
-/**
- * 解析一段公钥文本：接受 PEM（含头尾与换行）、纯 base64、以及带空格/换行的 base64。
- * 解析成功后必须通过"点在曲线上"的校验才算数。
-  */
 export function parseRecipientPublicKey(text: string): ParseResult {
   const trimmed = (text ?? '').trim();
   if (trimmed === '') return { ok: false, code: 'E_KEY_TEXT_EMPTY', reason: '公钥文本为空' };
@@ -91,8 +81,6 @@ export function parseRecipientPublicKey(text: string): ParseResult {
     };
   }
   const publicKey = parsedSpki.publicKey;
-  /* 这里再确认一次"点在曲线上"不是多余：解析层已经保证，但加密交付是不可逆的动作，
-     宁可多花一次模运算，也不要拿一把来历不明的钥匙去加密。  */
   if (!isOnCurve(publicKey)) {
     return { ok: false, code: 'E_KEY_NOT_ON_CURVE', reason: '公钥点不在 SM2 曲线上，拒绝导入' };
   }
@@ -101,18 +89,15 @@ export function parseRecipientPublicKey(text: string): ParseResult {
   return { ok: true, publicKey, spkiBase64, fingerprint: publicKeyFingerprint(publicKey) };
 }
 
-/** 导出为可线下交换的文本（PEM 或纯 base64） */
 export function exportRecipientPublicKey(spkiBase64: string, format: 'pem' | 'base64' = 'pem'): string {
   if (format === 'base64') return spkiBase64;
   const wrapped = spkiBase64.replace(/(.{64})/g, '$1\n').trim();
   return `${PEM_BEGIN}\n${wrapped}\n${PEM_END}\n`;
 }
 
-/** 由目录条目取回公钥点（供加密交付使用） */
 export function publicKeyOf(key: RecipientKey): Sm2Point {
   const parsed = publicKeyFromSpki(new Uint8Array(Buffer.from(key.spkiBase64, 'base64')));
   if (publicKeyFingerprint(parsed) !== key.fingerprint) {
-    /* 条目被改过（指纹与公钥对不上）→ 宁可报错也不要拿一把来历不明的钥匙去加密 */
     throw new Error(`接收方公钥条目 ${key.keyId} 已被篡改：指纹与公钥不匹配`);
   }
   return parsed;
@@ -164,15 +149,12 @@ export function findRecipientKey(store: RecipientKeyStore, keyId: string): Recip
   return store.keys.find((key) => key.keyId === keyId);
 }
 
-/** 目录落盘为明文 JSON：里面只有公钥（公钥本就可公开），私钥从不进入本文件  */
 export function saveRecipientKeys(path: string, store: RecipientKeyStore): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
 }
 
 export function loadRecipientKeys(path: string): RecipientKeyStore {
-  /* 文件不存在是正常状态（首次使用）；其余错误必须显式抛出 ——
-     静默返回空目录会让"我导入的接收方不见了"变成无从排查的问题。  */
   if (!existsSync(path)) return EMPTY_KEY_STORE;
   const text = readFileSync(path, 'utf8');
   let parsed: RecipientKeyStore;

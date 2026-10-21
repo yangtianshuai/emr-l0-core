@@ -1,5 +1,3 @@
-// T28 审计报告：把散落在各处的事实汇总成一份可核对的产物。
-
 import { hashNodes } from '../model/hash.ts';
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
 import type { DataElementTag, DocNode, DocumentModel } from '../model/types.ts';
@@ -13,17 +11,9 @@ export interface AuditGateRejection {
 
 export interface AuditInput {
   doc: DocumentModel;
-  /** 生成时刻（注入以保证"同输入同输出"） */
   generatedAt: string;
-  /** 门控拒绝记录（来自服务端日志；不传就注明"未提供"）  */
   gateRejections?: AuditGateRejection[];
-  /**
-   * 书写时长。通常由调用方传 `session.timing()`（会话里的才是当下这一版）；
-   * 不传则从文档的 `extensions` 里读（落盘时写进去的那一份）。
-   * 两者都没有就如实记为"未提供"。
-   */
   writing?: WritingTiming | null;
-  /** 更细致的不变量检查结果（如 `session.verifyInvariants()`）：本模块不重复实现校验器 */
   invariants?: string[];
 }
 
@@ -31,7 +21,6 @@ export interface AuditCheck {
   id: string;
   description: string;
   pass: boolean;
-  /** 具体证据：哪个节点/哪条留痕/多少条 —— 空字符串表示"无需证据" */
   detail: string;
 }
 
@@ -61,9 +50,7 @@ export interface AuditReport {
     modelId?: string;
     confidence?: number;
     humanConfirmed: boolean;
-    /** 确认人（provenance.acceptedBy 优先，缺失时由留痕推导） */
     acceptedBy?: string;
-    /** 确认时间（来自留痕：节点 rev 对应的那条 revision） */
     confirmedAt?: string;
   }>;
   signatures: Array<{
@@ -82,23 +69,14 @@ export interface AuditReport {
     elementCount: number;
     stale: boolean;
   };
-  /**
-   * 书写时长（来自 `doc.extensions` 里的时长记录；没有就如实记为"未提供"）。
-   *
-   * `trusted:false` 的数字照样给出 —— 但报告里必须写明它不可信：
-   * 藏着"有个数字"而只在不显眼处说不可信，比没有这个数字更容易被人拿去用。
-   */
   writing: {
     present: boolean;
     trusted: boolean;
-    /** 有效编辑时长（毫秒）：相邻书写间隔不超过空闲阈值的那部分 */
     activeMs: number | null;
-    /** 被判为空闲、未计入的时长（毫秒） */
     idleMs: number | null;
     editCount: number | null;
     firstEditAt: string | null;
     lastEditAt: string | null;
-    /** 一句话说清这份时长能不能用 */
     note: string;
   };
   revisions: Array<{
@@ -111,12 +89,6 @@ export interface AuditReport {
     confidence?: number;
   }>;
   gateRejections: AuditGateRejection[];
-  /**
-   * 审签流程：这份病历是怎么走到当前这一态的。
-   *
-   * 与"留痕（操作轨迹）"是两件事：那条列的是"每一次写入"，
-   * 这条只列状态迁移 —— 问"这份是怎么到归档的"时，答案在这里，不用去几百条写入里翻。
-   */
   reviewFlow: Array<{
     rev: number;
     at: string;
@@ -124,11 +96,9 @@ export interface AuditReport {
     op: 'submit' | 'review' | 'void' | 'archive';
     decision?: 'submit' | 'approve' | 'reject';
     note?: string;
-    /** 作废理由（与退回理由分开：两者含义不同，合成一列会让"为什么没了"说不清） */
     reason?: string;
   }>;
   checks: AuditCheck[];
-  /** 报告自身指纹（覆盖除本字段外的全部内容） */
   reportDigest: string;
 }
 
@@ -139,15 +109,6 @@ function tagCodeOf(node: DocNode): string | undefined {
   return tag?.code;
 }
 
-/**
- * 从留痕里定位某节点最后一次变更的记录（按文档级 rev 从后往前找第一条 targetId 匹配的）。
- *
- *  早期版本拿 `node.rev` 去比 `entry.rev`，结果是"所有确认都查不到留痕"（审计报告立刻报出来）。
- * 原因是两者根本不是一回事：
- *   - `revisions[].rev` 是文档级序号（= revisions.length，用于乐观锁）；
- *   - `node.rev` 是节点级版本号（该节点被改过几次）。
- * 这类"看起来同名、实则两个口径"的字段最容易被误用，因此在报告里只按"最后一条针对该节点的留痕"定位。
-  */
 function lastChangeOf(doc: DocumentModel, node: DocNode): DocumentModel['revisions'][number] | undefined {
   for (let index = doc.revisions.length - 1; index >= 0; index -= 1) {
     const entry = doc.revisions[index]!;
@@ -156,10 +117,6 @@ function lastChangeOf(doc: DocumentModel, node: DocNode): DocumentModel['revisio
   return undefined;
 }
 
-/**
- * 生成审计报告。
- * `checks` 的每一条都必须能指向具体证据：做不到就不写进报告（避免"看起来专业但无法复核"的结论）。
-  */
 export function buildAuditReport(input: AuditInput): AuditReport {
   const { doc, generatedAt } = input;
   const nodes = Object.values(doc.nodes) as DocNode[];
@@ -177,8 +134,6 @@ export function buildAuditReport(input: AuditInput): AuditReport {
   const gateRejections = input.gateRejections ?? [];
   const gateLogProvided = input.gateRejections !== undefined;
 
-  /* 书写时长优先用调用方给的（会话里的才是当下这一版），没有再从文档里读（落盘时写的那一份）。
-     这里绝不重算：报告是"事后看"，审计要的是当时记下的那个数，不是此刻算出来的数。 */
   const writing = input.writing ?? readWritingTiming(doc);
 
   const checks: AuditCheck[] = [
@@ -244,8 +199,6 @@ export function buildAuditReport(input: AuditInput): AuditReport {
     {
       id: 'SIGNATURE_COVERS_MACHINE_READABLE',
       description: '机读信息载体在签名覆盖范围内（否则结构化数据可被替换而不破坏签名）',
-      /*  covers 记的是容器内文件路径（如 `MachineReadable.xml`），不是逻辑段名 ——
-         早期按字符串 `machineReadable` 去匹配，结果"明明覆盖了却报未覆盖"（由审计报告实测发现）。  */
       pass:
         machine === undefined ||
         (doc.signatureRefs ?? []).every((reference) => (reference.covers ?? []).some((path) => /machine/i.test(path))),
@@ -294,8 +247,6 @@ export function buildAuditReport(input: AuditInput): AuditReport {
     },
     aiParticipation: aiNodes.map((node) => {
       const record = lastChangeOf(doc, node);
-      /* 确认人优先取 provenance.acceptedBy（AI 建议被采纳时写入），缺失则从留痕推导 ——
-         两个来源都写进报告，便于核对它们是否一致 */
       const confirmedBy = node.provenance?.acceptedBy ?? record?.actorId;
       return {
         nodeId: node.id,
@@ -364,13 +315,11 @@ export function buildAuditReport(input: AuditInput): AuditReport {
     reportDigest: '',
   };
 
-  /* 指纹覆盖"除自身外的全部内容"：任何一个数字被改都会对不上 */
   const withoutDigest = { ...report, reportDigest: '' };
   report.reportDigest = sm3Hex(utf8(JSON.stringify(withoutDigest)));
   return report;
 }
 
-/** 校验报告是否被改动过（把 reportDigest 重算一遍比对） */
 export function verifyAuditReport(report: AuditReport): { ok: boolean; reason?: string } {
   const expected = sm3Hex(utf8(JSON.stringify({ ...report, reportDigest: '' })));
   return expected === report.reportDigest
@@ -380,10 +329,6 @@ export function verifyAuditReport(report: AuditReport): { ok: boolean; reason?: 
 
 const yn = (value: boolean): string => (value ? '✅' : '❌');
 
-/**
- * 渲染为人可读的 Markdown。
- * 结论文本必须与 checks 一致：报告里既要有"通过/未通过"的摘要，也要能逐条看到证据。
-  */
 export function renderAuditReportMarkdown(report: AuditReport): string {
   const passed = report.checks.filter((check) => check.pass).length;
   const lines: string[] = [

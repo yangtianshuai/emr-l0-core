@@ -1,13 +1,6 @@
-// T27 · WS/T 500（电子病历共享文档）XML 导出（零依赖）。
-
 import type { DataElementTag, DocNode, DocumentModel, FieldNode, NodeId, SectionNode } from '../model/types.ts';
 
 export interface Wst500ExportOptions {
-  /**
-   * 标签体系 → codeSystem(OID) 映射。
-   * 默认表里的 OID 需要按院方字典核对后再用于生产（尤其是 2.16.156.10011 根下
-   * 具体后缀与本地字典的对应关系）；这里只保证"不编造、可覆盖"。
-    */
   tagSystemOids?: Record<string, string>;
   /** 文档类型 codeSystem（默认 urn:l0:docType：明确表示"这不是标准里的文书类型编码"） */
   docTypeCodeSystem?: string;
@@ -19,12 +12,6 @@ export interface Wst500ExportResult {
   warnings: string[];
 }
 
-/**
- * 默认标签体系 OID 表。
- * - `2.16.840.1.113883.6.x` 是 HL7 注册的 OID（ICD/LOINC 等），可直接使用；
- * - `2.16.156.10011` 是中国卫生信息标准根 OID，根可用但具体后缀必须院方核对；
- * - `urn:l0:*` 是本系统自用命名空间，明确表示"未映射到标准"。
-  */
 const DEFAULT_TAG_SYSTEM_OIDS: Record<string, string> = {
   WST500: '2.16.156.10011.2.1.1.4',
   WS445: '2.16.156.10011.2.1.1.5',
@@ -46,12 +33,6 @@ function esc(text: string): string {
     .replace(/'/g, '&apos;');
 }
 
-/**
- * ISO 时间 → CDA 时间。保持原精度：
- *   '2026-10-08T10:30:00' → '20261008103000'；'1990-03-12' → '19900312'。
- * 不要给日期补 `000000`：CDA 允许两种精度，但补齐之后回导会变成
- * `1990-03-12T00:00:00`，与源值不再相等 —— 往返保真优先于"格式整齐"（实测踩到）。
-  */
 function toCdaTime(iso: string | undefined): string | undefined {
   if (!iso) return undefined;
   const digits = iso.replace(/\D/g, '');
@@ -91,7 +72,6 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
 
   const stats = { sections: 0, paragraphs: 0, fields: 0, textChars: 0, aiFields: 0 };
   const usedSystems = new Set<string>();
-  /** 没导出的表格（连带格子里的结构化数据）：最后要逐条说明，不做静默丢弃  */
   const skippedTables: string[] = [];
 
   const codeSystemOf = (field: FieldNode): string => {
@@ -105,7 +85,6 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
     return tagOids[system] ?? 'urn:l0:tag:unmapped';
   };
 
-  /** 收集一个章节下的正文段落（paragraph → text 子节点）与结构化数据（field，可能挂在 paragraph 或 section 上） */
   const collect = (section: SectionNode): { paragraphs: string[]; fields: FieldNode[]; childSections: SectionNode[] } => {
     const paragraphs: string[] = [];
     const fields: FieldNode[] = [];
@@ -116,9 +95,6 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
         continue;
       }
       if (child.type === 'table') {
-        /* 表格在这套映射里没有对应结构（WS/T 500 的 section/entry 中不含表格容器）。
-           跳过可以，但必须说出来：静默丢掉一张生命体征单，对方拿到的是"少了一半"的病历，
-           而导出的人只会以为一切正常 —— 警告里要带上在哪儿丢的。  */
         skippedTables.push(`${section.title ?? section.sectionCode ?? section.id}（${child.colCount ?? '?'} 列）`);
         continue;
       }
@@ -129,8 +105,6 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
           stats.paragraphs += 1;
           stats.textChars += text.length;
         }
-        /* 段落下的字段（模型允许 field 挂在 paragraph 下）也要落进 entry，
-           否则"体温 38.5"这类结构化数据会在交换时丢失 —— 只剩叙述文本里的一句话。 */
         for (const grandChild of childrenOf(doc, child.id)) if (isField(grandChild)) fields.push(grandChild);
         continue;
       }
@@ -183,7 +157,6 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
     const { paragraphs, fields, childSections } = collect(section);
     const lines: string[] = [];
     lines.push(`${indent}<section>`);
-    /* 没有 sectionCode 就不写 code：宁可缺元素，也不糊一个假编码（对手方会当真） */
     if (section.sectionCode) {
       lines.push(`${indent}  <code code="${esc(section.sectionCode)}" codeSystem="${esc(tagOids.WST500 ?? 'urn:l0:tag:unmapped')}"/>`);
     }
@@ -257,7 +230,6 @@ export function buildWst500Xml(doc: DocumentModel, options: Wst500ExportOptions 
   }
 
   if (skippedTables.length > 0) {
-    /* 逐条说清"在哪儿丢的"：只说"有表格没导出"，导出的人就得自己回头翻是哪一张 */
     warnings.push(
       `有 ${skippedTables.length} 张表格未导出（WS/T 500 的章节结构里没有表格容器）：`
         + `${skippedTables.join('、')} —— 表格里的结构化数据在源文书里仍然完整，但对方系统收不到`,

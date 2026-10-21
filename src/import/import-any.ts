@@ -9,16 +9,10 @@ export type ImportFormat = 'ofd' | 'wst500' | 'unknown';
 
 export type AnyImported = { kind: 'ofd'; result: OfdImportResult } | { kind: 'wst500'; result: Wst500ImportResult };
 
-/** ZIP 本地文件头（OFD 是 ZIP 容器） */
 function isZip(bytes: Uint8Array): boolean {
   return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04;
 }
 
-/**
- * 嗅探格式。只看前若干字节：
- *   - ZIP 魔数 → OFD 容器；
- *   - 文本且根元素为 ClinicalDocument（或含 structuredBody）→ WS/T 500。
- */
 export function sniffImportFormat(bytes: Uint8Array): ImportFormat {
   if (isZip(bytes)) return 'ofd';
   const head = new TextDecoder('utf-8').decode(bytes.slice(0, 4096)).replace(/^\uFEFF/, '').trimStart();
@@ -44,7 +38,6 @@ export function buildDraftFromAny(parsed: AnyImported, meta: ImportMeta): Import
   return parsed.kind === 'ofd' ? buildImportedDraft(parsed.result, meta) : buildWst500Draft(parsed.result, meta);
 }
 
-/** 统一的"人话摘要"，供日志与界面展示（两种格式的统计口径在这里对齐） */
 export function describeAnyImport(parsed: AnyImported): string {
   if (parsed.kind === 'ofd') {
     const { format, pages, machine } = parsed.result;

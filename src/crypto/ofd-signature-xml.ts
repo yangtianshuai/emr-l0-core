@@ -1,5 +1,3 @@
-// Signatures.xml 的读写放在同一个模块。
-
 import { attrOf, childOf, findAll, findFirst, parseXml, textOf } from '../import/xml.ts';
 import type { ReferenceEntry, SignatureBlock } from './signature.ts';
 

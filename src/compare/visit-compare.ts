@@ -1,5 +1,3 @@
-// 跨次就诊对比 —— 同一位患者、两次就诊的两份文书并排看。
-
 import type { DataElementTag, DocumentModel, NodeId, SectionNode } from '../model/types.ts';
 
 export interface CompareTag {
@@ -11,27 +9,20 @@ export interface CompareTag {
 export type SectionState = 'same' | 'changed' | 'added' | 'removed';
 
 export interface SectionRow {
-  /** 对齐键：优先 `sectionCode`，没有就用标题（两者都没有就用节点 id，等于只跟自己对上） */
   key: string;
   code: string | null;
   title: string;
   state: SectionState;
-  /** 上次的段落原文（按文档顺序） */
   previous: string[];
-  /** 这次的段落原文 */
   current: string[];
-  /** 这次新增的段落（按这次文档顺序） */
   added: string[];
-  /** 上次有、这次没有的段落（按上次文档顺序） */
   removed: string[];
 }
 
 export interface MedicationCarry {
-  /** 上次"医嘱/用药/处理/治疗"章节的段落原文；给不出时为空数组 */
   paragraphs: string[];
   sectionTitle: string | null;
   code: string | null;
-  /** 给不出的原因；能给出时为 null */
   reason: string | null;
 }
 
@@ -45,7 +36,6 @@ export interface VisitCompare {
     currentEmpty: boolean;
   };
   sections: SectionRow[];
-  /** 有差异的章节数（新增/删除/改写都算） */
   changedSections: number;
   medication: MedicationCarry;
   /** 这次对比的前提，必须显示给人看（否则"没差异"会被读成"没问题"） */
@@ -57,7 +47,6 @@ const textOfNode = (node: DocumentModel['nodes'][string]): string => {
   return node.runs.map((run) => run.text).join('');
 };
 
-/** 诊断编码：只认 ICD 族（`ICD10` / `ICD-10` / `ICD9`…），其余数据元不参与"同诊断"判断 */
 const isIcdTag = (tag: DataElementTag): boolean => /^icd/i.test(String(tag.system ?? ''));
 
 function diagnosisOf(doc: DocumentModel): CompareTag[] {
@@ -80,7 +69,6 @@ function diagnosisOf(doc: DocumentModel): CompareTag[] {
 
 const keyOfTag = (tag: CompareTag): string => `${tag.system}|${tag.code}`;
 
-/** 节点所在的最近一层章节（走到根就返回 null：根上没有"章"这个概念） */
 function sectionOf(doc: DocumentModel, nodeId: NodeId): SectionNode | null {
   let cursor: NodeId | null = doc.nodes[nodeId]?.parentId ?? null;
   const guard = new Set<string>();
@@ -94,7 +82,6 @@ function sectionOf(doc: DocumentModel, nodeId: NodeId): SectionNode | null {
   return null;
 }
 
-/** 章节按文档顺序排（`order` 是同级序号；跨级比较时用 id 兜底，保证结果可复现） */
 function sectionsOf(doc: DocumentModel): SectionNode[] {
   return Object.values(doc.nodes)
     .filter((node): node is SectionNode => node.type === 'section')
@@ -104,12 +91,6 @@ function sectionsOf(doc: DocumentModel): SectionNode[] {
 const sectionKeyOf = (section: SectionNode): string =>
   section.sectionCode && section.sectionCode !== '' ? section.sectionCode : (section.title ?? section.id);
 
-/**
- * 段落级 LCS：只用来对齐，不用来算相似度。
- *
- * 字符级 diff 会把"发热 3 天"和"反复发热三天"拆成一地碎块，读起来比原文还慢；
- * 医生判断的是"这一段要不要"，所以对齐单位就是段落。
- */
 function diffParagraphs(previous: string[], current: string[]): { added: string[]; removed: string[] } {
   const rows = previous.length;
   const cols = current.length;
@@ -142,14 +123,12 @@ function diffParagraphs(previous: string[], current: string[]): { added: string[
   return { added, removed };
 }
 
-/** 用药/医嘱类章节：按编码或标题认，认不出就不认（宁可说"给不出"） */
 const MED_SECTION_CODE = /(order|medic|drug|treatment|plan|prescription)/i;
 const MED_SECTION_TITLE = /(医嘱|用药|处方|处理|治疗)/;
 
 function isMedicationSection(section: SectionNode): boolean {
   const code = String(section.sectionCode ?? '');
   const title = String(section.title ?? '');
-  /* 编码命中要更严格：`plan` 可能指"诊疗计划"，那也正是用药最常出现的地方，认它 */
   if (code !== '' && MED_SECTION_CODE.test(code)) return true;
   return MED_SECTION_TITLE.test(title);
 }
@@ -221,7 +200,6 @@ export function compareVisits(previous: DocumentModel, current: DocumentModel): 
       removed,
     });
   }
-  /* 顺序：按本次文档的章节顺序，本次没有的（removed）排在后面 —— 人先看"这次有什么" */
   const currentOrder = new Map(currentSections.map((section, index) => [sectionKeyOf(section), index]));
   sections.sort((left, right) => {
     const leftIndex = currentOrder.get(left.key);

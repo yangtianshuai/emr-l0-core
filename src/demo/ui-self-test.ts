@@ -1,5 +1,3 @@
-// Demo 界面 + 服务的验收自测（这一层最容易"看起来在跑、其实全废"）。
-
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -26,13 +24,6 @@ import { ASR_NO_CONFIDENCE_NOTE, encodeCaptureWav, parseCaptureWav } from '../di
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const STATE_KEY = 'selftest-ui-state-key';
-/**
- * 测试用的后台账号。
- *
- * 产品侧已经没有任何内置口令（口令存在数据库里，由第一次运行时初始化），
- * 所以测试自己把账号造出来，而不是"去猜产品里那条演示口令"：
- * 后者只有在"产品里真的存在一条硬编码口令"时才成立，而那种设计正是这一轮要去掉的。
- */
 const ADMIN_USER = 'ADMIN';
 const ADMIN_PASSWORD = 'selftest-admin-password';
 const QC_USER = 'qc-selftest';
@@ -41,15 +32,8 @@ const SELFTEST_ROLE_PASSWORD = 'selftest-role-password';
 /** B37 用它验"登录失败有代价 + 成功会清零"（不能用 ADMIN 那个桶，否则会把后面要用的桶一起打满） */
 const BRUTE_USER = 'brute-selftest';
 const BRUTE_PASSWORD = 'selftest-brute-password';
-/** 严格模式实例写进 `server-config.json` 的装机凭据（`bootstrap.token`）：用来证明"未初始化 + 已给部署凭据"那一档真的要求它 */
 const STRICT_DEPLOY_TOKEN = 'selftest-deploy-token';
 
-/**
- * 登录参数成对给出（用户名 + 口令）。
- *
- * 写成 `[用户名, 口令]` 两个常量而不是"一个角色名 + 一条口令"：后者在共享口令模型下成立，
- * 而现在的登录凭据就是这两样，用例读起来也该是这两样。
- */
 const AS_ADMIN: [string, string] = [ADMIN_USER, ADMIN_PASSWORD];
 const AS_QC: [string, string] = [QC_USER, SELFTEST_ROLE_PASSWORD];
 const AS_CLINICIAN: [string, string] = [CLINICIAN_USER, SELFTEST_ROLE_PASSWORD];
@@ -59,35 +43,23 @@ const SERVER_CONFIG_FILE = join(runtimeDir, 'server-config.json');
 const UI_HTML = join(ROOT, 'src', 'demo', 'ui.html');
 const UI_CSS = join(ROOT, 'src', 'demo', 'ui.css');
 const UI_JS = join(ROOT, 'src', 'demo', 'ui.js');
-/** 正文渲染（逐个节点的那套 HTML）：医生端与管理后台的模板预览共用这一份  */
 const DOC_VIEW_JS = join(ROOT, 'src', 'demo', 'doc-view.js');
-/** 自由流式视图（整页连续书写）：与 doc-view.js 并列的第二套正文画法。
- *  它同样必须在 `script` 整体里 —— 否则"渲染里输出了 data-flow-seg、
- *  脚本里却读不到"这类跨文件断裂会被 A3 漏掉（那正是 A3 存在的理由）。  */
 const FLOW_VIEW_JS = join(ROOT, 'src', 'demo', 'flow-view.js');
-/** 自定义弹框（确认 / 提示 / 一句话）：医生端与管理后台共用的一份经典脚本。
- *  它不在 `frontend` 整体里（那会牵动一批结构断言），涉及它的检查单独读这个文件。  */
 const DIALOG_JS = join(ROOT, 'src', 'demo', 'dialog.js');
-/** 宿主接入桥（被嵌进医生工作站时的那一层）：同样是独立脚本 + 独立静态路由，
- *  涉及它的检查也单独读这个文件（它不在 `script` 整体里，那会牵动一批结构断言）。  */
 const HOST_BRIDGE_JS = join(ROOT, 'src', 'demo', 'host-bridge.js');
 const SERVER_TS = join(ROOT, 'src', 'demo', 'demo-server.ts');
 const PORT = Number(process.env.L0_UI_SELFTEST_PORT ?? 8799);
-/** 主实例的基地址（`loginAt` / `provisionAccounts` 要按地址打不同实例） */
 const BASE = `http://127.0.0.1:${PORT}`;
 /** 靶子签名服务的端口（与 demo 服务分开，免得"服务端自己签自己"看不出来） */
 const SIGN_PORT = Number(process.env.L0_UI_SELFTEST_SIGN_PORT ?? 8809);
-/** 靶子 ASR 服务的端口（同样与服务分开：真连一次，才谈得上"转发走通了"） */
 const CAPTURE_PORT = Number(process.env.L0_UI_SELFTEST_CAPTURE_PORT ?? 8829);
 const CAPTURE_ASR_URL = `http://127.0.0.1:${CAPTURE_PORT}`;
 /** 部署声明的模型标识（该 ASR 不返回模型信息，只能由部署方声明，且必须带版本/日期） */
 const CAPTURE_MODEL = 'local/asr-zh-med:0.9@2026-09-selftest';
-/** 靶子 ASR 固定回的文本：断言"拿回来的就是服务给的那句" */
 const CAPTURE_TEXT = '患者三天前无明显诱因出现咳嗽，咳白色黏痰。';
 /** 一段合法的 16k / 单声道 / 16-bit PCM WAV（采集端固定产出这一种格式） */
 const CAPTURE_AUDIO = encodeCaptureWav(new Uint8Array(3200));
 const CAPTURE_CLIENT_PORT = 8931;
-/** 桥的一次性令牌（真实部署里由客户端打开页面时带上；这里显式给出，便于断言"错令牌被拒"） */
 const CAPTURE_CLIENT_TOKEN = 'selftest-capture-token-1';
 const FIRST_DOC = 'doc_001_opd';
 const SECOND_DOC = 'doc_001_opd_prev';
@@ -97,22 +69,18 @@ const suite = new TestSuite('Demo 界面与服务验收自测', [
   'B 部分用真实 HTTP 打真实服务，验证用户点到的每一条链路（含切换病历后状态是否真的独立）。',
 ]);
 
-const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
+const ONLY = String(process.env.L0_UI_ONLY || '').trim();
+const test = (name: string, fn: () => void | Promise<void>): Promise<void> => (
+  ONLY === '' || name.includes(ONLY) ? suite.test(name, fn) : Promise.resolve()
+);
 
 const html = readFileSync(UI_HTML, 'utf8');
 const css = readFileSync(UI_CSS, 'utf8');
-/** 架构拆分后脚本独立成 ui.js；正文渲染又搬到了 `/doc-view.js`（医生端与管理后台共用）。
-    静态检查的"脚本"是两份合起来：否则"渲染里输出了 data-x、脚本里却读不到"
-    这类断裂会因为跨了文件而漏掉 —— 而那正是 A3 / A28 / B25 / B27 要守的东西。  */
 const script = `${readFileSync(UI_JS, 'utf8')}\n;\n${readFileSync(DOC_VIEW_JS, 'utf8')}\n;\n${readFileSync(FLOW_VIEW_JS, 'utf8')}`;
-/** 流式视图单独读一份：涉及它的断言要能明确"这条是它的事"，而不是混在 `script` 整体里 */
 const flowScript = readFileSync(FLOW_VIEW_JS, 'utf8');
 const serverSource = readFileSync(SERVER_TS, 'utf8');
-/** ui.html 现在不含内联 <script>/<style>，结构性断言直接看它 */
 const markup = html;
-/** 前端整体（结构 + 样式 + 脚本）：用于"引用完整性"类检查（dataset 属性、api 路径等跨文件存在） */
 const frontend = `${html}\n${css}\n${script}`;
-/** 去注释后的 CSS：结构纪律针对的是属性声明（max-height 等），注释里出现这些字样不违规 */
 const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
 
 function kebab(name: string): string {
@@ -124,12 +92,6 @@ interface ApiResponse {
   code?: string;
   message?: string;
   state?: DemoState;
-  /**
-   * 粘贴落位结论（`/api/paste-text`）：哪几段被挪到了哪一章、凭什么。
-   *
-   * 它在响应顶层（与 `state` 同类：描述"这次调用是怎么做的"，不是"产出了什么"），
-   * 与前端 `placementNote(r.placement)` 读的是同一处 —— 两个位置读岔了，界面就永远沉默。
-    */
   placement?: {
     enabled: boolean;
     moved: number;
@@ -143,12 +105,6 @@ interface ApiResponse {
       moved: boolean;
     }>;
   } | null;
-  /**
-   * 即时结构化的提议结果（`/api/structure-propose`）：哪几段提议绑哪个数据元、凭什么。
-   *
-   * 同样在顶层（与 `placement` 同类：它描述"这次判定是怎么做的"）。
-   * 它是 `?` 而不是 `| null`：这个接口每次都给一份结果（包括"策略不参与"那一档）。
-    */
   structure?: {
     enabled: boolean;
     proposed: number;
@@ -166,18 +122,10 @@ interface ApiResponse {
       keyContent: boolean;
     }>;
   };
-  /**
-   * 各接口自己的附加数据。
-   *
-   * 这里列出的是断言真的会读的字段（不是全量接口文档）：字段够用就好，
-   * 因为它的作用只是让"读了一个不存在的字段"在 typecheck 阶段就暴露 ——
-   * 断言读错字段名时，那种错误在运行期表现为 `undefined`，与"接口没返回"分不开。
-    */
   data?: {
     suggestionId?: string;
     docId?: string;
     pages?: number;
-    /* 模板库 / 科室字典那几个接口的返回 */
     itemId?: string;
     packId?: string;
     status?: string;
@@ -185,12 +133,9 @@ interface ApiResponse {
     action?: string;
     fingerprintAfter?: string;
     removedCodes?: string[];
-    /* 科室字典 / 文书类型保存后的回执：被去掉的条目要如实点名 */
     removedKeys?: string[];
     enabledCount?: number;
-    /* 多行粘贴（`/api/paste-text`）新建的文本节点：界面据此把光标放进第一段 */
     textNodeIds?: string[];
-    /* 即时结构化采纳（`/api/structure-apply`）的回执：真的绑上了哪几条、跳过哪几条及原因 */
     applied?: Array<{ nodeId: string; tag: DataElementTag }>;
     skipped?: Array<{ nodeId: string; tag: DataElementTag; reason: string }>;
   };
@@ -226,34 +171,24 @@ interface TreePatient {
 interface DemoItem {
   kind: string;
   id: string;
-  /** 章节的人话名（只有 `kind === 'section'` 有）：正文按文档顺序下发，段落据此归到哪一章 */
   title?: string;
   keyContent: boolean;
   humanConfirmed: boolean;
-  /** 来源：human | ai | system | imported */
   origin: string;
   text?: string;
   tags?: Array<{ system?: string; code: string; display?: string }>;
-  /** 机器绑上、待人确认的标签（采纳后出现；确认该段内容即消失，未消失则签章被拦） */
   unconfirmedTags?: Array<{ system?: string; code: string; display?: string }>;
-  /** 字段/派生值的显示文本（界面据此渲染 input） */
   value?: string;
   unit?: string;
-  /** 段落在本节的位置（界面据此禁用"上移/下移"） */
   paragraphFirst?: boolean;
   paragraphLast?: boolean;
-  /** 由模板实例化而来时的出处：界面据此把"系统带入"改写成"模板带入" */
   templateRef?: string;
-  /** 列表项的行首标记（只有 `kind === 'listItem'` 有）：`· ` 或 `1. `，由服务端算 */
   marker?: string;
-  /** 列表项里文本节点的 id：界面用它走 `data-edit` 那条写路径 */
   textId?: string;
-  /** 列表项里填写项的 id：界面用它走 `data-field` 那条写路径 */
   fieldId?: string;
 }
 
 interface DemoState {
-  /** 接收方公钥目录（全局，不属于某份文档的阅读记录；只含公钥） */
   recipientKeys: {
     keys: Array<{ keyId: string; label: string; spkiBase64: string; fingerprint: string }>;
     error: string | null;
@@ -266,15 +201,10 @@ interface DemoState {
   items: DemoItem[];
   suggestions: Array<{ id: string; status: string; confidence: number; modified: boolean; editRatio: number | null; editBand: string | null }>;
   metrics: { suggested: number; accepted: number; rejected: number; modified: number; editRate: number; rejectRate: number };
-  /** 三级归因（原样 / 微改 / 大改 + 未归因）：与 `metrics` 并列下发，界面照它渲染，不自己算 */
   attribution: { accepted: number; asIs: number; light: number; heavy: number; unknown: number; asIsShare: number; lightShare: number; heavyShare: number };
   machine: { stale: boolean; count: number; elements: Array<{ code: string; origin: string }> };
   /** 形式类规则清单：只列启用中的（界面展示与扫描同口径） */
   formRules: Array<{ id: string; title: string; severity: string }>;
-  /**
-   * 知识资产包（部署参数：不进文档、不进签名、不改任何病历）。
-   * 两个指纹分开：内容指纹 = "载的是哪一版"，生效指纹 = "实际在跑什么"。
-   */
   knowledgePacks: {
     packs: Array<{
       packId: string;
@@ -286,13 +216,6 @@ interface DemoState {
       enabledItemCount: number;
       items: Array<{ itemId: string; enabled: boolean }>;
     }>;
-    /**
-     * 规则条目目录（含停用项）。
-     *
-     * `predicate / params / detail / suggestion` 四个字段是编辑抽屉的回显来源：
-     * 编辑是"读回 → 改 → 写回"的回路，读不全就等于写不全 ——
-     * 少回显一个字段，那一次保存就会把它静默清掉，而且没有任何地方会报错。
-      */
     rules: Array<{
       packId: string;
       itemId: string;
@@ -303,15 +226,10 @@ interface DemoState {
       params: Record<string, unknown>;
       detail: string | null;
       suggestion: string | null;
-      /**
-       * 判定依据的人话回读（自定义条件专用）：由服务端把条件树（含具名条件的引用）解开算好 ——
-       * 界面不另编一句：两处各编一句，迟早出现"表里说的"与"提示里说的"不一样。
-        */
       conditionSummary?: string | null;
     }>;
     contentFingerprint: string;
     effectiveFingerprint: string;
-    /** 落库现状：载进来的是哪几个包、以及库是不是空的（空库会让质控 0 命中） */
     store: {
       tables: string[];
       source: 'empty' | 'database' | null;
@@ -319,37 +237,21 @@ interface DemoState {
       error: string | null;
     };
   };
-  /**
-   * 可编辑的判定方式与它们的参数规格（下发给界面生成"判定方式"下拉与参数表单）。
-   * 界面不自己抄一份谓词清单：参数名与取值域只在上游写一处，
-   * 两边各写一份的后果是"界面能选、引擎不认"，而它只会等有人真的点了它才暴露。
-    */
   qcPredicates: Array<{
     kind: string;
     label: string;
     doc: string;
     params: Array<{ name: string; kind: string; label: string; doc: string; required?: boolean; options?: string[] }>;
   }>;
-  /**
-   * 条件库目录（具名条件）。
-   *
-   * `when` 与 `summary` 是编辑抽屉的回显来源：条件本身要能原样读回（少带一格，
-   * 保存一次就把它静默清掉），而那句人话用于表里那一列。`usedBy` 是同一个函数算出来的
-   * 引用面 —— 界面在保存前显示它，删除保护也读它（两处各算一遍会得到"界面说没人用、删除却被拒"）。
-    */
-  /** 判定方式：库级资产（全院一份、不属于任何包，所以这里没有 `packId`）  */
   qcConditions: Array<{
     itemId: string;
     name: string;
     description: string | null;
-    /** 参数规格（T1）：空数组 = 不带参数。界面照它渲染"规则填实参"的那几格 */
     params: Array<{ name: string; kind: string; label: string; required?: boolean; options?: string[]; unit?: string; doc: string }>;
     summary: string | null;
     when: unknown;
-    /** 谁在用它：引用方在哪个包（判定方式是库级的，引用方可能分布在多个包里） */
     usedBy: Array<{ packId: string; itemId: string; title: string; enabled: boolean }>;
   }>;
-  /** 判定方式库那一侧的状态（库里有没有、最近谁改的） */
   qcConditionLibrary: { source: string; count: number; updatedAt: string | null; updatedBy: string | null };
   qcPlugins: {
     root: string;
@@ -376,15 +278,7 @@ interface DemoState {
     logic: Array<{ name: string; label: string; doc: string }>;
     limits: { maxDepth: number; maxChildren: number; maxWordLength: number };
   };
-  /**
-   * 旁挂数据落盘状态。`conflict` 为真时界面必须给出出路（「重新载入旁挂数据」），
-   * 所以它不是"内部细节"，而是界面契约的一部分。
-   */
   sidecar: { conflict: boolean; persisted: boolean };
-  /**
-   * 工作数据落在哪个库、里面有多少条，"数据在哪"要能一句话答出来，
-   * 而不是靠人去翻源码找路径（B41 用它证明写入真的进了库）。
-   */
   database: {
     file: string;
     schemaVersion: number;
@@ -395,7 +289,6 @@ interface DemoState {
     sidecars: number;
     kv: number;
   };
-  /** 旁挂质控提示（不是文档内容：不改 rev、不进文档留痕），界面「质控提示」面板就是它 */
   annotations: Array<{
     id: string;
     nodeId: string;
@@ -406,21 +299,10 @@ interface DemoState {
     suggestion: string | null;
     status: string;
     anchorState: string;
-    /** system 来源必带：无依据的提示无法复核（内核要求） */
     ruleId: string | null;
     createdAt: string;
   }>;
-  /**
-   * 最近一次质控扫描里适用但判不了的条目（缺入院时间、导入件…）。
-   *
-   * 它与命中数同屏出现：只说"共 N 条提示"，会让"有一批根本没判"被读成"都查过了"。
-   */
   qcUnevaluated: Array<{ ruleId: string; title: string; nodeId: string; reason: string }>;
-  /**
-   * 内涵类质控的现状（`null` = 还没跑过）。没接上必须看得见：
-   * `configured=false` 时界面要说明原因，不能让它与"跑了 0 命中"长得一样
-   * （这两件事在界面上同形，是内涵类质控最容易撒的谎）。
-   */
   qcContent: {
     configured: boolean;
     reason: string | null;
@@ -432,13 +314,6 @@ interface DemoState {
     silentRules: string[];
     rejected: Array<{ index: number; code: string; message: string }>;
   } | null;
-  /**
-   * 最近一次就诊时间轴的读数（`null` = 还没读过）。
-   *
-   * 它随 state 下发，而不是"每次重渲染现算"：算的输入是全就诊的文书正文，
-   * 而界面上任何一个无关动作都会触发重渲染 —— 那时若重算一次并重新取 `now`，
-   * 同一屏上的时间就会前后不一致。
-   */
   visitTimeline: {
     docs: Array<{ docId: string; createdAt: string; isCurrent: boolean }>;
     dischargedAt: string | null;
@@ -453,7 +328,6 @@ interface DemoState {
     skipped: Array<{ nodeId: string; code: string; source: string; reason: string; label: string }>;
     rejected: Array<{ index: number; code: string; message: string }>;
   } | null;
-  /** 模板体系（K4）：能开哪几种文书 */
   templates: Array<{
     packId: string;
     templateId: string;
@@ -465,10 +339,6 @@ interface DemoState {
   }>;
   /** 医学表达式控件库（K4 验收口径：≥5 个） */
   expressionControls: Array<{ packId: string; controlId: string; name: string; unit: string; formula: string }>;
-  /**
-   * 模板条目目录（含草稿与停用的）：管理后台「模板库」据此管控。
-   * `departments` 是编码（判定用），`departmentNames` 是给人看的名称。
-    */
   templateCatalog: Array<{
     packId: string;
     itemId: string;
@@ -483,12 +353,10 @@ interface DemoState {
     sections?: Array<{ sectionCode: string; title: string; slots: Array<Record<string, unknown>> }>;
     /** 这份文书引用了哪些表达式控件（目录要带出来，否则这一行只剩一个名字） */
     controls?: Array<{ controlId: string; name: string; formula: string; unit?: string; enabled: boolean }>;
-    /** 控件条目的公式（AST）与说明：编辑控件时构造器要回显它们 */
     expression?: unknown;
     unit?: string;
     description?: string;
   }>;
-  /** 科室字典：整个部署共用的主数据（模板的"适用科室"与就诊科室名都读它） */
   departments: {
     items: Array<{ code: string; name: string; enabled: boolean }>;
     source: 'store' | 'empty';
@@ -497,10 +365,6 @@ interface DemoState {
     updatedBy: string | null;
     error: string | null;
   };
-  /**
-   * 文书类型（B52b）：整个部署共用的主数据 ——
-   * 「新建文书」的类型选项与质控规则定位文书的依据都读它。
-   */
   docTypes: {
     items: Array<{ system: string; code: string; display: string; enabled: boolean }>;
     source: 'store' | 'empty';
@@ -510,19 +374,12 @@ interface DemoState {
     updatedBy: string | null;
     error: string | null;
   };
-  /** 模板能"从系统带入"哪些字段（填写项取值路径 + 表达式构造器的系统字段） */
   contextFields: Array<{ path: string; label: string; group: string }>;
-  /** 表达式构造器的函数表（参数个数 + 人话说明）：前端不手抄一份 */
   expressionFunctions: Array<{ name: string; minArgs: number; maxArgs: number | null; doc: string }>;
-  /** 本文书里"由公式算出来"的字段数：界面据此决定「重算派生值」按钮出不出现 */
   derivedCount: number;
-  /** 当前病历若为导入件，则带来源与核对提示 */
   importSource: Record<string, unknown> | null;
-  /** T27：共享文档（WS/T 500）导出记录（与 OFD 归档导出分开） */
   lastWst500: { file: string; bytes: number; sections: number; fields: number; paragraphs: number; exportedAt: string } | null;
-  /** 最近一次导出的文档 JSON（独立探针 S2/S3/S5 的输入） */
   lastJson: { file: string; bytes: number; nodes: number; exportedAt: string } | null;
-  /** 最近一次审计报告摘要 */
   lastAudit: {
     jsonPath: string;
     mdPath: string;
@@ -532,13 +389,7 @@ interface DemoState {
     reportDigest: string;
     failed: Array<{ id: string; description: string; detail: string }>;
   } | null;
-  /** 语音落位（V1）：配置视图 + 候选节点，界面据此为每段指定落点 */
   placement: Record<string, unknown> | null;
-  /**
-   * 语音采集（C2）：ASR 地址 / 超时预算 / 分片参数 / 留存开关。
-   * `configured` 是界面契约的一部分：未配置时采集入口必须置灰并说明原因，
-   * 而"未配置"与"配了但不通"在只看字段值时会显得一样。
-   */
   capture: {
     endpoint: string;
     modelId: string;
@@ -554,21 +405,16 @@ interface DemoState {
     source: string;
   } | null;
   placementCandidates: Array<{ nodeId: string; label: string }>;
-  /** 受控阅读的授权平台：本系统信任哪个平台签发的阅读授权 */
   readingAuthority: {
     endpoint: string | null;
     trustedIssuerFingerprint: string | null;
     trustedIssuerPublicKeyPresent: boolean;
     trustedFingerprints: string[];
-    /** 是否已配置信任根，未配置时任何凭据都会被拒（fail-closed） */
     configured: boolean;
     source: string;
   } | null;
-  /** T18：受控阅读（授权清单 / 最近受控视图 / 阅读流水 / 文档指纹） */
   reading: {
-    /** 授权登记的落盘现状（落在哪张表、读错误、全局条数与已撤销数），"重启后授权还在不在"要能被验证 */
     persistence: { table: string; error: string | null; total: number; revoked: number };
-    /** 文档内容指纹：授权平台签发授权时要绑定的就是它（本系统把它交给平台） */
     documentFingerprint: string;
     grants: Array<{
       grantId: string;
@@ -580,14 +426,10 @@ interface DemoState {
       environments: string[];
       concealPatientIdentity: boolean;
       publicKeyFingerprint: string;
-      /** 是否为加密交付（授权书里带密钥交付片段） */
       encryptedDelivery: boolean;
-      /** 接收方种子（仅演示：生产由密码设备保管私钥，服务端不应持有） */
       recipientSeed?: string;
-      /** 接收方标签（来自公钥目录；用于界面显示"给了谁"） */
       recipientLabel?: string;
     }>;
-    /** 最近一次阅读视图的来源：明文 还是 解封后的加密阅读 */
     lastViewSource: 'plaintext' | 'unsealed' | null;
     lastView: {
       patientLabel: string;
@@ -606,30 +448,20 @@ interface DemoState {
   } | null;
   /** T18：签名元信息（算法/后端/指纹/覆盖范围）与独立验签结论 */
   sign: { algorithm: string; provider: string; publicKeyFingerprint: string; signedAt: string; covers: string[] } | null;
-  /**
-   * 签章状态（内核判定）：`valid` 当前有效 / `voided` 已被解锁作废 / `none` 无签章。
-   * 它单独存在，是因为"已被有理由的解锁作废"与"内容被篡改"在 `signatureVerified` 上完全同形。
-   */
   signatureState: {
     kind: 'none' | 'valid' | 'voided';
     voidedBy: { reason: string; at: string; invalidated: Array<{ publicKeyFingerprint: string; signedAt: string }> } | null;
   } | null;
   signatureVerified: { ok: boolean; reasons: string[]; details: { algorithm: string; provider: string; publicKeyFingerprint: string; referenceCount: number } } | null;
   log: Array<{ ok: boolean; code?: string; action?: string }>;
-  /**
-   * 鉴权现状：模式、口令来源、以及哪些破坏性动作两种模式都收口。
-   * 界面据此把「重置」置灰并说明理由（"能不能做"由 `/api/session.actions` 给）。
-   */
   auth: {
     mode: 'open' | 'strict';
     ttlMinutes: number;
-    /** 账号来源（取代原先的 `tokens`）：口令的权威只有数据库一处 */
     accounts: { initialized: boolean; total: number; admins: number; source: string };
     note: string;
     destructiveGuarded: string[];
     loginEndpoint: string;
   };
-  /** 可撤销的最近一次写入（没有则为 null）：界面据此显隐/禁用手柄并把目标写进 title */
   undo: { rev: number; op: string } | null;
   lastExport: null | {
     file: string;
@@ -646,7 +478,6 @@ let captureClient: { kill(signal?: string): boolean } | null = null;
 
 let adminCookie = '';
 
-/** 在指定实例上登录，返回会话 cookie（`name=value` 一段；其余属性由浏览器负责） */
 async function loginAt(base: string, username: string, password: string): Promise<string> {
   const res = await fetch(`${base}/api/admin/session`, {
     method: 'POST',
@@ -664,9 +495,6 @@ async function adminLogin(username = ADMIN_USER, password = ADMIN_PASSWORD): Pro
   try {
     adminCookie = await loginAt(BASE, username, password);
   } catch (err) {
-    /* 登录限流（同一来源 300 秒内最多 20 次）在这么长的套件里会被撞到：这时沿用手里这个会话，
-       而不是让一条与本用例无关的限流把用例判成失败（实测就是这么撞上的）。
-       只在"已经握着一个会话"且确实是限流时才放过：没有会话时的失败是真失败，必须抛出去。  */
     if (adminCookie !== '' && String((err as Error).message).includes('E_RATE_LIMITED')) return;
     throw err;
   }
@@ -701,12 +529,6 @@ async function post(path: string, body: Record<string, unknown> = {}): Promise<A
   return (await res.json()) as ApiResponse;
 }
 
-/**
- * 重置工作区：必须带管理员会话（`workspace.reset` 只给管理员，两种模式一致）。
- *
- * 单独一个辅助而不是到处写 `post('/api/reset')`：后者依赖"之前刚好有人登录过"这种
- * 顺序巧合，用例的通过与否不该取决于别的用例跑在前面。没会话就现登录一个。
- */
 async function resetWorkspace(): Promise<ApiResponse> {
   if (!adminCookie) await adminLogin();
   return post('/api/reset', {});
@@ -717,7 +539,6 @@ async function loadSamplePacks(): Promise<ApiResponse> {
   return post('/api/knowledge-pack-load', { sample: true });
 }
 
-/** 带指定 cookie 的请求：用于"以医生/质控员身份打一次"这类断言 */
 async function callWith(
   path: string,
   cookie: string,
@@ -732,7 +553,6 @@ async function callWith(
   return (await res.json()) as ApiResponse;
 }
 
-/** 不带会话的 POST：用来断言"未登录就改不了配置" */
 async function postNoAuth(path: string, body: Record<string, unknown> = {}): Promise<ApiResponse> {
   const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     method: 'POST',
@@ -747,11 +567,6 @@ async function get(path: string): Promise<ApiResponse> {
   return (await res.json()) as ApiResponse;
 }
 
-/**
- * 带会话的 GET：管理后台的只读视图（审计 / 运行状态 / 系统信息）要求登录。
- * 与 `get()` 分开而不是给它加个开关：不加会话与加了会话是两种语义，
- * "这次到底带没带身份"必须在调用处一眼看得出来。
- */
 async function getAuth(path: string): Promise<Record<string, unknown>> {
   const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
     headers: adminCookie ? { Cookie: adminCookie } : {},
@@ -759,14 +574,6 @@ async function getAuth(path: string): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
-/**
- * 模型配置的完整基线：这几格每次都一起传。
- *
- * 踩过的坑：只传 `format/model/apiKey` 时，没传的那几格会被判为非法值，整条保存被拒，
- * 而被拒与保存成功在断言里的差别是致命的：`await post(...)` 然后只看"指纹变没变"，
- * 会在"请求根本没生效"时给出假绿（B31 初版就是这么写出来的，实测抓到）。
- * 所以下面每次保存都显式断言 `ok`，把"没生效"变成一条失败而不是一条沉默。
- */
 const MODEL_BASE = {
   format: 'offline',
   model: 'qwen-audit-probe',
@@ -826,22 +633,11 @@ function seedSystemConfig(targetStateDir: string, input: Parameters<typeof saveS
   }
 }
 
-/**
- * 起一个服务进程并等它就绪。
- *
- * 超时给到 30 秒（而不是 15）：首次启动要播种到数据库，那一趟要付一次口令派生
- * （默认 200_000 次，实测约 7.6 秒），本机够用，慢一点的机器上 15 秒会误判成"启动失败"。
- *
- * 起进程之前先写服务端配置文件：那是"打开库之前就要知道"的口令与装机凭据。
- */
 async function spawnServer(): Promise<void> {
   writeServerConfig();
   const spawned = spawn(process.execPath, ['src/demo/demo-server.ts', '--port', String(PORT)], {
     cwd: ROOT,
     stdio: 'pipe',
-    /* 只保留路径类变量（运行时根目录 + 状态目录）：它们决定"东西落在哪儿"。
-       账号 / 口令 / 鉴权模式 / 采集配置都已经不在环境变量里（前者在配置文件，后者在库里），
-       所以这里不再有那些"显式清空"的行 —— 它们对 demo-server 已经没有任何作用。  */
     env: {
       ...process.env,
       L0_RUNTIME_DIR: runtimeDir,
@@ -868,11 +664,6 @@ async function spawnServer(): Promise<void> {
 }
 
 async function startServer(): Promise<void> {
-  /* 工作数据（文书 + 旁挂）落在数据库里，必须用独立目录；
-     清掉它等于"从空库开始"，于是每轮测试都从播种态出发（用例之间互不污染）。
-     这不只是测试问题，它同时说明重置必须真的清库（见 demo-server 的 `resetWorkspace`）。
-     运行时目录（服务端配置文件所在处）一并清掉：那里有密封口令与装机凭据，
-     每轮都从"新目录 + 新配置文件"出发，才不受上一轮残留影响。 */
   const rmRecursive = rmSync as unknown as (path: string, options: { recursive: boolean; force: boolean }) => void;
   for (const dir of [stateDir, runtimeDir]) {
     if (existsSync(dir)) rmRecursive(dir, { recursive: true, force: true });
@@ -880,47 +671,23 @@ async function startServer(): Promise<void> {
   await spawnServer();
 }
 
-/**
- * 重启服务（不擦库）：杀掉进程，用同一个状态目录再起一个。
- *
- * B41 用它证明"数据真的在库里"，擦掉库再起，证不出任何东西（那等于从播种态开始）。
- */
 async function restartServer(): Promise<void> {
   await stopServer();
   await spawnServer();
 }
 
-/**
- * 杀掉一个服务进程，并等它真的退出、把端口与文件句柄放掉。
- *
- * `kill()` 在 Windows 上只是投递终止请求，进程退出、`l0.db` 的句柄被释放是之后的事：
- *   - 删状态目录紧跟在 `kill()` 后面会撞 `EPERM`（目录还被占着）；
- *   - 复用同一端口再来一次会撞 `EADDRINUSE`（`restartServer` 原来靠"睡 600ms"绕开的就是它）。
- * 两处表现不同，原因却是同一个，所以收敛成一个"等退出"的动作，而不是各自睡各自的。
- * 主实例与 B37 那个 strict 实例都从这一处走（它们原本各自写了一遍同样的时序假设）。
-  */
 async function killAndWait(target: { kill(signal?: string): boolean } | null): Promise<void> {
   if (!target) return;
-  /* 类型是本仓库精简版声明里没有的（同 `rmSync` / `spawnSync` 的处置）：
-     按真实运行时的形状局部断言，而不是为了过检查把要用的东西去掉。 */
   const handle = target as unknown as { exitCode: number | null; once: (event: 'exit', listener: () => void) => void };
   const exited =
     handle.exitCode === null
       ? new Promise<void>((resolve) => handle.once('exit', () => resolve()))
       : Promise.resolve();
   target.kill();
-  /* 兜底超时：进程万一不退出，也不能把整轮卡死在这里 */
   await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 3000))]);
-  /* "进程退出"与"系统真的把句柄/端口还回来"之间还有一小段窗口 */
   await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
-/**
- * 停掉主实例（`child` 同时置空，后面的 `spawnServer` 才不会把已死的句柄当成活的）。
- *
- * 它同时是报告能不能打出来的前提：收尾删目录一旦抛错，`process.exit(suite.report())`
- * 就执行不到，于是断言明明都跑完了，屏幕上却什么都没有。
-  */
 async function stopServer(): Promise<void> {
   const dying = child;
   child = null;
@@ -931,22 +698,10 @@ function allDocs(target: DemoState): TreeDoc[] {
   return target.tree.flatMap((patient) => patient.visits.flatMap((visit) => visit.docs));
 }
 
-/* ------------------------------ 靶子签名服务 ------------------------------
-   产品侧已经没有内置软件签名：未配置医院签名服务时，签章会被明确拒绝
-   （`E_SIGN_NOT_CONFIGURED`）。而 UI 契约里有一批用例要"签章成功才能往下走"
-   （导出、受控阅读、审计报告都建立在"已签章"之上），所以测试必须真的接上一台签名服务。
-
-   它是测试的靶子，不是产品里的一条捷径：请求/响应走的是与真实服务同一套声明式映射
-   （`data.content` / `data.signature` 点路径），服务端只是用自研 SM2 把收到的数据签一次，
-   于是"映射 → 请求构造 → 服务签 → 取签名值 → 内核签章 → 独立验签"整条链路都被真实覆盖。
-------------------------------------------------------------------------- */
-
 const SIGN_SERVICE_KEY = softwareSigner(demoKeyPair('l0-ui-sign-service').privateKey);
 
 function startFakeSignService(): Server {
   const server = createServer((req, res) => {
-    /* 本仓库的 node:http 类型声明是精简版（同 node:fs，见各套件里 rmSync 的处置）：
-       这里按实际用到的形状局部断言，而不是把类型声明补全（那会变成"为了测试改产品依赖"）。 */
     const request = req as unknown as { on: (event: string, listener: (chunk: unknown) => void) => void };
     const response = res as unknown as {
       writeHead: (status: number, headers: Record<string, string>) => void;
@@ -976,11 +731,6 @@ function startFakeSignService(): Server {
   return server;
 }
 
-/**
- * 把靶子签名服务配进 demo，走的是界面上同一个接口（`/api/sign-backend-config`），
- * 而不是偷偷塞一个软件签名器进进程。这样"配置 → 可签章"这条判定也被真实覆盖：
- * 若哪天有人把配置链路改坏了，这里会立刻红。
- */
 async function configureSignService(): Promise<void> {
   const r = await post('/api/sign-backend-config', {
     adminId: 'ADMIN',
@@ -1039,12 +789,6 @@ function startFakeAsrService(): Server {
   return server;
 }
 
-/**
- * 提交一段音频（走同源采集路由，multipart 形状与真实前端一致）。
- *
- * 刻意与 `post()` 分开而不是给它加个开关：这两条请求的体格式不同（一个是 JSON、
- * 一个是二进制分段），混成一个函数会让"这次到底发了什么"在读用例时看不出来。
-  */
 async function postAudio(path: string, filename: string, bytes: Uint8Array, cookie = adminCookie): Promise<ApiResponse> {
   const buffer = new ArrayBuffer(bytes.byteLength);
   new Uint8Array(buffer).set(bytes);
@@ -1057,11 +801,6 @@ async function postAudio(path: string, filename: string, bytes: Uint8Array, cook
   });
   return (await res.json()) as ApiResponse;
 }
-
-/* ------------------------------ 本地客户端桥（B49 用） ------------------------------
-   桥在另一个进程里（`local-capture-client.ts`），所以这里只能按 HTTP 打它 ——
-   而这正是页面要走的同一条路：取段、取音频、ack。
-------------------------------------------------------------------------------------  */
 
 async function bridgeCall(
   path: string,
@@ -1101,9 +840,6 @@ async function main(): Promise<void> {
     assert(/<script[^>]+src="\/doc-view\.js"/.test(html), 'ui.html 应引用 /doc-view.js（正文渲染与模板预览共用同一份）');
   });
 
-  /* 命令面板（Ctrl+K）单独占一条：它是独立脚本 + 独立静态路由，
-     而这两处缺任何一处，症状都一样 —— "按了没反应"，且没有任何后端行为会被别的用例撞见。
-     （同样读不到 source 时也无法靠 `script` 整体兜住：它不在 ui.js 里。）  */
   await test('A1b 命令面板：脚本被引用、被服务端提供、可解析、被 ui.js 真正调用', () => {
     const file = join(ROOT, 'src', 'demo', 'command-palette.js');
     assert(existsSync(file), '应有 src/demo/command-palette.js（Ctrl+K 的面板实现）');
@@ -1119,11 +855,6 @@ async function main(): Promise<void> {
     }
   });
 
-  /* 宿主接入（被嵌进医生工作站）单独占一条。
-     它是"独立脚本 + 独立静态路由 + ui.js 侧调用点"三处配合，而三处缺任何一处都不报错：
-     表现只是"宿主注入没生效"，与"宿主根本没发 init"在界面上分不开。
-     另有一条边界必须钉住：桥是**通道**，不是内核 —— 它一旦带上写语义，
-     就等于给同一份病历开了第二套写路径。 */
   await test('A1e 宿主接入：桥脚本被引用且在 ui.js 之前、服务端提供、可解析、且绝不碰写语义', () => {
     const file = HOST_BRIDGE_JS;
     assert(existsSync(file), '应有 src/demo/host-bridge.js（嵌入医生工作站时的接入层）');
@@ -1135,13 +866,9 @@ async function main(): Promise<void> {
     assert(/path === '\/host-bridge\.js'/.test(serverSource), '服务端应提供 /host-bridge.js（no-store）');
     assert(/window\.L0Host\s*=/.test(source), '桥要把自己挂到 window.L0Host（ui.js 靠它广播与注册能力）');
     assert(/L0Host/.test(script), 'ui.js 要真的用它，否则引了也是死代码');
-    /* 独立运行时不得依赖它：没有 ?host=1 时页面照常启动。
-       "嵌不进去"不该变成"打不开" —— 这是注入缺失时行为不变的落点。 */
     assert(/if \(window\.L0Host\) await window\.L0Host\.whenReady\(\)/.test(script), '启动链必须先判空再等宿主');
     assert(/hostEmit\('ready'/.test(script), '启动完成要广播 ready（宿主据此收掉自己的加载态）');
     assert(/registerHostApi\(\);/.test(script), '宿主能力要在启动路径上注册（否则宿主调用一律"不支持"）');
-    /* 宿主切换患者 / 卸载面板前要问"能不能走"：不先落盘就走，医生正在打的那句
-       会丢在失焦 250ms 的防抖里，而界面上不会留下任何痕迹说它丢过。 */
     assert(/async function canLeave\(\)/.test(script), '要有"能不能离开"的判定（宿主切换患者前问的就是它）');
     assert(/const last = await flushEdits\(\);/.test(script), 'canLeave 必须先落盘再回答（否则编辑丢在防抖里）');
     try {
@@ -1149,7 +876,6 @@ async function main(): Promise<void> {
     } catch (err) {
       assert(false, `host-bridge.js 存在语法错误：${(err as Error).message}`);
     }
-    /* 桥里出现任何写路径都意味着宿主侧在替内核落笔 —— 留痕、门控与签章会随之被旁路 */
     assertEqual(
       ['/api/edit', '/api/confirm', '/api/sign', '/api/accept', '/api/export'].filter((path) => source.includes(path)),
       [],
@@ -1157,9 +883,6 @@ async function main(): Promise<void> {
     );
   });
 
-  /* 逐句审阅只有"取舍 → 组合文本 → 带 editedText 落笔"这一条链。
-     三条断任何一条，界面都会变成"勾了半天、落笔的还是 AI 原文"—— 而这不会报错，
-     只会让修改率偏低，看起来像模型变好了。 */
   await test('A1c 建议卡片：逐句取舍落到草稿文本，采纳时按草稿落笔', () => {
     assert(/data-sugg-pick=/.test(script), '逐句勾选框要带 data-sugg-pick（事件委托靠它找对照表）');
     assert(/function composeReview/.test(script), '要有"按勾选拼出最终文本"的实现');
@@ -1176,16 +899,12 @@ async function main(): Promise<void> {
     assert(/reviewRowText\(row\)/.test(script), '拼文本与算区间必须共用同一个"这一行贡献什么"，各算一遍必然错位');
   });
 
-  /* 全景时间轴：四类待办（超时/未签/缺口/未写入病程）必须各有落点。
-     这几条一旦被删掉，界面会退回"只报缺口"——而"有一份没签、有一处变化没写进病程"
-     恰恰是最容易漏掉的两类，它们不会让任何一次质控扫描报错。 */
   await test('A1d 时间轴：四类待办都在轴上，且带可执行入口', () => {
     assert(/signStateOf/.test(script), '要有"已签/未签/归档作废/状态未知"的四态判定');
     assert(/kind: 'timeout'/.test(script) && /kind: 'unsigned'/.test(script), '超时与未签各自成一类待办');
     assert(/kind: 'gap'/.test(script) && /kind: 'unwritten'/.test(script), '缺口与"变化未写入病程"各自成一类待办');
     assert(/todo-\$\{todo\.kind\}/.test(script), '待办条目要带分类类名（左边缘那条颜色靠它）');
     assert(/data-open-doc/.test(script), '待办要能一键切到该动手的那份文书');
-    /* 未知状态绝不能算成未签：那会让清单上永远挂着一份可能已签的文书 */
     assert(/state === 'unknown'/.test(script), '"状态未知"要单列，不能并入未签');
   });
 
@@ -1200,15 +919,14 @@ async function main(): Promise<void> {
 
   await test('A3 脚本读取的 dataset.X，都对应存在 data-x 属性（事件委托靠它定位节点）', () => {
     const names = new Set<string>();
-    for (const match of script.matchAll(/dataset\.([A-Za-z]+)/g)) names.add(match[1] as string);
+    for (const match of script.matchAll(/dataset\.([A-Za-z][A-Za-z0-9]*)/g)) names.add(match[1] as string);
     assert(names.size >= 5, `扫描到的 dataset 过少（${names.size}）`);
-    const missing = [...names].filter((name) => !frontend.includes(`data-${kebab(name)}`));
+    const surface = `${frontend}\n${serverSource}`;
+    const missing = [...names].filter((name) => !surface.includes(`data-${kebab(name)}`));
     assertEqual(missing, [], '存在"脚本读 dataset、模板却从不输出该 data 属性"的断裂');
   });
 
   await test('A41 撤销/历史版本抽屉：点「撤销」能选回到某一版，且说得出每一版改了什么', () => {
-    /* 这条守的是"功能有没有出口"：内核能回到任意版本、接口也能调，
-       但界面上没有入口时，它对医生等于不存在（只能由程序员调接口）。 */
     assert(/<dialog class="drawer" id="historyDrawer"/.test(html), '历史版本应是抽屉（点「撤销」弹出），而不是常驻面板');
     assert(/id="btnUndo"[^>]*title="撤销 \/ 历史版本/.test(html), '「撤销」要成为历史版本的入口（不再只是撤最近一笔）');
     assert(/function openHistory\(/.test(script) && /historyDrawer/.test(script), '要真的把抽屉打开（含 Esc 与滚动锁）');
@@ -1217,7 +935,6 @@ async function main(): Promise<void> {
     assert(/\/api\/revert-to/.test(script), '按钮要真的打 /api/revert-to');
     assert(/const HISTORY_LIMIT = 15/.test(script), '只列最近 15 次（全量在「指标与留痕」与审计报告里）');
     assert(/slice\(0, HISTORY_LIMIT\)/.test(script), '15 条的上限要真的作用在列表上，不能只是写个常量');
-    /* 摘要：让人认出"这是哪一版"，太长就截断（全文进 title） */
     assert(/a\.summary/.test(script), '每一行要显示"大概改了什么"（服务端下发的 summary）');
     assert(/class="hist-sum" title=/.test(script), '摘要要一行截断、全文放 title（长了也不撑破布局）');
     /* 不能回滚时必须写清原因，而不是给个灰按钮让人猜 */
@@ -1225,34 +942,140 @@ async function main(): Promise<void> {
       assert(script.includes(reason), `缺少拦截说明：${reason}`);
     }
     assert(/当前版本/.test(script), '最新一版要标"当前版本"，而不是也给一个点了没用的按钮');
-    /* 点阴影也要能关：原生 <dialog> 不替你关，得自己判"点在内容之外" */
     assert(/event\.target === drawer/.test(script) && /closeHistory\(\)/.test(script), '点阴影关闭（否则用户只能去找那个 ×）');
-    /* 被拒时理由留在抽屉里：抽屉盖着正文，提示丢在外面等于没说 */
     assert(/function showHistoryError\(/.test(script) && /hist-error/.test(css), '回滚被拒时，原因要显示在抽屉里');
     assert(/当前内容会被替换成那一版的样子/.test(script), '确认框只说清后果，不写解释性文案');
   });
 
+  await test('A41b 个人模板：常用语与内容段落都能在 Ctrl+K 里带入，抽屉能管', () => {
+    assert(/id="btnMyContent"/.test(html), '顶栏要有「个人模板」常驻入口：只挂在 Ctrl+K 里，等于只有知道它的人才用得到');
+    assert(/\$\('btnMyContent'\)/.test(script), '顶栏入口要真的接到抽屉上');
+    const mine = script.indexOf('pushMyContentCommands(commands)');
+    const tabs = script.indexOf("group: '面板'");
+    assert(mine > 0 && tabs > 0 && mine < tabs, '候选里"个人模板"要排在面板之前（面板还有 Alt+1..4 与页签两条路）');
+    assert(/<dialog class="drawer" id="contentDrawer"/.test(html), '应有「个人模板」抽屉（与历史版本同一套抽屉做法）');
+    assert(/id="contentClose"/.test(html) && /aria-labelledby="contentDrawerTitle"/.test(html), '抽屉要有可读标题与可见关闭入口（不能只靠 Esc）');
+    assert(/id="contentBody"/.test(html), '抽屉里要有内容区（清单在 ui.js 里渲染）');
+
+    assert(
+      /<dialog class="app-dialog content-editor" id="contentEditor"/.test(html)
+        && /id="contentName"/.test(html) && /id="contentText"/.test(html),
+      '新建要在弹层里一次填完名称与内容',
+    );
+    assert(/function submitContentEditor\(/.test(script) && /function openContentEditor\(/.test(script), '弹层的开与关各只有一处');
+    assert(!/createMyPhrase/.test(script) && !/contentCompose"/.test(script), '旧的两步入口与内嵌表单都不能留一半');
+
+    assert(
+      /role="tablist"/.test(html) && /data-content-tab="phrase"/.test(html) && /data-content-tab="content-paragraph"/.test(html),
+      '两签要分开（落笔方式不同，混在一列里医生得逐条读）',
+    );
+    assert(/aria-selected/.test(html) && /function setContentTab\(/.test(script), '签的状态要可读出、可切换');
+    assert(
+      /contentPhraseCount/.test(html) && /contentParaCount/.test(html),
+      '签上要带条数：打开就知道"我各有多少条"',
+    );
+    /* 清单会攒到几十条：查询与分页是"找得到"的两条路，缺一条就只能一屏屏往下翻 */
+    assert(/id="contentSearch"/.test(html), '抽屉里要有查询框（名称 / 触发词 / 正文片段）');
+    assert(
+      /let contentKeyword = ''/.test(script) && /let contentPage = 1/.test(script),
+      '查询条件与页码要有状态（翻页是客户端的事，不重新拉清单）',
+    );
+    assert(/const CONTENT_PAGE_SIZE = \d+/.test(script), '分页要有每页条数');
+    assert(
+      /data-content-page=/.test(script) && /dataset\.contentPage/.test(script),
+      '分页要有上一页 / 下一页，并接上翻页事件',
+    );
+    assert(
+      /function contentGotoItem\(/.test(script),
+      '新建 / 另存之后页码要跟到那一条（否则就是"存完了、列表里看不见它"）',
+    );
+    assert(/没有名称或内容含/.test(script), '筛空了要说清"是筛没了"而不是"这一签没有"');
+
+    assert(/\/api\/content-similar/.test(script), '相似提示要走服务端现算，不在前端各写一份相似度');
+    assert(/function renderContentSimilar\(/.test(script), '相似结果要能落在新建弹层里');
+    assert(/E_CONTENT_DUPLICATE_NAME/.test(script), '同名被拒时要能指到那一处提示，而不是只弹一句错');
+    assert(
+      /const kind = rows\.length > 1 \? 'content-paragraph' : 'phrase'/.test(script),
+      '落笔方式由内容决定（有换行 = 多段落）',
+    );
+    assert(/function updateContentHint\(/.test(script), '一边打字一边说清会落到哪：落笔方式不能等保存完才知道');
+    assert(/overflow-wrap: anywhere/.test(css) && /resize: vertical/.test(css), '长内容要能换行、能往下拉（内容会很长）');
+
+    assert(/function insertMyContent\(/.test(script), '应有统一的带入函数（两种条目共用一个落笔入口）');
+    assert(/'个人模板 · 常用语'/.test(script) && /'个人模板 · 内容段落'/.test(script), 'Ctrl+K 里要分成两组（落笔方式不同，混在一起等于让人猜）');
+    assert(/\/api\/content-insert/.test(script), '带入要真的打 /api/content-insert（不在前端拼文本）');
+    assert(/\/api\/content-list/.test(script), '清单要真的取自 /api/content-list');
+    assert(/\/api\/content-save-from-doc/.test(script), '从当前段另存要打 /api/content-save-from-doc（脱敏在服务端）');
+    assert(/function saveParagraphAsContent\(/.test(script), '应有"把当前段存进个人模板"的入口');
+    assert(/data-content-delete/.test(script) && /\/api\/content-delete/.test(script), '抽屉里要能删（行尾带按钮并真的打接口）');
+    assert(/先把光标点进正文某一段，再按 Ctrl\+K/.test(script), '没有光标就明说"先点进某一段"，不往最后一段里塞');
+    assert(/classList\.remove\('drawer-open'\)/.test(script), '关闭抽屉要解开背景页滚动锁（只加不解，关掉后整页都滚不动）');
+    assert(/id="contentTarget"/.test(html), '抽屉里要有落点提示：把"这次会插到哪一段"写出来');
+    assert(/contentTargetCaret/.test(script) && /function rememberCaret\(/.test(script), '落点要在打开抽屉前记下（焦点会被按钮抢走）');
+    assert(/function caretAlive\(/.test(script), '旧落点要在换文书后作废（节点 id 可能重名）');
+    assert(/canInsert \? '' : ' disabled/.test(script), '没有落点时「带入」要置灰（点完再报错是白动作）');
+    assert(!/lastUsedAt/.test(script), '清单顺序不由前端重排（"最近用过"只在服务端那一处排序）');
+  });
+
+  await test('A41c 触发词：`;fb` + 空格展开仍走内容插入接口，输入法拼写中不触发', () => {
+    assert(/id="contentTrigger"/.test(html), '新建内容要有触发词一栏（不填也行）');
+    assert(/如 fb：正文里输入 ;fb 再按空格/.test(html), '界面要写明用法（前缀固定是 ;）');
+    assert(/function triggerHitFor\(/.test(script) && /function expandTrigger\(/.test(script), '识别与展开各只有一处');
+    assert(/event\.isComposing/.test(script), '输入法拼写中不能触发（那时的空格是在选字）');
+    assert(/replaceStart/.test(script) && /replaceEnd/.test(script), '`;fb` 那几个字要交给服务端一次换掉（不先自己删）');
+    assert(/E_CONTENT_DUPLICATE_TRIGGER/.test(script), '触发词撞车要能指回那一格');
+    assert(/triggerInflight/.test(script), '异步插入期间不重复触发（连按空格不能插两条）');
+  });
+
+  await test('A41d 整章另存：入口可见、按章收集、仍走脱敏接口', () => {
+    assert(/id="btnSaveSection"/.test(html), '抽屉里要有「从当前章另存」入口（只藏在 Ctrl+K 里等于没有）');
+    assert(/function saveSectionAsContent\(/.test(script), '整章另存只此一处');
+    assert(/source: 'section'/.test(script), '要明确告诉服务端按章收集（段落顺序由服务端文档结构决定）');
+    assert(/把当前章存为内容段落/.test(script), 'Ctrl+K 里也要有一条（不打开抽屉也能存）');
+    assert(/function sectionTitleOf\(/.test(script), '要能说出存的是哪一章（名字与提示都用它）');
+    assert(/\/api\/content-save-from-doc/.test(script), '仍走原来的另存接口：脱敏与 PHI 关卡不另开一条路');
+  });
+
+  await test('A41e 置顶：只改自己的顺序，不改条目', () => {
+    assert(/data-content-pin/.test(script), '卡片上要有置顶入口');
+    assert(/\/api\/content-pin/.test(script), '置顶走独立接口（不是 content-update）');
+    assert(/pinned: !item\.pinned/.test(script), '同一个按钮切换置顶与取消');
+    assert(!/content-update[\s\S]{0,120}pinned/.test(script), '置顶不能混进改内容的接口');
+  });
+
+  await test('A41f 连续带入：插完不关抽屉，落点自动接到刚插入的字后面', () => {
+    assert(/id="contentContinuous"/.test(html), '抽屉里要有连续带入开关（贴着按钮，不藏进设置）');
+    assert(/keepFocus/.test(script), '连续模式不抢焦点（焦点留在抽屉，医生是在挑下一条）');
+    assert(/outcome\.ok && outcome\.caret/.test(script), '插入成功后才推进落点（失败不能假装往前走了）');
+    assert(/带入并继续/.test(script), '按钮要把"这次点完不关"写出来');
+    assert(/contentContinuous = false/.test(script), '每次打开重置为单条（不跨次记住，免得以为界面卡住）');
+    assert(/\/api\/content-insert/.test(script), '仍走同一条插入接口');
+  });
+
+  await test('A41g 选中文字浮条：只存/换选中那一截，润色走同一条 AI 建议', () => {
+    assert(/id="selBar"/.test(html), '浮条要在页面里（不是临时 DOM）');
+    assert(/data-sel-action="save-content"/.test(html) && /data-sel-action="replace-content"/.test(html), '存/换两个入口都要有');
+    assert(/id="selBar"[\s\S]{0,80}hidden/.test(html), '默认隐藏（只在有选区时出现）');
+    assert(/start: caret\.start/.test(script) && /end: caret\.end/.test(script), '另存选区要带 start/end（不是整段）');
+    assert(/openMyContent\(caret\)/.test(script), '替换走抽屉，落点取选区（抽屉会说"将替换选中的 N 个字"）');
+    assert(/polishSelection\(caret\)/.test(script), '选中润色走专用入口');
+    assert(/api\('\/api\/polish-selection'/.test(script), '润色候选来自专用接口');
+    assert(/function acceptPolish/.test(script) && /api\('\/api\/edit'/.test(script),
+      '接受才落笔，且走与打字同一条写路径（AI 仍不直写）');
+    assert(/S\.doc\.status === 'signed'/.test(script), '已签名不弹写类入口');
+    assert(/clipboard\.writeText/.test(script), '复制写纯文本');
+    assert(/blockAt\(block, range\.startContainer\)/.test(script), '流式模式要按真实选区算区间');
+  });
+
   await test('A4 UI 调用的每个 /api 路径，服务端都有对应路由', () => {
     const paths = new Set<string>();
-    /* 路径里必须允许数字与斜杠：`/api/export-wst500` 会被 `[a-z-]` 截成 `/api/export-wst`、
-       `/api/reading/grant` 会被截成 `/api/reading`，于是检查器自己制造假失败；
-       更糟的是截断后若恰好命中另一个真实路径，就会漏报真实问题。
-       （同一个坑踩了两次：检查器的正则也是被测对象。） */
     for (const match of script.matchAll(/\/api\/[a-z0-9/-]+/g)) paths.add(match[0]);
     assert(paths.size >= 9, `扫描到的接口过少（${paths.size}）`);
-    /* GET 分支不走 switch，故需在白名单里列明 */
     const passthrough = new Set(['/api/state', '/api/download', '/api/download-wst500', '/api/qc-content-contract', '/api/dictation/capture/records']);
     const missing = [...paths].filter((path) => !passthrough.has(path) && !serverSource.includes(`case '${path}'`));
     assertEqual(missing, [], 'UI 调用了服务端不存在的接口');
   });
 
-  /* 编辑范式（卡片 / 流式）与显示密度（演示 / 临床）是两个正交维度。
-     合成一个开关的后果不是"少一个下拉"，而是"我到底在切什么"说不清：
-     一个是"显示多少内部标识"，一个是"怎么落笔"，两个问题的答案互不替代。
-     所以这里守的是"两个开关都在、各自有判断函数、各自持久化"。
-     两者的住处与形态都不同（显示密度在顶栏、是个下拉；编辑范式在正文卡标题行右侧、
-     是个分段控件），所以这里只按 id / 类名找，不绑位置与标签 —— 挪控件、换形态
-     都不该让这条断言失效。  */
   await test("A36 编辑范式：卡片 / 流式是两个独立开关（与显示密度正交，都只是视图偏好）", () => {
     assert(/id="editMode"/.test(html) && /data-mode="flow"/.test(html), '应有编辑范式切换器（卡片 / 流式）');
     assert(
@@ -1278,9 +1101,6 @@ async function main(): Promise<void> {
     assert(flowTag > 0 && uiTag > flowTag, '/flow-view.js 必须在 /ui.js 之前加载');
   });
 
-  /* 流式的落笔方式是"读 DOM → 与状态比对 → 得出一串操作"，一次动作可能对应好几次结构提交。
-     因此必须有批量入口：逐条发 HTTP 的后果是"撤销只退掉半个动作"
-     （拆段只退回了新段落，尾巴还留在里面）。 */
   await test('A37 流式落笔：批量入口 + 一个撤销单元 + AI 不得旁路（服务端守）', () => {
     assert(/\/api\/apply-edits/.test(script), '流式落笔应走批量入口（不是逐条发 /api/edit）');
     assert(/case '\/api\/apply-edits'/.test(serverSource), '服务端应有批量落笔路由');
@@ -1291,62 +1111,33 @@ async function main(): Promise<void> {
       /entry\.session\.beginUndoGroup\(\);[\s\S]*entry\.session\.endUndoGroup\(\);/.test(serverSource),
       '批量落笔必须用一个撤销组包住（否则撤销退不掉整个动作）',
     );
-    /* AI 旁路：批量入口必须显式判来源，且 `ai` 一律拒 —— 原则 1（AI 只能经建议通道）。
-       漏了它的后果是"AI 内容可以不经过人工采纳直接进正文"，而那是本仓库最不能破的一条。 */
     assert(/const origin = String\(op\.origin \?\? 'human'\)/.test(serverSource), '批量插入必须显式判来源');
     assert(/E_AI_DIRECT_WRITE_FORBIDDEN/.test(serverSource), 'AI 内容不得经批量入口落笔（必须走建议通道）');
-    /* 乐观锁：界面传来"画那一屏时的 rev"，服务端整批判一次。
-       不判的后果是两个端同时改同一段时后写覆盖先写，而且没有任何痕迹说"被覆盖了"；
-       逐条判的后果是把一次改动劈成一半（前两条落笔、第三条冲突），而撤回只能整批撤。  */
     assert(/expectedRev/.test(serverSource) && /E_REV_CONFLICT/.test(serverSource), '批量落笔要接乐观锁');
     assert(/expectedRev !== entry\.session\.docRev/.test(serverSource), '乐观锁要在**批前**整批判一次');
     assert(/flowBaselineRev/.test(script), '界面要记住"画那一屏时的 rev"（落笔时现读等于没有锁）');
   });
 
-  /* 两种画法必须是同一批视图项 + 同一条写路径的两种表述。
-     若流式自己再画一套表格/控件，两处迟早分叉，而分叉的表现是
-     "同一个控件在两种模式里少了样东西" —— 没人会同时开两种模式比对。  */
   await test('A38 流式与卡片共用渲染与写路径（防两套分叉）', () => {
     assert(/L0FlowView\.render\(/.test(script), '医生端应调用流式渲染');
     assert(/L0FlowView\.planOf\(/.test(script) && /planOf/.test(flowScript), '渲染与解析必须来自同一份计划（两处各判一次必然分叉）');
     assert(/L0DocView\.nodeHtml\(/.test(flowScript), '表格与专科控件应复用卡片模式的渲染，不另画一份');
     assert(/data-flow-seg/.test(frontend), '可编辑区要有稳定的区标识（落笔时按它找回来）');
     assert(/flowHostOf\(/.test(script), '落笔前要能按区标识找回那片可编辑区');
-    /* 光标：流式下一次落笔就会重画整片纸，不还原光标等于"每写完一句就被踢出去" */
     assert(/L0FlowView\.caretOf\(/.test(script) && /L0FlowView\.setCaret\(/.test(script), '落笔前后要存取光标');
-    /* 输入法：合成期间不落笔（落笔重画会把候选框打断） */
     assert(/compositionstart/.test(script) && /compositionend/.test(script) && /composing/.test(script), '必须处理输入法合成期');
-    /* 填写项的判据只能有一份：id 序列。
-       这里钉的不是"写法"而是踩过的坑：曾经用"文字被浏览器切成了几段"当判据（`shape`），
-       而那个切分方式随输入过程变化（打一个字就可能把一段文字拆成两个节点），
-       结果是每一次正常输入都被误判成"填写项被搬动了"、整批拒绝落笔。
-       现场表现是"打字没反应，只有一句提示" —— 真实浏览器里跑出来的，静态检查看不出来。  */
     assert(!/\.shape\b/.test(flowScript), '不要用文本节点切分方式当填写项判据（它随输入变化，会整批误拒）');
     assert(/base\.fields/.test(flowScript), '填写项的比对要落在基线与 DOM 两侧**同一份**判据上');
-    /* 前端与卡片模式共用同一条落笔纪律：点任何按钮之前先落笔 */
     assert(/async function flushEdits\(\)\s*\{\s*[\s\S]{0,200}?await flushFlow\(\);/.test(script), '统一落笔入口必须同时覆盖流式模式');
-    /* 段末状态徽标必须看得见、且不被读进正文 —— 这两件事是一对：
-       看不见（最初那版就是）：医生要到签章被"待确认"清单拦下才知道有段落没确认；
-       看得见但会被读进正文：下一次落笔就把「待确认」三个字写成了病历内容。
-       质控徽标与待确认判词都复用卡片模式那一份（两处各写一份必然分叉）。  */
     assert(/paragraphDecoHtml/.test(flowScript), '纸面上要有段末状态徽标（来源 / 关键内容 / 待确认 / 质控）');
     assert(/dataset\.paraDeco\) continue/.test(flowScript), '解析时必须整块跳过段末装饰');
     assert(/L0DocView\.anchorBadge/.test(flowScript), '质控徽标要复用卡片模式那一份');
     assert(/L0DocView\.confirmChip/.test(flowScript), '待确认要用卡片模式同一份判词');
-    /* 演示模式的内部标识：用生成内容显示，不能写进 DOM 文本（写进去就会被当成正文读回去）  */
     assert(/attr\(data-node-id\)/.test(css) && /flow-mode:not\(\.clinical\)/.test(css), '演示模式要在纸面上显示节点 id 与 rev');
-    /* Ctrl+Z：不拦就会落到浏览器原生撤销上（只改 DOM、不进模型），而落笔重画会清掉原生撤销栈。
-       拦截之后必须走**服务端**撤销那条路（`doUndo`）——
-       不能改成"点撤销按钮"：那个按钮现在打开的是历史版本抽屉，Ctrl+Z 不该弹窗。 */
     assert(/event\.key === 'z'/.test(script) && /void doUndo\(\)/.test(script), '流式纸面上要接管 Ctrl+Z 并走服务端撤销路径');
     assert(/async function doUndo\(/.test(script) && /'\/api\/undo'/.test(script), 'Ctrl+Z 与抽屉里的按钮要共用同一条撤销路径（两套实现必然分叉）');
   });
 
-  /* run 级来源（`RunProvenance`）是"逐句可回溯"的载体，它必须三处同步：
-     模型定义、校验白名单、run 合并规则。少任何一处的后果都不是报错，而是静默错误：
-       · 少了白名单 → 文档校验直接判非法（写进去的文档过不了自己的校验）；
-       · 少了合并规则 → 格式不同的相邻 run 被合并，"这一句是 AI 写的"标记被抹掉，
-         且合并是不可见的（结果里看不出曾经有过两个 run）。  */
   await test('A39 run 级来源：模型 / 校验白名单 / 合并规则三处必须同步', () => {
     const typesSource = readFileSync(join(ROOT, 'src', 'model', 'types.ts'), 'utf8');
     const validateSource = readFileSync(join(ROOT, 'src', 'model', 'validate.ts'), 'utf8');
@@ -1357,15 +1148,11 @@ async function main(): Promise<void> {
     assert(/JSON\.stringify\(a\.provenance/.test(textRunsSource), '合并规则必须比较 provenance（漏了就会把来源标错且看不出来）');
     /* 不继承：医生在 AI 句子里插字，插进去的必须是"人写的" */
     assert(/provenance` 刻意不继承/.test(textRunsSource), '"新插入的 run 不继承来源"这条规则必须写明（否则下一个人会顺手补上继承，方向就反了）');
-    /* AI 落笔的来源构造属于内核（单条采纳与批量采纳共用一份），
-       不能由上层各写一遍 —— 那样"同一份数据在两张报表上不一样" */
     const sessionSource = readFileSync(join(ROOT, 'src', 'core', 'session.ts'), 'utf8');
     assert(/function aiRunProvenance/.test(sessionSource), 'AI 落笔的 run 级来源应由内核统一构造');
   });
 
   await test('A14 界面可见文本不得出现 Markdown 语法（`粗体` 会被原样显示）', () => {
-    /* 拆分后可见文本可能在 HTML 标记、CSS、以及 JS 里渲染出的模板字符串（含确认弹框的文案）。
-       注释（块注释 / 行注释 / HTML 注释）里的不受影响，先剥掉，剥完还剩 ``，就是会被人看到的那种。 */
     const stripComments = (text: string) => text
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '')
@@ -1387,9 +1174,6 @@ async function main(): Promise<void> {
     assert(/\.panel\s*\{[^}]*display:\s*none/.test(css), '未选中的面板应隐藏');
     assert(/\.panel\.active\s*\{[^}]*display:\s*flex/.test(css), '当前面板应显示（flex 竖排：标题行高度不参与正文高度计算）');
     assert(!/\.panel\.active > \.pb\s*\{[^}]*overflow/.test(css), '面板体不应有内部滚动条（内容要全部显示）');
-    /* 正文段的高度不能按"标题行 = 42px"这类常量算：标题里的状态胶囊一折行，
-       标题就变高，正文按常量算出来的高度会顶出面板底部被裁掉（实测门控日志少一截）。
-       这一条和 A12 同类：它不"好看"，但它决定内容看不看得全，所以要防回退。 */
     assert(!/\.pb\s*\{[^}]*height:\s*calc\(/.test(css), '面板正文段不得按常量算高度（标题行高度是内容算出来的）');
 
     assert(/\.col\.rail\s*\{[^}]*position: sticky/.test(css), '右栏应贴壁（内容短时吸附在右侧）');
@@ -1400,8 +1184,6 @@ async function main(): Promise<void> {
 
     assert(/l0demo\.activeTab/.test(script), '页签选择应持久化');
     assert(/applyPanelState\(\)/.test(script), '应有统一的"显示当前面板"函数');
-    /* 标签配平：错配会被浏览器容错（页面看着正常、结构已经错），人工极难发现，
-       实测踩到过：把某个 `</div>` 写成了 `</h2>`，页面照常显示。 */
     for (const tag of ['div', 'h2', 'section']) {
       const open = (markup.match(new RegExp(`<${tag}[\\s>]`, 'g')) || []).length;
       const close = (markup.match(new RegExp(`</${tag}>`, 'g')) || []).length;
@@ -1409,29 +1191,12 @@ async function main(): Promise<void> {
     }
     assert(/switchTab\(tab\.dataset\.tab\)/.test(script), '点页签应切换显示的面板');
 
-    /* 配置管理是抽屉浮层（不是右栏页签）：
-       它若混进页签体系，就会出现"抽屉开着、页签却高亮在别处"这种自相矛盾的状态；
-       而且它是"离开写病历去做的事"，与右栏那些"随时瞄一眼"的页签不同类。 */
-    /* 配置抽屉已搬到管理后台独立页面（/admin）：这里不再断言它的交互细节
-       （showModal / 遮罩 / 焦点归还），医生端已经没有这条路径了。
-       标记本身还在（惰性的，见 ui.html 的说明），下面两条是过渡期断言：
-       删标记时要连同本用例一起改（L0 进度条目里列为"未做完"）。 */
     assert(/id="btnAdmin"/.test(html), '医生端应只剩一个通往管理后台的入口（配置不再摆在医生端）');
     assert(/id="modelDrawer"/.test(html), '（过渡期）抽屉标记仍在但已惰性：删它要同步改本用例与 A2/A20/B28');
-    /* 抽屉必须真正铺满视口高度，且内部滚动不带动背景页：
-       Chrome 给 top-layer dialog 默认加了 max-height（约 calc(100% - 6px - 2em)），
-       不显式 max-height:none 就会在底部露出约 38px 主界面（实测踩到）。 */
     assert(/dialog\.drawer\s*\{[^}]*max-height:\s*none/.test(css), '抽屉应解除 UA 的 max-height 上限，否则铺不到视口底部');
     assert(/dialog\.drawer\s*\{[^}]*overscroll-behavior:\s*contain/.test(css), '抽屉内滚动不应把背景页一起带着滚');
     assert(/html\.drawer-open\s*\{[^}]*overflow:\s*hidden/.test(css), '抽屉打开期间应锁住背景页滚动');
-    /* 背景滚动锁与"按坐标判定的遮罩点击"随抽屉一起移除：配置搬到管理后台后那里是整页，
-       没有浮层，也就不需要遮罩、Esc 兜底与滚动锁。CSS 侧的 .drawer 规则暂留（标记还在，属惰性），
-       删标记时一并清理。 */
-    /* 抽屉必须有显式视口高度：Chrome UA 给 dialog 的默认 height 是 fit-content，
-       内容比视口高时元素会长出去、overflow-y:auto 反而不生效（内容滚不动）。 */
     assert(/dialog\.drawer\s*\{[^}]*height:\s*100dvh/.test(css), '抽屉应显式给视口高度，否则内部内容滚不动');
-    /* 抽屉四角必须是直角（尤其下边左右两角）：仅靠简写可能被内核兜底样式局部覆盖，
-       故要求逻辑四角的 border-end-*-radius 显式归零。 */
     assert(/border-end-start-radius:\s*0/.test(css) && /border-end-end-radius:\s*0/.test(css), '抽屉四角应为直角（含下边左右两角）');
 
     assert(!/slice\(0, 12\)|slice\(-8\)|slice\(-30\)/.test(serverSource), '服务端不应截断机读数据元 / 留痕 / 日志');
@@ -1445,9 +1210,7 @@ async function main(): Promise<void> {
     assert(/id="moreMenu"[^>]*hidden/.test(html), '菜单应默认收起');
     assert(/\.more-menu\[hidden\]\s*\{[^}]*display:\s*none/.test(css), '菜单收起时应真正隐藏');
     assert(/id="btnMoreTabs"/.test(html) && /btnMoreTabs/.test(script), '必须有「更多」图标按钮');
-    /* 图标形态：不应再有"更多"这个文字页签 */
     assert(!/>\s*更多\s*</.test(html), '「更多」应是图标按钮，不是文字页签');
-    /* 菜单里用全称：页签栏用简称是为省地方，菜单空间充足，没有理由让人猜 */
     const menuBlock = /<div class="more-menu"[\s\S]*?<\/div>/.exec(html)?.[0] ?? '';
     assertEqual(
       ['定稿与导出', '门控日志', '指标与留痕'].filter((label) => menuBlock.includes(label)),
@@ -1455,8 +1218,6 @@ async function main(): Promise<void> {
       '菜单项应用全称（简称是页签栏的妥协，不该带进菜单）',
     );
 
-    /* 四个常驻页签同样用全称，且顺序按使用频次：
-       AI 助手 → 语音转写 → 质控提示 → 机读信息 */
     const navBlock = /<div class="tabbar" id="tabbar"[\s\S]*?<div class="more-menu"/.exec(html)?.[0] ?? '';
     const navLabels = ['AI 助手', '语音转写', '质控提示', '机读信息'];
     assertEqual(navLabels.filter((label) => navBlock.includes(label)), navLabels, '常驻页签应用全称');
@@ -1495,11 +1256,6 @@ async function main(): Promise<void> {
     );
   });
 
-  /* A32：能力开关（宿主按部署形态收窄界面）。
-     它靠 HTML 上的 `data-capability` 与脚本里的 `CAPABILITIES` 白名单两处配合，
-     而两处对不上的表现都不报错：一个能力名拼错 = 那个入口永远不显示；
-     白名单里多一个没人用的名字 = 这个错永远查不出来。所以只能静态钉住。
-     另有一条界面断裂必须一起守：摘掉面板却还在渲染它 —— 渲染函数摸到 null 会直接抛。  */
   await test('A32 能力开关：data-capability 与脚本白名单必须一一对得上，且页签与面板成对、不得与 data-optional 混用', () => {
     const capsMatch = /const CAPABILITIES = \[([^\]]+)\]/.exec(script);
     assert(capsMatch !== null, '应能读到脚本里的 CAPABILITIES 白名单（否则能力开关名无据可依）');
@@ -1534,8 +1290,6 @@ async function main(): Promise<void> {
       );
     }
     assert(/applyCapabilities\(\);\s*\n/.test(script), 'applyCapabilities() 必须在启动路径上被调用');
-    /* ⑤ 两类开关不许混：`data-optional` 的语义是"低频、收进「更多」菜单"，数量由 A8 钉着 3 个。
-          能力开关若复用它，A8 就变成在数两个语义的和，两边都会失去意义 */
     assertEqual((html.match(/data-optional=/g) || []).length, 6, 'data-optional 仍应恰好 6 个（能力开关不得复用它）');
   });
 
@@ -1561,9 +1315,6 @@ async function main(): Promise<void> {
        复制、读屏、审查时仍会出现，等于没做 */
     const guarded = (script.match(/isClinical\(\)/g) || []).length;
     assert(guarded >= 6, `临床模式的条件渲染点过少（${guarded} 处），只换名字不算产品化`);
-    /* 这几处是最容易被漏掉的内部标识 */
-    /* 节点行的渲染在共用的 `/doc-view.js` 里：模式由调用方以 `clinical` 选项传入 ——
-       管理后台的模板预览走同一条路，于是"预览里同样收起内部标识"不必再单独验一遍 */
     assert(/opts\.clinical === true \? '' : `<span class="rev">/.test(script), '节点行上的「id · rev」应受模式控制');
     assert(/isClinical\(\) \? '' : `<span class="chip ai">/.test(script), '建议卡片上的 modelId 应受模式控制');
     assert(/isClinical\(\) \? '' : `<span class="chip danger">/.test(script), '被拒横幅上的错误码应受模式控制');
@@ -1588,19 +1339,20 @@ async function main(): Promise<void> {
 
     assert(/id="keysHelp"/.test(html) && /toggleKeysHelp/.test(script), '应有快捷键帮助表');
 
-    /* ⑤ 不抢浏览器快捷键；页签切换用组合键而非单键 */
     assert(/event\.ctrlKey \|\| event\.metaKey/.test(script), '不应拦截浏览器快捷键');
     assert(/event\.altKey/.test(script) && /Alt\+1/.test(html), '页签切换应用 Alt+数字组合键');
   });
 
   await test('A12 可读性基线：正文不小于 14px、次要色足够深、说明默认折叠、操作有回执', () => {
-    /* 这类"不好看但决定医生愿不愿意一直看"的基线，最容易被后续改动顺手改回去，
-       所以它和门控一样需要被锁住。 */
     assert(/--fs-md:\s*14px/.test(css), '正文字号令牌应为 14px（医生真正要看的是它，不能更小）');
-    assert(/textarea\.editor[^{]*\{[^}]*font-size:\s*var\(--fs-md\)/.test(css), '正文编辑区应使用该字号令牌');
+    assert(/--fs-doc:\s*var\(--fs-md\)/.test(css), '纸面字号必须默认取那条 14px 底线（可放大，但下限不动）');
+    assert(/textarea\.editor[^{]*\{[^}]*font-size:\s*var\(--fs-doc\)/.test(css), '正文编辑区应使用纸面字号令牌');
+    assert(/DOC_FONT_STEPS\s*=\s*\[14,\s*16,\s*18,\s*20\]/.test(script),
+      '正文字号的档位必须从 14px 起（比它小的正文不该存在）');
+    assert(/setProperty\('--fs-doc'/.test(script), '字号要落在 --fs-doc 令牌上，而不是整页 zoom');
+    assert(/l0demo\.docFont/.test(script), '字号是视图偏好，要记住（同一份病历换台机器不该变）');
+    assert(/id="docFont"/.test(html), '字号控件要有界面入口（只有 localStorage 等于没有）');
     assert(/--muted:\s*#5a6472/.test(css), '次要文字色应加深到足够对比度');
-    /* 面板内不再摆折叠说明（2026-10-17 起由用户要求删除）：判断标准不是"有没有说明"，
-       而是首屏只留能动手的东西 —— 说明退到按钮 title 与文档里。  */
     assert(!/class="note"/.test(html), '面板内不再摆放折叠说明块（说明改挂 title）');
     assert(/id="toast"/.test(html) && /function toast\(/.test(script), '操作必须有全局回执');
     /* 回执必须挂在统一的响应处理上，而不是散落各处手动调用，散着写一定会漏 */
@@ -1608,11 +1360,8 @@ async function main(): Promise<void> {
   });
 
   await test('A13 面板标题只说"这是什么"：不该出现设计内部词汇，也不该丢掉演示声明', () => {
-    /* "旁挂""-H 载体"是我们的设计语言，不是医生的语言，出现在标题行只是噪音。
-       该说的机制改由按钮 title 承担（面板内的折叠说明已按用户要求删除，见 A12）。 */
     assert(!/旁挂 · 不是文档内容/.test(html), '标题行不该出现"旁挂 · 不是文档内容"这类设计内部词汇');
     assert(!/"-H" 载体/.test(html), '标题行不该出现内部缩写');
-    /* 但演示声明必须保留：删掉它会让人误以为这里接了真实模型 / 真实 ASR */
     assert(/本地规则模拟/.test(html), '演示声明不能被删掉（否则会被误认为真实模型）');
     assert(/模拟 ASR/.test(html), '演示声明不能被删掉（语音同理）');
     assert(
@@ -1632,8 +1381,6 @@ async function main(): Promise<void> {
 
   await test('A8 布局：三栏（树 / 正文 / 页签）+ 正文随中栏拉宽', () => {
     assert(/grid-template-columns:\s*238px/.test(css), '主区应为三栏网格，左栏固定宽');
-    /* 正文不再限宽（2026-10-17 起按用户要求自动拉宽）：中栏多宽正文就多宽。
-       限宽会在宽屏上留下大块空白，看上去像"正文被压窄了"。 */
     assert(!/\.doc-wrap\s*\{[^}]*max-width/.test(css), '正文应随中栏拉宽，不应再设限宽');
     assert(/align-items: start/.test(css), 'grid 子项不应被拉伸等高，各栏按内容自然撑高');
   });
@@ -1643,13 +1390,6 @@ async function main(): Promise<void> {
     assert(!/\.col\s*\{[^}]*overflow/.test(css), '列不应内部滚动（内容要能整页铺开）');
     assert(!/\.tree\s*\{[^}]*overflow/.test(css), '树不应内部滚动');
     assert(!/\.doc\s*\{[^}]*max-height/.test(css), '正文不应限高');
-    /* cssNoComments 已在模块顶部统一生成（对 ui.css 剥掉注释）。
-       两处豁免：
-         · `max-height: none` 解除浏览器对 top-layer dialog 的默认上限，与"限高逼出滚动条 / 截断内容"方向相反；
-         · img 规则里的限高是**缩放**（与被允许的 `max-width: 100%` 同用途）：它裁的是图片、不裁文字，
-           也不会在面板里逼出滚动条，正是 `max-width: 100%` 在纵向的那个对等物。
-           若把它一并禁掉，唯一的合法写法就变成任由大图把版面撑破。
-       其余任何带长度的 max-height 仍然禁止。 */
     const cssNoImg = cssNoComments.replace(/[^{}]*img[^{}]*\{[^}]*\}/g, '');
     const limiting = (cssNoImg.match(/max-height\s*:[^;]+/g) || []).filter((decl) => !/max-height\s*:\s*none\b/.test(decl));
     assertEqual(limiting, [], `除抽屉的 max-height:none（解除 UA 上限）外不应出现任何限高声明（限高会逼出滚动条/截断内容），实际：${limiting.join(' | ')}`);
@@ -1661,10 +1401,6 @@ async function main(): Promise<void> {
 
   await test('A10 建议调用：必须用当次 suggest 返回的 id（取错会静默失败，且没有报错提示）', () => {
     assert(!/find\(\(s\) => s\.status === 'pending'\)/.test(script), '不应再用 find(pending) 取建议：上一条被拒的建议仍是 pending，会被取到');
-    /* 判据是"每一处产出都保存了返回值"，不是"恰好几处"：
-       裸调用 = 丢掉 id，只能靠 find(pending) 找回来，而那正是本用例要禁止的。
-       原先是拿一键演示那三次产出（`first/second/third`）钉住这条不变量；
-       那段自动演示脚本已从页面移除，不变量不变，盯的改成页面上真人在点的建议入口。 */
     assertEqual(
       script.match(/^\s*await api\('\/api\/suggest(-low)?'/gm) || [],
       [],
@@ -1704,9 +1440,6 @@ async function main(): Promise<void> {
   await test('A17 可访问性：页签/面板/回执有正确 ARIA 角色，图标按钮有可访问名', () => {
     assert(/role="tablist"/.test(html), '页签栏应有 tablist 容器');
     assert((html.match(/role="tab"/g) || []).length >= 7, '每个页签应有 tab 角色');
-    /* 只数右栏的 7 个面板：配置抽屉里的子页签也是 tabpanel，不该被算进来 */
-    /* 不要求 `data-panel` 紧跟 `role`：两者之间还可能隔着 `data-visit-scope` 之类的开关属性，
-       把属性顺序写进断言，改一次顺序就会得到一条看起来像"面板丢了"的失败 */
     assertEqual((html.match(/data-panel="[^"]+"[^>]*role="tabpanel"/g) || []).length, 11, '右栏应有 11 个面板且都带 tabpanel 角色（新增页签时连同本用例一起改）');
     assert(/aria-selected/.test(script), '当前页签应同步 aria-selected（读屏感知切换）');
     assert(/role="status"/.test(html), '回执类浮层应有 status 角色');
@@ -1725,8 +1458,6 @@ async function main(): Promise<void> {
   });
 
   await test('A19 拖拽指定落点：靠 data 属性定位，且只接受候选集内的节点', () => {
-    /* 拖拽是"指定落点"的另一种输入方式，不新增通道：拖完只改写那个下拉框的值，
-       提交仍走「按这些落点生成建议」→ `/api/dictate-commit`。 */
     assert(/data-drag-segment/.test(frontend), '段落卡片应有 data-drag-segment（事件委托靠它定位拖源）');
     assert(/data-node-id/.test(frontend), '正文文本节点应有 data-node-id（它是拖放落点目标）');
     assert(
@@ -1736,8 +1467,6 @@ async function main(): Promise<void> {
   });
 
   await test('A20 配置子页签：页签与面板一一对应，且每个面板只装一组配置', () => {
-    /* 这条检查是踩坑之后加的：子页签容器一旦少一个闭合 `</div>`，后面的面板会整体嵌进第一个里，
-       表现是"切到别的页签，内容区一片空白"，而所有 id 都在（A2 照样通过），静态检查完全看不出来。 */
     const tabs = [...html.matchAll(/data-cfg-tab="([^"]+)"/g)].map((match) => match[1]);
     const panes = [...html.matchAll(/data-cfg-pane="([^"]+)"/g)].map((match) => match[1]);
     assert(tabs.length >= 3, `应有配置子页签，实际 ${tabs.length}`);
@@ -1754,11 +1483,6 @@ async function main(): Promise<void> {
     }
   });
 
-  /* 管理后台的页签是另一份文件（`admin.html`）：A20 守的是医生端那份配置抽屉。
-     管理员页签是"分区内的分类"，插错一个闭合 `</div>` 会让后面的面板整体嵌进前一个里，
-     表现是"切到别的页签，内容区一片空白"，而所有 id 都在（A2 照样通过）。
-     与医生端那条有一处刻意的不同：管理后台的「质控」面板放两张卡是有意的
-     （形式类 / 内涵类各一件事），所以这里不照搬"恰好一组"，只要求一一对应、且面板不空。  */
   await test('A23 管理后台子页签：页签与面板一一对应，且每个面板都有内容', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const tabs = [...adminMarkup.matchAll(/data-cfg-tab="([^"]+)"/g)].map((match) => match[1]);
@@ -1773,9 +1497,6 @@ async function main(): Promise<void> {
     }
   });
 
-  /* id 唯一：在面板之间搬动元素（知识资产包从「质控」拆出独立页签正是如此）最容易留下的
-     就是"旧位置那一行忘了删"。重复 id 不会让页面报任何错，`$('x')` 只是静静地拿到 DOM 里
-     靠前的那一个 —— 于是状态行写到另一个页签的角落，而谁也不觉得这是 bug。 */
   await test('A24 管理后台 id 唯一：搬动面板不得留下重复 id', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const seen = new Set();
@@ -1787,9 +1508,6 @@ async function main(): Promise<void> {
     assertEqual([...dup], [], `以下 id 在 admin.html 里出现了多次：${[...dup].join(' / ')}`);
   });
 
-  /* "界面上能改的字段"与"保存时读回来的字段"是两份清单，它们必须对得上。
-     对不上的表现是"改了、保存之后面貌依旧"—— 看起来像没保存成功，实际是被丢掉了；
-     而且它不会让任何东西报错（包写得进去、校验也过得去），只能在这里钉住。 */
   await test('A27 模板编辑器：界面上能改的每一类字段，保存时都必须被读回来', () => {
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const rendered = new Set([...adminScript.matchAll(/data-tpl-input="slot:([a-zA-Z]+):/g)].map((match) => match[1]));
@@ -1802,9 +1520,6 @@ async function main(): Promise<void> {
     for (const field of rendered) {
       assert(handled.has(field), `界面上能改的「${field}」在 readTplEditForm 里没有分支：那会表现成"改了、保存后没变"`);
     }
-    /* 章节标题与编码走的是另一条分支（`path.startsWith('sec:')` 之后按 field 分），
-       它们不在上面那份 `slot:` 清单里，必须单独看一眼：漏读的表现是"改了章节名，
-       保存后又变回原样"，而这一页的所有东西都还在，看起来像没保存成功。 */
     assert(
       /field === 'title'/.test(readForm) && /field === 'code'/.test(readForm),
       '章节标题与编码也要读回（章节编码是跨文书比对的锚点）',
@@ -1812,28 +1527,17 @@ async function main(): Promise<void> {
   });
 
   await test('A28 医生端徽标：从系统带入的值要说清"从哪儿带的"，与"模板带入"分得开', () => {
-    /* 这两档徽标的渲染在共用的 `/doc-view.js` 里：管理后台的模板预览画的是同一个函数，
-       所以读它 —— 只读医生端那一份的话，这里的断言就守不住预览了 */
     const uiScript = readFileSync(DOC_VIEW_JS, 'utf8');
-    /* 三档必须分开写：`origin` 都是 system，但一件事是"这一格已经把系统里的值填进去了"，
-       另一件是"模板只给了一个空骨架"。合成一个名字，医生要么以为姓名没带进来，
-       要么以为骨架就是内容 —— 这是口径问题，不是措辞问题。 */
     assert(/item\.fromRef/.test(uiScript), '界面要读服务端下发的来源（fromRef）');
     assert(/fromLabel/.test(uiScript), '显示的是人话名称（fromLabel），而不是 patient.nameMasked 这类路径');
     assert(/模板带入/.test(uiScript), '"模板带入"这一档仍然在（三档要分得开）');
   });
 
-  /* 文书的新建 / 编辑是弹层（抽屉）。它必须是原生 `<dialog>` + `showModal()`：
-     遮罩、Esc、焦点困在框内、top layer 都由内核给。自造的那套浮层总会漏掉其中一条
-     （最常见的是 Esc 与焦点归还），而"看起来能用"会一直用到有人被它卡住。
-     还有一条更实际的原因：抽屉打开期间要锁住背景页滚动，不锁就表现为
-     "在抽屉里滚，后面的页面跟着动"。  */
   await test('A26 文书新建/编辑是原生 <dialog> 弹层：遮罩·Esc·滚动锁·焦点归还都到位', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const adminCss = readFileSync(join(ROOT, 'src', 'demo', 'ui.css'), 'utf8');
     assert(/<dialog[^>]*id="tplDrawer"/.test(adminMarkup), '管理后台应有文书抽屉 <dialog id="tplDrawer">');
-    /* 模板预览画的是医生端那一套正文（同一份渲染、同一份样式）：脚本没引上就只剩空壳 */
     assert(/<script[^>]+src="\/doc-view\.js"/.test(adminMarkup), '管理后台应引用 /doc-view.js（预览与正文共用同一份渲染）');
     assert(/showModal\(\)/.test(adminScript), '抽屉必须用 showModal()（top layer，才自带遮罩与 Esc）');
     assert(/id="tplDrawerClose"/.test(adminMarkup), '抽屉应有可见的关闭入口（不能只靠 Esc）');
@@ -1842,18 +1546,11 @@ async function main(): Promise<void> {
     assert(/classList\.remove\('drawer-open'\)/.test(adminScript), '关闭抽屉要解开背景页滚动锁');
     /* 焦点归还：关闭后焦点应回到打开它的那个按钮，否则键盘用户要从头 tab 一遍 */
     assert(/TPL_DRAWER_OPENER\.focus/.test(adminScript), '关闭抽屉后焦点要还给触发按钮');
-    /* 关闭清理统一挂在 close 事件上：Esc 关的与点按钮关的都该走同一处 */
     assert(/addEventListener\('close'/.test(adminScript), '关闭后的清理应挂在 dialog 的 close 事件上');
-    /* 点遮罩（抽屉外那层阴影）要能关掉当前这一层：内核的 <dialog> 不提供这个行为，
-       不自己接上就是"点阴影什么都不会发生"。判定必须按坐标（框外才算遮罩），
-       只判 target 会把"点在抽屉自己的内边距上"也一起关掉。 */
     assert(
       /getBoundingClientRect\(\)/.test(adminScript) && /addEventListener\('click'/.test(adminScript),
       '点遮罩关闭要自己接（并按坐标判定"点在框外"）',
     );
-    /* 两级抽屉与方向：默认在右（一级），二级 `.from-left` 在左。
-       两级对开是"从表格点进某一条"这件事的排布方式 —— 两级贴同一边会互相盖住，
-       而"我在哪张表里"和"我在改哪一条"必须同时看得见。  */
     assert(
       /<dialog class="drawer from-left" id="tplDrawer2"/.test(adminMarkup),
       '管理后台应有二级抽屉 <dialog class="drawer from-left" id="tplDrawer2">（从左侧滑入）',
@@ -1869,23 +1566,16 @@ async function main(): Promise<void> {
     );
   });
 
-  /* 「模板库」是管理后台里唯一一张"会一直长"的表（文书只会越建越多），
-     所以它三件事一起验：表格展示、按名称查询、分页。
-     这三件都是纯前端的：目录本来就在 `/api/state` 下发的 `templateCatalog` 里，
-     查询与翻页只重画这一页的表，不产生任何请求 —— 断言因此落在"状态 + 标记 + 样式"上。  */
   await test('A27 模板库：表格展示 · 按名称查询 · 分页（查询与翻页都在前端，不产生请求）', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const adminCss = readFileSync(join(ROOT, 'src', 'demo', 'ui.css'), 'utf8');
-    /* 面板切片：查询条要落在「模板库」那一页里，摆到别的页签上等于没有 */
     const pane = adminMarkup.slice(
       adminMarkup.indexOf('data-cfg-pane="templates"'),
       adminMarkup.indexOf('data-cfg-pane="packs"'),
     );
     assert(pane.includes('id="tplSearchName"'), '「模板库」面板里应有按模板名称查询的输入框');
     assert(pane.includes('id="btnCreateTemplate"'), '「模板库」面板里应有新建文书入口');
-    /* 表达式的入口不在这一页：2026-10-16 起它是「基础数据 → 表达式控件」子页签（见下面那条）。
-       留一个按钮在这里就出现两个入口，而两处迟早会只改到其中一处。  */
     assert(!pane.includes('id="btnOpenExpressions"'), '「模板库」面板里不应再有表达式控件入口（它已是「基础数据」的子页签）');
     assert(
       adminMarkup.slice(
@@ -1897,11 +1587,9 @@ async function main(): Promise<void> {
     assert(/<table class="mini tpl-table">/.test(adminScript), '模板库应以表格渲染');
     assert(/<th>模板名称<\/th>/.test(adminScript), '表里应有「模板名称」这一列');
     assert(/function tplRowHtml\(item\)/.test(adminScript) && /<tr class="tpl-row/.test(adminScript), '一行一份文书（表格行）');
-    /* 查询：状态 + 边打边筛 + 筛空要单独说清"是筛没了" */
     assert(/let TPL_NAME_FILTER = ''/.test(adminScript), '查询条件要有状态（切走再回来不丢）');
     assert(/el\.id === 'tplSearchName'/.test(adminScript), '查询框要接上输入事件');
     assert(/没有名称含/.test(adminScript), '筛空了要说清"是筛没了"而不是"库里没有"');
-    /* 分页：页码 + 每页条数 + 上一页/下一页 + 越界夹回 */
     assert(/let TPL_PAGE = 1/.test(adminScript) && /const TPL_PAGE_SIZE = \d+/.test(adminScript), '分页要有页码与每页条数（模块级状态）');
     assert(/data-tpl-page=/.test(adminScript), '分页要有上一页 / 下一页按钮');
     assert(/el\.dataset\.tplPage/.test(adminScript), '翻页按钮要接上事件');
@@ -1911,14 +1599,11 @@ async function main(): Promise<void> {
       '新建之后页码要挪到新增的那一份上（否则超过一页就是"建完了、列表里看不见它"）',
     );
     assert(/\.tpl-pager\s*\{/.test(adminCss), '分页条要有样式');
-    /* 查询条件一改就回第 1 页：留在第 3 页上看"筛出来的第 3 页"，多数时候是一片空白 */
     const searchAt = adminScript.indexOf("el.id === 'tplSearchName'");
     assert(
       adminScript.slice(searchAt, searchAt + 300).includes('TPL_PAGE = 1'),
       '改查询条件应回到第 1 页',
     );
-    /* 查询框要放得下整句提示语（"按名称筛选（不区分大小写）"）：窄了会被截成
-       "按名称筛选（不区分大…"，提示语被截等于这一格没说明白自己要什么。 */
     const searchWidth = /\.tpl-toolbar input\[type="search"\]\s*\{\s*width:\s*(\d+)px/.exec(adminCss);
     assert(
       searchWidth !== null && Number(searchWidth[1]) >= 240,
@@ -1926,15 +1611,9 @@ async function main(): Promise<void> {
     );
   });
 
-  /* 医学表达式控件表格页（「基础数据 → 表达式控件」子页签）与模板库那张表是同一件事的两份：
-     两边都是"会一直长"的清单，所以查询（控件名称）与分页必须一起有，
-     做法也要一样 —— 缺一边会让人以为那一边"少了什么"。
-     它挂在基础数据那一组里（与科室字典 / 文书类型 / 判定方式并列），而不是模板页上的一个弹层：
-     控件比模板更基础（先有控件，才谈得上一份文书去引用它）。  */
   await test('A28 表达式控件表格页（基础数据子页签）：按控件名称查询 + 分页（与模板库同一套做法）', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
-    /* 面板切片：新建入口与表格容器要落在「表达式控件」那一页里，摆到别的页签上等于没有 */
     const pane = adminMarkup.slice(
       adminMarkup.indexOf('data-cfg-pane="expressions"'),
       adminMarkup.indexOf('data-cfg-pane="predicates"'),
@@ -1951,8 +1630,6 @@ async function main(): Promise<void> {
       /function exprGotoItemPage\(itemId\)/.test(adminScript) && /exprGotoItemPage\(String\(r\.data\.itemId\)\)/.test(adminScript),
       '新建控件后页码要挪到它那一页',
     );
-    /* 查询条必须是常驻的壳、表在它下面单独一块：输入框若跟着表一起重画，
-       打一个字就丢焦点、光标跳回开头，"边打边筛"当场失效。  */
     assert(
       /function renderExprCatalogShell\(\)/.test(adminScript)
       && /id="exprCatalogTable"/.test(adminScript)
@@ -1965,7 +1642,6 @@ async function main(): Promise<void> {
   await test('A35 基础数据·专科控件：页签紧随表达式控件；清单按形状展示；不预置内置控件（空态要说清）', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
-    /* 位置：页签就在「表达式控件」与「判定方式」之间 —— 两页的分工要摆在眼前，藏到别处就等于没写 */
     const tabs = [...adminMarkup.matchAll(/data-cfg-tab="([^"]+)"/g)].map((match) => match[1]);
     assertEqual(
       tabs.indexOf('ctrlDefs'),
@@ -1986,12 +1662,8 @@ async function main(): Promise<void> {
       /function ctrlCatalogItems\(\)/.test(adminScript) && /item\.itemType === 'control'/.test(adminScript),
       '清单要按 `itemType === control` 取（与表达式控件同在一个目录里）',
     );
-    /* 形状要说人话：`scale` / `series` 这种词读不出来"这一条会被画成什么" */
     assert(/const CTRL_SHAPE_LABELS = \{/.test(adminScript), '形状要有中文名（形态是这一页的主要信息）');
     assert(/<th>形态<\/th>/.test(adminScript), '表里应有「形态」这一列');
-    /* 影像（`image`）这一档：形状是闭集，加一档就必须同时在两处落地 ——
-       管理端要认得它的中文名与"这一格只收地址"，正文要有一支渲染器把它画成图。
-       只改一处的结果是"配得出来、填不进去"或"填得进去、纸面上只剩一串 URL"，两头都不报错。  */
     assert(/'影像'/.test(adminScript), '形状要有「影像」这一档（否则它在界面上选不出来）');
     assert(
       /text（地址）/.test(adminScript),
@@ -2001,13 +1673,10 @@ async function main(): Promise<void> {
       /item\.shape === 'image'/.test(script),
       '正文里影像要有自己的画法（形状决定渲染器：没有这一支，画出来与量表长得一样）',
     );
-    /* 地址是病历内容（外部数据），会被放进 `img[src]` 与 `a[href]`：
-       `javascript:` 一类的地址写进 href 就是一处"点一下病历就执行"的脚本  */
     assert(
       /function safeImageUrl\(/.test(script),
       '影像地址要过协议白名单（只认 http(s) 与站内路径）',
     );
-    /* 查询与分页：与模板库 / 表达式控件同一套（同一套状态命名、同一个 `.tpl-pager`） */
     assert(/let CTRL_NAME_FILTER = ''/.test(adminScript), '专科控件表要有查询状态');
     assert(
       /let CTRL_PAGE = 1/.test(adminScript) && /const CTRL_PAGE_SIZE = \d+/.test(adminScript),
@@ -2024,8 +1693,6 @@ async function main(): Promise<void> {
       /setCtrlCatalogStatus/.test(adminScript),
       '专科控件的开关回话要落在这一页的状态行上（与模板 / 表达式各回各页同一条规则）',
     );
-    /* 编辑器：页头要有新建入口（不预置内置控件，就只能自建），表单走二级抽屉（与表达式控件同一层），
-       增删改各走自己的接口 —— 控件与表达式控件不是同一件事，借用对面的接口会让两件事迟早混成一件。 */
     assert(pane.includes('id="btnNewControl"'), '「专科控件」面板里应有新建入口（不预置内置控件，就只能自建）');
     assert(/function renderCtrlForm\(\)/.test(adminScript), '要有控件表单（新建与编辑共用一份）');
     assert(/function readCtrlForm\(\)/.test(adminScript), '表单要能被读回（少读一格，一保存就把它清掉了）');
@@ -2035,14 +1702,12 @@ async function main(): Promise<void> {
       && /'\/api\/control-item-delete'/.test(adminScript),
       '增删改各走自己的接口（控件与表达式控件不是同一件事）',
     );
-    /* 改到字段或形状要问一次：服务端会把定义升版，而升版的后果要说在人眼前  */
     assert(/ctrlSemanticSignature/.test(adminScript), '字段语义有改动时要问一次（升版是显式后果）');
   });
 
   await test('A33 规则库：表格 · 按标题或规则号查询 · 分页 · 条目编辑抽屉（参数表单照服务端下发的规格生成）', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
-    /* 面板切片：查询条与新建入口要落在「规则库」那一页里，摆到别的页签上等于没有 */
     const paneStart = adminMarkup.indexOf('data-cfg-pane="packs"');
     const pane = adminMarkup.slice(paneStart, adminMarkup.indexOf('data-cfg-pane="qc"'));
     assert(pane.includes('id="ruleSearchKeyword"'), '「规则库」面板里应有查询框');
@@ -2050,15 +1715,12 @@ async function main(): Promise<void> {
     assert(!pane.includes('id="qcPackLoad"'), '不应再有整包载入入口（规则只在库里新建与修改，不从别处贴 JSON 搬进来）');
     assert(!adminScript.includes('btnLoadPack') && !adminScript.includes('qcPackJson'),
       '「贴 JSON 载入包」这条路要彻底撤掉（按钮、输入框、处理分支都不留）');
-    /* 表格：一行一条规则，且"按什么判、参数多少"要单独成列 */
     assert(/<table class="mini tpl-table">/.test(adminScript), '规则库应以表格渲染');
     assert(/<th>判定方式 \/ 参数<\/th>/.test(adminScript), '表里应有「判定方式 / 参数」这一列（否则两行标题一样、参数不同就分不清）');
     assert(/function ruleRowHtml\(rule\)/.test(adminScript) && /<tr class="tpl-row/.test(adminScript), '一行一条规则（表格行）');
-    /* 查询：状态 + 边打边筛 + 筛空单独说清 */
     assert(/let RULE_KEYWORD_FILTER = ''/.test(adminScript), '查询条件要有状态（切走再回来不丢）');
     assert(/el\.id === 'ruleSearchKeyword'/.test(adminScript), '查询框要接上输入事件');
     assert(/没有标题或规则号含/.test(adminScript), '筛空了要说清"是筛没了"而不是"库里没有"');
-    /* 分页：与模板库同一套（页码 + 每页条数 + 翻页 + 越界夹回 + 新建后挪到它那一页） */
     assert(/let RULE_PAGE = 1/.test(adminScript) && /const RULE_PAGE_SIZE = \d+/.test(adminScript), '分页要有页码与每页条数（模块级状态）');
     assert(/data-rule-page=/.test(adminScript) && /el\.dataset\.rulePage/.test(adminScript), '分页要有上一页 / 下一页并接上事件');
     assert(/RULE_PAGE = pageCount/.test(adminScript), '页码越界要夹回来（删掉本页最后一条不该显示空表）');
@@ -2066,7 +1728,6 @@ async function main(): Promise<void> {
       /function ruleGotoItemPage\(itemId\)/.test(adminScript) && /ruleGotoItemPage\(String\(r\.data\.itemId\)\)/.test(adminScript),
       '新建之后页码要挪到新增的那一条上（否则超过一页就是"建完了、列表里看不见它"）',
     );
-    /* 条目编辑：一级抽屉 + 四类操作都真的接了事件 */
     assert(/id="ruleDrawer"/.test(adminMarkup), '条目编辑走抽屉（与模板库同一套做法）');
     assert(/el\.id === 'ruleDrawerClose'/.test(adminScript) && /el\.dataset\.ruleCancel/.test(adminScript), '抽屉要能关（关闭按钮与取消）');
     assert(/el\.dataset\.ruleEdit/.test(adminScript), '行尾要有「编辑」并接上事件');
@@ -2076,16 +1737,11 @@ async function main(): Promise<void> {
       /\/api\/rule-item-create/.test(adminScript) && /\/api\/rule-item-update/.test(adminScript) && /\/api\/rule-item-delete/.test(adminScript),
       '三个条目接口都要真的被界面调用（否则按钮点了没反应）',
     );
-    /* 参数表单照服务端下发的规格生成：前端不许自己抄一份谓词清单与参数表  */
     assert(/S\.qcPredicates/.test(adminScript), '判定方式与参数规格要读服务端下发的那一份');
     assert(
       /function ruleParamsHtml\(conditionId, params\)/.test(adminScript) && /data-rule-arg/.test(adminScript),
       '参数区要按规格生成控件并接上读回（要填哪几格由**被引用的那条判定方式**的参数表决定）',
     );
-    /* 自定义条件（条件树）：构造器的字段与算子一个都不许写死在界面里 ——
-       写死的那份与内核不一致时，表现是"界面能拼、引擎不认"，而它只会在有人真的拼了一条之后才暴露。
-       这里只点几档最容易手滑写死的算子名：字段名（如 `docType` / `sectionCode`）在别的功能里
-       本来就是正当的关键字（模板编辑、文书类型字典），按字符串断言会把它们一起误伤。  */
     for (const op of ['older-than-hours', 'missing-pattern', 'empty-with-tag', 'length-less-than', 'not-contains']) {
       assert(
         !adminScript.includes(`'${op}'`) && !adminScript.includes(`"${op}"`),
@@ -2116,10 +1772,8 @@ async function main(): Promise<void> {
       !/'document-time-limit'/.test(adminScript) && !/'text-missing-time'/.test(adminScript),
       '前端不得写死任何谓词名 —— 写死的表现是"界面能选、引擎不认"，而那要等有人真的点了它才暴露',
     );
-    /* 级别只有 info / warn：block 是"卡住流程"，界面不许给这一档 */
     assert(/<option value="warn"/.test(adminScript), '级别下拉要有 warn');
     assert(!/value="block"[^>]*>block/.test(adminScript), '级别下拉不许出现 block');
-    /* 读回表单：能改的每一格都要读回来（少读一格，保存一次就把它清掉了） */
     assert(/function readRuleForm\(\)/.test(adminScript) && /dataset\.ruleInput/.test(adminScript), '表单要整体读回（含判定方式、参数与文案）');
     assert(
       /function renderRuleConditionSwitch/.test(adminScript) && /dataset\.ruleInput === 'conditionId'/.test(adminScript),
@@ -2131,20 +1785,16 @@ async function main(): Promise<void> {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const adminCss = readFileSync(join(ROOT, 'src', 'demo', 'ui.css'), 'utf8');
-    /* 面板切片：它要落在「基础数据」那个分区里，与另外两个子页签并列 */
     const master = adminMarkup.slice(
       adminMarkup.indexOf('data-admin-view-pane="master"'),
       adminMarkup.indexOf('data-admin-view-pane="accounts"'),
     );
-    /* 页面上的字才作数：注释里叙述"这一组原来叫什么"是正常的（同 A29 对 JS 注释的处置） */
     const masterText = master.replace(/<!--[\s\S]*?-->/g, '');
     assert(master.includes('data-cfg-tab="predicates"'), '「基础数据」里应有「判定方式」子页签');
     assert(master.includes('data-cfg-pane="predicates"'), '子页签要有对应的面板');
-    /* 一张表两组：容器、计数格、刷新按钮（"谁在用它"会随规则库变化，得能刷） */
     assert(master.includes('id="conditionLibraryBody"'), '面板里要有判定方式那张表的容器');
     assert(master.includes('id="conditionLibChip"'), '要有一格显示"几条判定方式 · 分布在几个包"');
     assert(master.includes('id="conditionLibRefresh"'), '面板里要有刷新按钮（"谁在用它"会随规则库变化）');
-    /* 撤掉的是"内核判法"这一层，不是它的价值：页面上仍要说清"哪一类改得了" */
     assert(
       !/内核判法/.test(masterText) && !/id="predicateBody"/.test(master) && !/id="predicateRefresh"/.test(master)
       && !/id="predicateChip"/.test(master) && !/id="predicateSummary"/.test(master),
@@ -2155,9 +1805,6 @@ async function main(): Promise<void> {
       !/库级资产/.test(masterText) && !/一律可改可删/.test(masterText) && !/复制用于改口径前先留一份/.test(masterText),
       '这一页不再摆那一大段说明文字（判定方式的交付形态与"复制用来干什么"由表的列与抽屉里的话承担）',
     );
-    /* 自定义条件的两张表：字段决定"读什么"、算子决定"怎么算"。
-       它们是"能拼什么"的全部答案 —— 不列出来，使用者只能在抽屉里一个个试，
-       而"这里没有我要的选项"与"这件事做不了"看起来一模一样。 */
     assert(master.includes('id="conditionBody"'), '面板里要有字段 / 算子清单的容器');
     assert(master.includes('id="conditionChip"'), '要有一格显示"几个字段 · 几个算子"');
     assert(/function renderConditionCatalog\(\)/.test(adminScript), '要有字段表与算子表的渲染');
@@ -2165,7 +1812,6 @@ async function main(): Promise<void> {
       /function conditionCatalogOf\(\)/.test(adminScript) && /S\.qcCondition/.test(adminScript),
       '两张表要读服务端下发的 `qcCondition`，不在前端另抄一份',
     );
-    /* 渲染：数据来自服务端下发的那一份，"谁在用它"来自规则目录（不另开接口） */
     assert(/function renderPredicates\(\)/.test(adminScript), '要有这一页的整页渲染');
     assert(
       /function renderPredicates\(\)[\s\S]{0,300}renderConditionLibrary\(\)/.test(adminScript),
@@ -2183,9 +1829,6 @@ async function main(): Promise<void> {
       '"谁在用它"要来自规则目录（不另开一个接口去问）',
     );
     assert(/function conditionParamRange\(spec\)/.test(adminScript), '参数的取值域要按规格渲染（下拉列取值、数字写清必填与否）');
-    /* 界面不写死任何判法：七种都不许出现在界面脚本里。
-       （第七种是条件树：界面要在参数区认出它来，认的是参数类型 `condition`，
-       不是判法名本身 —— 前者是"控件长什么样"，后者才是"按什么判"。）  */
     for (const kind of [
       'text-missing-time', 'tagged-empty-text', 'placeholder-residue',
       'document-time-limit', 'visit-doc-interval', 'visit-doc-required', 'field-condition',
@@ -2195,12 +1838,9 @@ async function main(): Promise<void> {
         `界面脚本里不许写死判法 ${kind}（写死的那份与引擎不一致时，界面能选、引擎不认）`,
       );
     }
-    /* 切页签要按当前状态重画（计数跟着规则库走）；刷新按钮与同页另外两个按钮走同一条路径 */
     assert(/tab\.dataset\.cfgTab === 'predicates'[\s\S]{0,80}renderPredicates\(\)/.test(adminScript), '切到该页签要重画');
     assert(/el\.id === 'conditionLibRefresh'/.test(adminScript), '刷新按钮要接上事件');
     assert(/\.predicate-card\s*\{/.test(adminCss), '清单条目要有样式（每一组一块）');
-    /* 本院自建那一组：同页上可维护的那一类 —— "多条规则共用同一套口径"的唯一出口。
-       它得真的接上三条接口，否则界面只是一张好看的只读表。  */
     assert(
       master.includes('id="conditionLibraryBody"') && master.includes('id="btnCreateCondition"'),
       '「判定方式」页要有那张表与新建入口',
@@ -2238,8 +1878,6 @@ async function main(): Promise<void> {
       /legacyKind/.test(adminScript) && /不再作为可选/.test(adminScript),
       '旧的"内核判法 + 参数"规则打开时要说明白为什么上面那一格是空的（否则看起来像"参数丢了"）',
     );
-    /* 判定方式的参数与实参（T1）：参数表在条件抽屉里维护，实参在规则抽屉里按它渲染。
-       三处都要钉住，否则"参数配了但不生效"会以"界面看着一切正常"的样子留下来。  */
     assert(
       /data-cond-param-add/.test(adminScript) && /function readConditionParams\(/.test(adminScript)
       && /function conditionParamRowsHtml\(/.test(adminScript),
@@ -2266,37 +1904,27 @@ async function main(): Promise<void> {
     );
   });
 
-  /* 系统的 `confirm` / `alert` / `prompt` 一律不用（两页 + 登录页）。
-     它们不受本页样式控制，也不与触发它的按钮发生任何视觉联系；按钮还只有
-     "确定 / 取消"两个词，而这里要确认的动作是删除 / 撤稿 / 清除 ——
-     按钮上就该写动作本身。替换物是 dialog.js（原生 <dialog> + showModal()，
-     与抽屉同源：遮罩与 Esc 交给内核）。 */
   await test('A29 弹框一律用自定义的（dialog.js）：页面脚本里不出现系统弹框', () => {
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const loginScript = readFileSync(join(ROOT, 'src', 'demo', 'login.js'), 'utf8');
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const dialogScript = readFileSync(DIALOG_JS, 'utf8');
-    /* 剥掉注释再找（注释里叙述"原来用的是 window.confirm"是正常的）。 */
     const native = /(?<![\w.$])(confirm|alert|prompt)\s*\(/;
     for (const [name, src] of [['ui.js', script], ['admin.js', adminScript], ['login.js', loginScript]] as Array<[string, string]>) {
       assert(!native.test(stripJsComments(src)), `${name} 里不应再出现系统弹框（confirm / alert / prompt）`);
     }
-    /* 三个入口都在、都在页面脚本里真的被用到了 */
     assert(/window\.askConfirm =/.test(dialogScript), 'askConfirm 应挂在 window 上（两页共用的经典脚本）');
     assert(/window\.askAlert =/.test(dialogScript) && /window\.askText =/.test(dialogScript), 'askAlert / askText 也应挂在 window 上');
     assert((script.match(/await ask(Confirm|Alert|Text)\(/g) || []).length >= 8, '医生端的确认 / 提示 / 问理由都走自定义弹框');
     assert((adminScript.match(/await askConfirm\(/g) || []).length >= 15, '管理后台的确认都走自定义弹框');
-    /* 与抽屉同一套内核机制 + 同一套补丁（点遮罩关闭要自己接、按坐标判"点在框外"） */
     assert(/showModal\(\)/.test(dialogScript), '弹框必须是原生 <dialog> + showModal()');
     assert(/getBoundingClientRect\(\)/.test(dialogScript), '点遮罩关闭要自己接（并按坐标判"点在框外"）');
     assert(/dialog\.app-dialog\s*\{/.test(css), '弹框要有自己的样式（不受系统弹框那套外观支配）');
-    /* 危险动作仍然要问，且问的措辞还在（替换掉的是弹框，不是"问不问"） */
     assert(/askConfirm\([\s\S]{0,220}内容不可恢复/.test(script), '删除本段仍要二次确认（不可恢复）');
     assert(
       /askConfirm\([\s\S]{0,220}整套质控会失效/.test(script),
       '「标记为误报」仍要二次确认（它会让同一条规则在内容未变时不再提示）',
     );
-    /* 两页都要加载它，服务端也要真的提供（静态资源缺一个，弹框就会 undefined 崩在点击里） */
     assert(/src="\/dialog\.js"/.test(markup), '医生端应加载 /dialog.js');
     assert(/src="\/dialog\.js"/.test(adminMarkup), '管理后台应加载 /dialog.js');
     assert(/path === '\/dialog\.js'/.test(serverSource), '服务端应提供 /dialog.js（no-store）');
@@ -2322,12 +1950,6 @@ async function main(): Promise<void> {
   });
 
   await test('A21 采集：ASR 协议与地址只出现在服务端，前端产物里一处都没有', () => {
-    /* 这条守的是采集路线本身的选择（设计文档第二节）：前端只与同源通信。
-       如果有人图省事把 ASR 地址或它的协议细节写进前端，两种现场都很晚才被发现：
-       页面在 HTTPS 下拿不到麦克风（混合内容被浏览器拦，前端无法绕过），
-       或者地址被写死后换一台 ASR 就要改前端。 */
-    /* 管理后台页与登录页也在"前端产物"里，一并检查：协议细节对它们同样没有意义，
-       而它们是最容易被顺手写上"服务端那几句"的地方（两边都在 UI 目录下）。 */
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     for (const [name, artifact] of [
@@ -2338,30 +1960,19 @@ async function main(): Promise<void> {
       assert(!/task_id/.test(artifact), `${name}产物里不得出现 \`task_id\`：前端拿到它就想自己轮询，而轮询在服务端完成`);
       assert(!/L0_CAPTURE_/.test(artifact), `${name}产物里不得出现采集的环境变量名（配置一律由服务端下发）`);
     }
-    /* 地址分两档看，而不是一律禁止：
-         - 医生端一个都不该有：它没有配地址的职责；
-         - 管理后台允许 placeholder 里写示例地址（那一格本来就是要人填地址的地方，
-           写"示例"比写"http://"更能让人填对），但脚本里不得写死：地址只能来自服务端下发的 state。  */
     assert(!/10\.\d+\.\d+\.\d+/.test(frontend), '医生端产物里不得出现内网地址（它没有配地址的职责）');
     assert(!/10\.\d+\.\d+\.\d+/.test(adminScript), '管理后台**脚本**里不得写死内网地址：它必须来自 state（写死的地址换一家医院就改不动）');
     assert(
       /\$\('cfgCaptureEndpoint'\)\.value\s*=/.test(adminScript),
       '管理后台应把采集地址从服务端状态回填（而不是在源码里钉一个）',
     );
-    /* 反证：协议在服务端模块里（`capture.ts` 是服务端采集层，不进前端产物）——
-       否则上一条会变成"哪儿都没有"的空检查。  */
     const captureSource = readFileSync(join(ROOT, 'src', 'dictation', 'capture.ts'), 'utf8');
     assert(/CAPTURE_SUBMIT_PATH/.test(captureSource), '反证：ASR 路径常量应在服务端采集层里（capture.ts 转出 asr-adapters.ts 的那一个）');
-    /* 医生端要能看见采集可用性：未配置时说明原因，而不是让人点了没反应 */
     assert(/id="dictationCapture"/.test(html), '医生端应有采集可用性的显示位（id="dictationCapture"）');
     assert(/dictationCapture/.test(script), '医生端脚本应渲染采集可用性');
   });
 
   await test('A22 采集界面：录音态有指示与计时；没有"自动开始采集"的路径；来源只有本机客户端', () => {
-    /* "录音必须可见"是本设计里唯一一条不讨论取舍的界面要求（第八节第 1 条：
-       病房里的人有权知道自己在被录）。这条是它的机器证明。
-       来源已收敛成只有本机客户端：下拉里的脚本音频（演示）与浏览器麦克风都撤了 ——
-       把演示源与真源并排摆着，现场只能靠猜"哪个才是真的"。  */
     assert(/id="captureLocalStatus"/.test(html), '界面要有本机客户端采集的状态渲染位（过程由客户端与页面共同产生）');
     assert(!/id="captureSource"/.test(html), '不再提供"音频来源"选项：来源只有本机客户端一条');
     assert(!/value="mic"/.test(html) && !/value="client"/.test(html), '来源下拉的三档都该撤掉（留着就是让人以为还能换来源）');
@@ -2370,13 +1981,10 @@ async function main(): Promise<void> {
     assert(/● 录音中/.test(script), '录音态必须有可见的指示（一个正在录的记号）');
     assert(/elapsedSec/.test(script), '录音态必须有计时：只有指示没有计时，看不出它走到哪一步了');
     assert(/currentChunkSec/.test(script), '还要能看出"当前这一段已录多久"（分片是静音判停做的）');
-    /* 采集源改成状态卡里的一行（`采集源 | tone（…）`）：值仍原样呈现 /hello 给的标识。
-       断线时也保留最近一次的源，不能跟着探测结果一起消失。 */
     assert(
       /capRow\('采集源', esc\(clientSource\)\)/.test(script),
       '采集源标识要如实呈现（客户端在 /hello 里回报；断线时也保留最近一次的源，不能跟着探测结果一起消失）',
     );
-    /* 页面不碰设备：浏览器麦克风那一档撤掉之后，页面脚本里更不该出现任何打开设备的调用 */
     assert(
       !/getUserMedia\s*\(/.test(stripJsComments(script)),
       '页面脚本里不得直接调 getUserMedia：那是"打开页面就碰设备"的来路',
@@ -2392,8 +2000,6 @@ async function main(): Promise<void> {
     assert(/同源/.test(script) || /\/api\/dictation\/capture\/segment/.test(code), '段仍要上传给**同源**采集路由（不把 ASR 端点告诉页面）');
     assert(/未检测到/.test(script), '没检测到客户端时必须说明"怎么办"（不能只显示一句"不可用"）');
     assert(/npm run dictation-client/.test(script), '没检测到客户端时要给出启动方式（否则医生只能去猜）');
-    /* 采集只能由人按：触发点必须唯一，且挂在按钮上。
-       来源收敛成一条之后，分派只剩 `startCapture → runLocalCapture` 这一段。  */
     assert(!/demo-run/.test(script), '页面不再挂"服务端脚本音频"这条演示采集（来源只有本机客户端）');
     assert(/el\.id === 'btnCaptureStart'[\s\S]{0,60}startCapture/.test(script), '那个触发点必须挂在按钮上（不许任何自动路径）');
     assert(
@@ -2404,13 +2010,10 @@ async function main(): Promise<void> {
       /const clientReady = clientProbe !== null && clientProbe\.ok === true;/.test(script),
       '开始采集只按客户端可用性置灰：录音与转写是两件事，没配 ASR 也该能录',
     );
-    /* 状态卡里主语在标签列（`语音识别 | 未配置（…）`），值那一格只留结论 */
     assert(
       /capRow\('语音识别', asrReady \? '已配置' : '未配置（可录，转写会失败）'/.test(script),
       '未配 ASR 要明确"能录、转写会失败"，而不是把录音入口一起关掉（那会把它变成转写按钮）',
     );
-    /* 录音状态监测：设备被拔掉/被独占时客户端只是"不再送帧"，页面上会表现成秒数停住。
-       必须把 /hello 的 sourceProblem 在采集期间也读回来并显示，否则那看起来像卡死。  */
     assert(
       /hello\.sourceProblem/.test(script) && /state\.problem/.test(script),
       '采集期间的采集源异常（设备掉线/被独占）要能从 /hello 的 sourceProblem 看到并显示，不能只让秒数停住',
@@ -2423,15 +2026,11 @@ async function main(): Promise<void> {
       /progress\.state/.test(script),
       '客户端提前收尾时要能看出来（只看页面自己的 running，会一直显示"录音中"）',
     );
-    /* 定时状态检测：不看当前是否已连上 —— 只在"已连上"时复检，等于"断了就再也不看了"，
-       而客户端后启动也永远不会被接上。这条守的是心跳的存在与它不带那个前提。  */
     const heartbeat = /setInterval\(\(\) => \{([\s\S]*?)\}, CLIENT_HEARTBEAT_MS\)/.exec(script);
     const beatBody = heartbeat === null ? '' : heartbeat[1];
     assert(heartbeat !== null, '页面要按固定周期检测本机客户端（不是只在打开时探一次）');
     assert(/probeCaptureClient\(\)/.test(beatBody), '心跳里必须真的调探测（写了常量没人用等于没有）');
     assert(!/clientProbe/.test(beatBody), '心跳不得以"已连上"为前提：客户端后启动接不上，中途退出也看不见');
-    /* 采集记录（只记元数据）：有显示位、有提交、有读取，且提交体里没有音频/文本 ——
-       这条记录一旦带上它们，就成了第二份病历内容副本，生命周期与门控都和正文不是一回事。  */
     assert(/id="captureHistory"/.test(html), '采集记录要有显示位（id="captureHistory"）');
     assert(/\/api\/dictation\/capture\/session/.test(code), '采集结束要提交一笔元数据（不提交 = 界面上永远没有记录）');
     assert(/\/api\/dictation\/capture\/records/.test(code), '界面要能读回采集记录（只写不读等于没做）');
@@ -2455,10 +2054,6 @@ async function main(): Promise<void> {
   });
 
   await test('A25 服务端文案同样不得出现 Markdown 语法（它会被 toast 与状态行原样显示）', () => {
-    /* `A14` 只扫前端文件，于是服务端吐出的文案是它的盲区 —— 实测就是靠真实渲染发现的：
-       一句 `不静默退回模拟转写` 原样出现在 toast 上。文案里带 Markdown，在这套界面里
-       只会变成几个碍眼的星号（医生看到的是"系统在打字时心不在焉"，而不是强调）。
-       扫描前先剥掉注释：注释里的 `` 不会被任何人看到。  */
     const stripComments = stripJsComments;
     const sources: Array<[string, string]> = [
       ['demo-server.ts', readFileSync(join(ROOT, 'src', 'demo', 'demo-server.ts'), 'utf8')],
@@ -2473,20 +2068,11 @@ async function main(): Promise<void> {
   });
 
   await startServer();
-  /* 配置写入一律要求管理后台会话（服务端 `requireAdminSession`，身份由服务端决定、不接受自报）。
-     这里先初始化出账号再登录：产品侧已经没有任何内置口令，账号是第一次运行时建出来的，
-     于是这一步同时把"初始化 → 建账号 → 登录"整条链走了一遍。
-     登录后，后续所有 `post()` 自动带上会话 cookie。 */
   adminCookie = await provisionAccounts(BASE);
-  /* 新库是空的（包不再播种）：把样例包载进来，后面那些"模板能开、质控有规则"的用例才有前提 */
   const seeded = await loadSamplePacks();
   if (seeded.ok !== true) throw new Error(`载入样例包失败：${seeded.code ?? ''} ${seeded.message ?? ''}`);
-  /* 签章是后面一批用例的前提（导出/受控阅读/审计都建立在"已签章"之上），
-     所以先把靶子签名服务接上，未配置就签不了章，这是产品侧有意的 fail-closed。 */
   signService = startFakeSignService();
   await configureSignService();
-  /* 靶子 ASR：默认不配置（采集入口应处于"未配置"这一 fail-closed 状态），
-     B45 会先用它证明"未配置时明确拒绝"，再配上去证明"配好后走通"。  */
   asrService = startFakeAsrService();
 
   await test('B1 工作区视图：3 位患者 / 6 份病历，含患者与就诊信息，活动病历展开章节', async () => {
@@ -2505,9 +2091,6 @@ async function main(): Promise<void> {
   });
 
   await test('B1b 状态投影：无会话拿医生端投影（不含管理端字段），管理员拿管理端投影（含）', async () => {
-    /* 医生端投影里不该出现的：管理端专有 + 只用于诊断的字段。
-       `activeDocId` 不在这张表里 —— 它是"工作区当前打开哪份文书"，属共用口径
-       （这条最初划错过，被 B1 挡了回来，见 demo-server 里那段注释）。  */
     const hidden = ['templateCatalog', 'contextFields', 'expressionFunctions', 'departments', 'expressionControls', 'database', 'invariants', 'placement', 'signBackend'];
 
     const anonRes = await fetch(`${BASE}/api/state`);
@@ -2516,7 +2099,6 @@ async function main(): Promise<void> {
     for (const key of hidden) {
       assert(!(key in anon), `医生端投影不应含 ${key}（它属管理端，或只用于诊断）`);
     }
-    /* 反证：医生端投影不能是"什么都没发" —— 否则上面那一条会因为空对象而通过 */
     assert(Array.isArray(anon.items) && anon.items.length >= 12, '医生端投影必须仍带正文节点（否则上一条是空检查）');
     assert(anon.doc !== undefined && anon.tree !== undefined, '医生端投影必须仍带文书与患者树');
     assert('activeDocId' in anon, '`activeDocId` 属共用口径，医生端投影必须有它');
@@ -2548,8 +2130,6 @@ async function main(): Promise<void> {
 
   await test('B2 低置信建议：采纳被门控拒绝，且错误码进入门控日志（界面可见）', async () => {
     const target = (await state()).items.find((item) => item.kind === 'text');
-    /* 低置信建议的来源是产出方（这里模拟一个自知不可靠的产出方），
-       不是"让界面把置信度调低"，界面能选的是谁来产出，不是这条内容有多可信 */
     const suggested = await post('/api/suggest-low', { nodeId: target?.id });
     assertEqual(suggested.ok, true, 'AI 出建议应成功（生成不落笔）');
     const accepted = await post('/api/accept', { suggestionId: suggested.data?.suggestionId });
@@ -2634,7 +2214,6 @@ async function main(): Promise<void> {
     assertEqual(record?.probe.roundTrip?.found, record?.probe.roundTrip?.total, '期望元素应全部命中');
     assertEqual(record?.file.endsWith(`${FIRST_DOC}.ofd`), true, `产物应按病历命名，实际 ${record?.file}`);
 
-    // 切到另一份病历：不应看到上一份的导出记录（产物与记录都隔离）
     await post('/api/open', { docId: SECOND_DOC });
     assertEqual((await state()).lastExport, null, '另一份病历不应看到上一份的导出记录');
     await post('/api/open', { docId: FIRST_DOC });
@@ -2679,10 +2258,6 @@ async function main(): Promise<void> {
     assertEqual(stillPending.length, 1, '被拒的低置信建议应仍为待处理');
     assertEqual(stillPending[0]?.id, low.data?.suggestionId, '仍是同一条低置信建议，这正是"用 find(pending) 会取错"的场景');
 
-    /* 三级归因走完整 HTTP 链路（服务端算、界面照渲染）：
-       这里不断言具体落在哪一档（那取决于服务端产出的建议文本），
-       而是断言恒等式与"归因条数与改写事实对得上" —— 断死档位会让用例
-       随产出方文案变化而碎，而它要守的是"归因不重不漏"这条纪律。  */
     const attribution = after.attribution;
     assertEqual(
       attribution.asIs + attribution.light + attribution.heavy + attribution.unknown,
@@ -2789,7 +2364,6 @@ async function main(): Promise<void> {
     assert((await state()).log.some((entry) => entry.code === 'E_IMPORTED_UNCONFIRMED'), '门控日志应记录该拒绝（界面要能看见）');
     assertEqual((await state()).doc.status, 'draft', '被拒后状态应仍为草稿');
 
-    /* 逐项确认：界面上每个内容节点都有自己的"确认内容"按钮 */
     for (const item of (await state()).items.filter((entry) => entry.kind === 'text' || entry.kind === 'field')) {
       const confirmed = await post('/api/confirm', { nodeId: item.id });
       assertEqual(confirmed.ok, true, `确认节点 ${item.id} 应成功`);
@@ -2805,7 +2379,6 @@ async function main(): Promise<void> {
   });
 
   await test('B11 导入 WS/T 500 XML：按内容识别、章节与数据元落地、未确认、门控生效', async () => {
-    /* 直接内联黄金样例，避免依赖其它套件先产出文件（用例之间不允许隐式依赖） */
     const base64 = Buffer.from(WST500_SAMPLE_XML, 'utf8').toString('base64');
     const imported = await post('/api/import', { fileName: 'wst500-sample.xml', base64 });
     assertEqual(imported.ok, true, `导入应成功（${imported.code ?? ''} ${imported.message ?? ''}）`);
@@ -2837,8 +2410,6 @@ async function main(): Promise<void> {
     );
     assertEqual(after.items.filter((item) => item.kind === 'section').length, 6, '6 个章节都应落地（含嵌套）');
     assert(JSON.stringify(after.items).includes('诊断明细'), '嵌套子章节标题应落地');
-    /* 树里的章节必须按文档层级顺序（子章节紧跟父章节）：
-       按 order 扁平排序会让子章节跑到父章节前面，看起来像"章节乱了"（实测踩到过） */
     const treeDoc = allDocs(after).find((doc) => doc.docId === report.docId);
     assertEqual(
       (treeDoc?.sections ?? []).map((section) => section.title),
@@ -2860,13 +2431,10 @@ async function main(): Promise<void> {
   });
 
   await test('B12 签名信息下发：算法/后端/指纹/覆盖范围 + 实时验签结论（界面据此展示）', async () => {
-    /* B11 已把当前导入件签章，故此刻应当是"已签章且验签通过"的状态 */
     const now = await state();
     assertEqual(now.doc.status, 'signed', '前置：当前病历应已签章');
     assert(!!now.sign, '状态里应带签名元信息（否则界面只能显示"已签章"而看不到算法与验签结论）');
     assertEqual(now.sign!.algorithm, 'SM2-SM3', '签名算法应为 SM2-SM3');
-    /* 后端必须是 `http`：产品侧唯一的签名后端就是医院签名服务（本用例里是靶子服务）。
-       若这里又变成 software，说明有人把"内置软件签名"放了回来，那正是本轮要去掉的东西。 */
     assertEqual(now.sign!.provider, 'http', '签名后端应标注为 http（医院签名服务）');
     assertEqual(now.sign!.publicKeyFingerprint.length, 64, '应给出公钥指纹（SM3/SPKI）');
     assertEqual(now.sign!.covers.some((item) => item.includes('MachineReadable')), true, '签名必须覆盖机读文件');
@@ -2882,7 +2450,6 @@ async function main(): Promise<void> {
     assert(record!.sections > 0, '应导出至少一个章节');
     assert(record!.bytes > 500, `产物不应过小：${record!.bytes} 字节`);
 
-    /* 用独立解析器读回（等价于"对方系统读这份文件"）：数量对不上就说明交换失败 */
     const xml = readFileSync(record!.file, 'utf8');
     const parsed = importWst500(new TextEncoder().encode(xml));
     assertEqual(parsed.stats.sections, record!.sections, '独立解析出的章节数应与导出统计一致');
@@ -2897,8 +2464,6 @@ async function main(): Promise<void> {
   });
 
   await test('B15 受控阅读（HTTP 全链路）：平台签发 → 导入 → 记账阅读 → 次数用尽/终端不符/停用/换文档都被拦', async () => {
-    /* 前置：B11/B14 之后当前病历已签章。
-       注意本系统不签发授权，凭据由"授权平台"（测试自建钥匙）签发，经导入进入本系统。 */
     const current = await state();
     const fingerprint = current.reading.documentFingerprint;
     assert(fingerprint.length === 64, 'state 应下发文档内容指纹（授权平台要绑定的就是它）');
@@ -2958,7 +2523,6 @@ async function main(): Promise<void> {
     assertEqual((await post('/api/reading/revoke', { grantId: boundId })).ok, true, '停用应成功');
     assertEqual((await post('/api/reading/open', { grantId: boundId, environmentId: 'WS-01' })).code, 'E_GRANT_REVOKED', '停用后必须拒绝');
 
-    /* ⑤ 文档不匹配：授权绑定的是那一份内容，换一份病历读不了 */
     const activeBefore = (await state()).activeDocId;
     const otherDoc = (await state()).tree.flatMap((patient) => patient.visits.flatMap((visit) => visit.docs)).find((doc) => doc.docId !== activeBefore);
     assert(!!otherDoc, '前置：工作区里应有另一份病历');
@@ -2969,9 +2533,6 @@ async function main(): Promise<void> {
   });
 
   await test('B16 界面导出的文档 JSON 能被独立探针（S5 模型校验）直接接受', async () => {
-    /* 这条用例的意义：把"界面导出的产物"与"第三方校验器"接起来。
-       现场做真实数据验证时走的就是这条路，导出 JSON 后直接喂给独立探针，
-       结论不经过我们的解析器，避免"自说自话"。 */
     const exported = await post('/api/export-json', {});
     assertEqual(exported.ok, true, `导出应成功（${exported.code ?? ''} ${exported.message ?? ''}）`);
     const record = exported.state!.lastJson!;
@@ -2988,9 +2549,6 @@ async function main(): Promise<void> {
   });
 
   await test('B17 加密交付（HTTP 全链路）：授权即密钥交付，换接收方连密钥都解不开', async () => {
-    /* 本系统不签发授权：这里由"授权平台"（测试自建钥匙）签发。
-       注意分工，密钥交付片段（keyDelivery）进授权书（要被签名覆盖，所以由平台签的那份承载），
-       而密文信封是（内容提供方）本系统的产物，不在授权书里，随凭据一起登记。 */
     const current = await state();
     const exported = await post('/api/export-json', {});
     assertEqual(exported.ok, true, `导出文档 JSON 应成功：${exported.code ?? ''}`);
@@ -3044,8 +2602,6 @@ async function main(): Promise<void> {
       '日志应记录"已解封内容密钥"（可审计）',
     );
 
-    // ② 换接收方（另一把私钥）→ 连内容密钥都解不出来（这是密码学事实，不是界面开关）
-
     const wrong = await post('/api/reading/open', { grantId: 'grant_b17_enc', environmentId: 'WS-01', recipientSeed: 'dept-b-2026' });
     assertEqual(wrong.code, 'E_RECIPIENT_MISMATCH', '换接收方必须拒绝');
     assert(String(wrong.message ?? '').includes('不可转让'), '拒绝原因应说明"凭证不可转让"');
@@ -3065,9 +2621,6 @@ async function main(): Promise<void> {
   });
 
   await test('B18 接收方公钥目录：非法公钥被拒 → 导入 → 重复被拒 → 公钥保真 → 移除（它是"交付目标"的登记处）', async () => {
-    /* 目录的用途是登记交付目标：授权平台签发"加密交付"授权时，需要用接收方公钥封装内容密钥。
-       本系统只保存与核对公钥（可导出交给平台），不持有任何私钥。
-       演示里接收方公钥由种子派生（生产由对方密码设备生成，只把公钥交出来）。 */
     const recipient = demoKeyPair('dept-c-2026');
     const spkiBase64 = Buffer.from(publicKeyToSpki(recipient.publicKey)).toString('base64');
     const pem = `-----BEGIN PUBLIC KEY-----\n${spkiBase64.match(/.{1,64}/g)!.join('\n')}\n-----END PUBLIC KEY-----`;
@@ -3095,7 +2648,6 @@ async function main(): Promise<void> {
 
     assertEqual(listed.spkiBase64, spkiBase64, 'SPKI 公钥应原样保存（交给平台的那一份，必须保真）');
 
-    /* ⑤ 移除条目：它只是"交付目标的登记"，不是密钥本身（移除不影响任何已登记的授权） */
     assertEqual((await post('/api/recipient-keys/remove', { keyId })).ok, true, '移除应成功');
     assertEqual((await state()).recipientKeys.keys.some((key) => key.keyId === keyId), false, '目录里应已移除');
   });
@@ -3105,8 +2657,6 @@ async function main(): Promise<void> {
     assertEqual(generated.ok, true, `生成应成功（${generated.code ?? ''} ${generated.message ?? ''}）`);
     const audit = generated.state!.lastAudit!;
     assert(!!audit, 'state 应记录最近一次审计报告摘要');
-    /* 8 项：原有 7 项 + 书写时长可信性（WRITING_DURATION_TRUSTED）。
-       数字写死是为了让"新增检查项"这件事被看见 —— 加了检查却没人改这条断言，等于白加。 */
     assertEqual(audit.total, 8, '应有 8 项机器可判定检查');
     assertEqual(audit.passed + audit.failed.length, audit.total, '通过数 + 失败数应等于总数');
     assertEqual(String(audit.reportDigest).length, 64, '报告应带 64 位指纹');
@@ -3122,7 +2672,6 @@ async function main(): Promise<void> {
       report.facts.gateRejectionCount >= 1,
       `前面用例制造过门控拒绝，报告应统计到：实际 ${report.facts.gateRejectionCount}`,
     );
-    /* 已签章且内容全部确认过 → "已签章不含未确认内容"应为通过 */
     const signedCheck = report.checks.find((check) => check.id === 'SIGNED_WITHOUT_UNCONFIRMED')!;
     assertEqual(signedCheck.pass, true, `已签章文档不应有未确认内容：${signedCheck.detail}`);
 
@@ -3137,8 +2686,6 @@ async function main(): Promise<void> {
   });
 
   await test('B17 确认减负（HTTP 全链路）：按章节确认 + 待确认口径必须含 AI 内容', async () => {
-    /* 前面的用例已经把当前病历签章了，已签章文档不能再改（E_SIGNED_IMMUTABLE）。
-       这不是缺陷，正是"签后不可改"在工作，所以本用例先切到一份未签章的病历。 */
     const s0 = await state();
     const docs = s0.tree.flatMap((patient) => patient.visits).flatMap((visit) => visit.docs);
     const fresh = docs.find((doc) => !doc.active && doc.status !== 'signed');
@@ -3149,7 +2696,6 @@ async function main(): Promise<void> {
     const textItem = s0b.items.find((item) => item.kind === 'text');
     assert(!!textItem, '前置：应有文本节点');
 
-    /* 造一条未确认的 AI 内容：AI 出建议 → 人工采纳（采纳 ≠ 确认责任） */
     const sug = await post('/api/suggest', { nodeId: textItem!.id, confidence: 0.9 });
     assertEqual(sug.ok, true, `出建议应成功：${sug.message ?? ''}`);
     await post('/api/accept', { suggestionId: String((sug.data as { suggestionId?: string } | undefined)?.suggestionId ?? '') });
@@ -3180,8 +2726,6 @@ async function main(): Promise<void> {
   });
 
   await test('B76 审签状态机（HTTP 全链路）：送审 → 退回 → 改 → 通过，审签流进审计报告', async () => {
-    /* 与 B17 同一条纪律：状态是终态/半终态的动作会改到共享的演示文书，
-       用例结束必须把当前文书切回去，否则后面的用例会莫名撞上"审核中不可改"。 */
     const before = await state();
     const activeOnEntry = before.doc.docId;
     const docs = before.tree.flatMap((patient) => patient.visits).flatMap((visit) => visit.docs);
@@ -3189,7 +2733,6 @@ async function main(): Promise<void> {
     assert(!!target, '前置：演示数据里应另有一份草稿文书');
     assertEqual((await post('/api/open', { docId: target!.docId })).ok, true, '切到那份草稿文书');
 
-    /* 按章节逐条确认（送审前把内容先逐条过一遍） */
     const clearUnconfirmed = async (): Promise<void> => {
       const snapshot = await state();
       const active = snapshot.tree.flatMap((p) => p.visits).flatMap((v) => v.docs).find((doc) => doc.active);
@@ -3203,7 +2746,6 @@ async function main(): Promise<void> {
     assertEqual(submitted.ok, true, `提交审核应成功：${submitted.code ?? ''} ${submitted.message ?? ''}`);
     assertEqual((await state()).doc.status, 'reviewing', '提交后应为审核中');
 
-    /* 审核中改内容：界面上按钮会在这时被禁用，这里验的是"即使请求直接打过来也被拒" */
     const s1 = await state();
     const textItem = s1.items.find((item) => item.kind === 'text');
     assert(!!textItem, '前置：应有文本节点');
@@ -3219,7 +2761,6 @@ async function main(): Promise<void> {
     assertEqual(rejected.ok, true, `退回应成功：${rejected.code ?? ''} ${rejected.message ?? ''}`);
     assertEqual((await state()).doc.status, 'draft', '退回后应回到草稿（否则医生改不了）');
 
-    /* 退回的意义就是能改：改完再送审，这次能过 */
     const s2 = await state();
     const item2 = s2.items.find((entry) => entry.kind === 'text');
     const edited = await post('/api/edit', { nodeId: item2!.id, text: `${item2!.text ?? ''}；持续三天` });
@@ -3231,8 +2772,6 @@ async function main(): Promise<void> {
     assertEqual(approved.ok, true, `审核通过应成功：${approved.code ?? ''} ${approved.message ?? ''}`);
     assertEqual((await state()).doc.status, 'signed', '审核通过 = 已签章（状态与签名一起落地）');
 
-    /* 审计报告里要有「审签流程」这一节：问"这份是怎么签上的"，答案应该在报告里，
-       而不是让人去几百条写入留痕里翻状态迁移 */
     const reported = await post('/api/audit-report', {});
     const report = (reported.data as unknown as { report?: { reviewFlow?: Array<{ op: string; decision?: string; note?: string }> } }).report;
     const flow = report?.reviewFlow ?? [];
@@ -3258,7 +2797,6 @@ async function main(): Promise<void> {
     assert(!!textItem, '前置：应有文本节点');
     const origin = String(textItem!.text ?? '');
 
-    /* 改一笔，然后把文档退回到"这一笔之前" */
     const edited = await post('/api/edit', { nodeId: textItem!.id, text: `${origin}·后来加的一句` });
     assertEqual(edited.ok, true, `改一笔应成功：${edited.code ?? ''} ${edited.message ?? ''}`);
     const grown = (await state()).items.find((item) => item.id === textItem!.id);
@@ -3281,9 +2819,142 @@ async function main(): Promise<void> {
     assertEqual((await post('/api/open', { docId: activeOnEntry })).ok, true, '用例结束后切回原文书');
   });
 
+  await test('B78 正文局部重画：判定层真的送达浏览器，且每类节点都有锚点', async () => {
+    const patchSource = readFileSync(join(ROOT, 'src', 'demo', 'patch-plan.js'), 'utf8');
+    assert(/L0PatchPlan/.test(patchSource), '判定层应挂在 window.L0PatchPlan');
+    assert(html.includes('src="/patch-plan.js"'), 'ui.html 应引入判定层');
+    assert(
+      html.indexOf('src="/patch-plan.js"') < html.indexOf('src="/ui.js"'),
+      '判定层必须排在 ui.js 之前（顺序反了，页面首屏会先整片重画一次）',
+    );
+    const uiSource = readFileSync(UI_JS, 'utf8');
+    assert(/L0PatchPlan\.planDoc\(/.test(uiSource), 'ui.js 必须真的走判定层');
+    assert(/typeof L0PatchPlan/.test(uiSource), 'ui.js 必须对判定层缺席做降级（旧服务端 / 部分部署时不至于整屏空白）');
+
+    const served = await fetch(`${BASE}/patch-plan.js`);
+    assertEqual(served.status, 200, 'GET /patch-plan.js 应返回 200');
+    const body = await served.text();
+    assert(body.includes('L0PatchPlan') && body.includes('function planDoc'), '取到的内容应是判定层本身');
+
+    const docViewScript = readFileSync(DOC_VIEW_JS, 'utf8');
+    const branchOf = (from: string, to: string): string => {
+      const start = docViewScript.indexOf(from);
+      const end = docViewScript.indexOf(to);
+      assert(start >= 0 && end > start, `应在 doc-view.js 里找到分支：${from}`);
+      return docViewScript.slice(start, end);
+    };
+    assert(
+      /data-node-id/.test(branchOf("item.kind === 'image'", "item.kind === 'table'")),
+      '图片节点的根必须带 data-node-id（否则它一变就只能整片重画）',
+    );
+    const fallbackBranch = docViewScript.slice(docViewScript.lastIndexOf('return `<div class="${classes.join'));
+    assert(/data-node-id/.test(fallbackBranch), '兜底的填写项节点也必须带 data-node-id');
+  });
+
+  await test('B79 编辑器手感：六种行内格式 / 浮条跟选区 / 字数从节点算 / 命令面板的段落级动作', async () => {
+    const script = readFileSync(UI_JS, 'utf8');
+    const pageHtml = readFileSync(UI_HTML, 'utf8');
+    const css = readFileSync(UI_CSS, 'utf8');
+
+    const marks = (pageHtml.match(/data-mark="([a-z]+)"/g) || []).map((hit) => hit.replace(/data-mark="|"/g, ''));
+    assertEqual(marks.length, 6, `段内格式应有 6 个按钮（实际 ${marks.length}：${marks.join(' / ')}）`);
+    for (const mark of ['bold', 'italic', 'underline', 'highlight', 'sup', 'sub']) {
+      assert(marks.includes(mark), `缺 ${mark} 按钮 —— 那种标记医生就自己打不出来`);
+    }
+
+    assert(/toggleInlineTag\('mark'\)/.test(script), '高亮必须走 toggleInlineTag（execCommand 产不出 <mark>）');
+    assert(/MARK_COMMAND/.test(script) && /superscript/.test(script) && /subscript/.test(script),
+      '上下标必须映射成 superscript / subscript');
+    assert(/function flowHostOfSelection/.test(script), '取格式目标要能回落到选区所在的段（点浮条时焦点可能已飘）');
+
+    assert(/function positionFlowTools/.test(script), '应有浮条定位函数');
+    assert(/\.ftools\.floating/.test(css), '浮条的样式必须在样式表里（否则它只是"飞出去的一行按钮"）');
+    assert(/selectionchange/.test(script), '浮条要跟选区走（只认一次点击会停在过期的位置）');
+    assert(/closest\('\[data-mark\]'\)\)\s*event\.preventDefault/.test(script),
+      '点浮条不能把正文焦点弄丢（丢了选区就没了，格式无从施加）');
+    assert(/id="flowToolsSpacer"/.test(pageHtml) && /\.ftools-spacer/.test(css),
+      '浮条必须带一块占位（否则选中文字时正文会往上跳一行）');
+    assert(/function setFlowToolsFloating/.test(script) && !/classList\.(add|remove)\('floating'\)/.test(
+      script.replace(/function setFlowToolsFloating[\s\S]*?\n}/, '')),
+      '浮起 / 落位只能走 setFlowToolsFloating（class 与占位必须一起切换）');
+
+    assert(/function docStatsSuffix/.test(script), '应有字数统计');
+    assert(/docStatsSuffix\(\)/.test(script), '字数必须真的被标题行用上');
+
+    assert(/group: '当前段'/.test(script), '命令面板应有「当前段」分组');
+    assert(/function paletteParagraphTarget/.test(script), '当前段必须由光标决定，不能猜「最后一段」');
+    for (const action of ['/api/insert-paragraph', '/api/move-node', '/api/confirm', '/api/delete-node', '/api/insert-image']) {
+      assert(script.includes(`api('${action}'`), `命令面板应能到达 ${action}`);
+    }
+  });
+
+  await test('B80 逐句来源：evidence 真的下发到界面，点一句能打开来源（G2 的界面出口）', async () => {
+    const serverSource = readFileSync(SERVER_TS, 'utf8');
+    const flowSource = readFileSync(FLOW_VIEW_JS, 'utf8');
+    const script = readFileSync(UI_JS, 'utf8');
+    const pageHtml = readFileSync(UI_HTML, 'utf8');
+    const css = readFileSync(UI_CSS, 'utf8');
+
+    assert(/function sourceOf\(node: DocNode\)/.test(serverSource), '应有把节点来源投影成视图字段的唯一函数');
+    assert(/evidence\?: EvidenceRef\[\]/.test(serverSource), '视图项必须带 evidence 字段');
+    const spreadCount = (serverSource.match(/\.\.\.sourceOf\(node\)/g) || []).length;
+    assert(spreadCount >= 3, `text / field / image / listItem 都应下发来源（实际 ${spreadCount} 处）`);
+
+    assert(/data-src-node=/.test(flowSource), 'AI / 导入的 run 必须带 data-src-node（否则"点哪一句"无从谈起）');
+    assert(/runHtml\(run, fallback, item\.id\)/.test(flowSource), 'runHtml 必须拿到节点 id');
+    assert(/function openSource\(/.test(script), '应有来源抽屉的打开函数');
+    assert(/EVIDENCE_KIND_LABEL/.test(script), '证据类别必须译成人话（否则界面露出英文枚举）');
+    assert(/closest\('\[data-src-node\]'\)/.test(script), '点击入口必须接到来源抽屉');
+    assert(/id="sourceDrawer"/.test(pageHtml) && /id="sourceBody"/.test(pageHtml), '来源抽屉的骨架必须在页面里');
+    assert(/\.run-imported \{[^}]*cursor: pointer/.test(css), '导入句的点线必须有光标反馈');
+    assert(/\.run-ai \{[^}]*cursor: pointer/.test(css), 'AI 句的点线必须有光标反馈');
+    /* 点阴影要能关：原生 <dialog> 不替你关，缺这一条就只能去找那个 × */
+    assert(
+      /sourceDrawerEl\.addEventListener\('click'[\s\S]{0,160}event\.target === sourceDrawerEl/.test(script),
+      '来源抽屉要支持点阴影关闭',
+    );
+  });
+
+  await test('B81 纸张视图与打印：尺寸只有一份来源（导出端），分页意图有人消费', async () => {
+    const serverSource = readFileSync(SERVER_TS, 'utf8');
+    const flowSource = readFileSync(FLOW_VIEW_JS, 'utf8');
+    const docSource = readFileSync(DOC_VIEW_JS, 'utf8');
+    const script = readFileSync(UI_JS, 'utf8');
+    const pageHtml = readFileSync(UI_HTML, 'utf8');
+    const css = readFileSync(UI_CSS, 'utf8');
+
+    assert(/DEFAULT_LAYOUT/.test(serverSource) && /DEFAULT_FURNITURE/.test(serverSource),
+      '服务端必须从导出端取纸张参数（屏幕 / 打印 / 导出三处不能各写一套）');
+    assert(/paper: \{/.test(serverSource) && /widthPt: DEFAULT_LAYOUT\.pageWidthPt/.test(serverSource),
+      'state 必须下发 paper（宽高与页边距）');
+    assert(/function presentationOf\(doc: DocumentModel, node: DocNode\)/.test(serverSource),
+      '分页意图要看父节点一层（医生说的是"这一段另起一页"）');
+    const presCount = (serverSource.match(/\.\.\.presentationOf\(doc, node\)/g) || []).length;
+    assert(presCount >= 3, `text / field / image 都应带上分页意图（实际 ${presCount} 处）`);
+
+    assert(/if \(item\.pageBreakBefore\) classes\.push\('pb-before'\)/.test(docSource), '卡片模式要消费分页意图');
+    assert(/textItem\.pageBreakBefore \? ' pb-before'/.test(flowSource), '流式模式要消费分页意图');
+    assert(/\.pb-before \{ break-before: page/.test(css), '打印时必须真的另起一页');
+
+    assert(/id="btnPaper"/.test(pageHtml), '顶栏要有纸张视图开关');
+    assert(/function applyPaper\(/.test(script) && /ptToPx\(paper\.widthPt\)/.test(script),
+      '纸面尺寸必须由下发的 paper 换算，而不是写死');
+    assert(/\.doc-wrap\.paper #docBody/.test(css), '纸张视图的纸面样式必须在样式表里');
+
+    assert(/@media print/.test(css), '必须有打印样式');
+    assert(!/@page\s*\{/.test(css), '样式表里不许写死 @page —— 那会与下发参数变成两份尺寸');
+    assert(/function ensurePrintPageRule\(/.test(script) && /size: \$\{width\}pt \$\{height\}pt/.test(script),
+      '@page 必须由下发参数现生成');
+    assert(/addEventListener\('beforeprint'/.test(script), '打印前要确保 @page 已就位（Ctrl+P 也要生效）');
+    assert(/function printDoc\(/.test(script), '应有打印入口');
+
+    /* ⑤ 判定层：分页意图变了必须重画（这条曾被"不参与比较"名单挡住） */
+    const patchPlan = readFileSync(join(ROOT, 'src', 'demo', 'patch-plan.js'), 'utf8');
+    assert(!/IGNORE_FIELDS = new Set\(\[[^\]]*'presentation'/.test(patchPlan),
+      'presentation 不能留在忽略名单：纸张视图与打印都消费它');
+  });
+
   await test('B20 语音落点确认：未落位不生成建议，医生指定落点后才提交（门控不松）', async () => {
-    /* 把落位策略切到"按章节词"且规则故意不命中，制造"全部未落位"的场景。
-       这条闭环的意义：落位是"建议的初始落点"，猜不中时必须能交回人工，而不是静默兜底。 */
     const candidates = (await state()).placementCandidates;
     assert(candidates.length > 0, 'state 应下发落位候选节点（界面据此渲染落点下拉）');
     const saved = await post('/api/placement-config', {
@@ -3329,14 +3000,12 @@ async function main(): Promise<void> {
       `应生成至少 ${record!.segments.length} 条待处理建议（落点由医生给，内容来源仍是 ASR，门控不松）`,
     );
 
-    /* 复位策略：本用例排在最后，但"改过就复原"是好习惯 */
     await post('/api/placement-config', { adminId: 'ADMIN', strategy: 'ordered', candidate: { onlyTextNodes: true }, confidenceCeiling: 0.85 });
   });
 
   await test('B21 授权平台：未配置时拒绝一切凭据；自洽但来源不可信的凭据必须被拒', async () => {
     const current = await state();
 
-    /* 先清空授权平台配置，制造"未配置"现场 */
     assertEqual((await post('/api/reading-authority', { adminId: 'ADMIN' })).ok, true, '应可清空授权平台配置');
     assertEqual((await state()).readingAuthority?.configured, false, '清空后应为"未配置"');
 
@@ -3371,7 +3040,6 @@ async function main(): Promise<void> {
     const untrusted = await post('/api/reading/import-credential', { text: JSON.stringify(wrongIssuer) });
     assertEqual(untrusted.code, 'E_UNTRUSTED_ISSUER', '不在信任集内的签发者必须被拒');
 
-    /* 形状不对：要报"内容不对"，而不是抛内部错误 */
     const malformed = await post('/api/reading/import-credential', { text: '{ 不是 JSON' });
     assertEqual(malformed.code, 'E_CREDENTIAL_MALFORMED', '畸形凭据应报形状错误');
 
@@ -3382,13 +3050,10 @@ async function main(): Promise<void> {
     assertEqual(denied.code, 'E_AUTHORITY_NOT_ISSUABLE', '应给出"本系统不签发"的明确错误码');
     assert(String(denied.message ?? '').includes('院内授权平台'), '说明里要指出授权该从哪来（否则用户不知道下一步做什么）');
 
-    /* 复位：本用例排在最后，但"改过就复原"是好习惯 */
     await post('/api/reading-authority', { adminId: 'ADMIN' });
   });
 
   await test('B22 未配置签名服务：签章被明确拒绝（本系统不提供"内置软件签名"）', async () => {
-    /* 这条是本轮改动的机器证明：去掉内置软件签名之后，没接上医院签名服务的环境签不了章，
-       而不是悄悄用演示密钥签一份"看起来成功"的章（那是最危险的一种假象）。 */
     const cleared = await post('/api/sign-backend-config', { adminId: 'ADMIN' });
     assertEqual(cleared.ok, true, '清空签名配置应成功');
     assertEqual((cleared.data as { configured?: boolean } | undefined)?.configured, false, '清空后应处于"不可签章"状态');
@@ -3406,8 +3071,6 @@ async function main(): Promise<void> {
   });
 
   await test('B23 生成幂等：连点不再堆重复，且界面必须说清"未重复生成"并默认只看待处理', async () => {
-    /* 从干净起点开始：建议是旁挂数据，随"重置工作区"一起清。
-       （本用例放在最后，重置不影响其它用例；这也顺带验证了"重置连旁挂数据一起清"。） */
     await resetWorkspace();
     const start = await state();
     const target = start.items.find((item) => item.kind === 'text');
@@ -3465,8 +3128,6 @@ async function main(): Promise<void> {
     assertEqual(clean.lastExport, null, '重置后不应有归档产物记录');
     assertEqual(clean.lastWst500, null, '重置后不应有共享文档记录');
 
-    /* 归档导出唯一的运行时门就是机读信息新鲜度：重置后还没派生 → 应当被挡（不导出半成品）。
-       界面卡上写的就是这句"可能被拦的只有两种情况"，这里逐条对上。 */
     const blocked = await post('/api/export');
     assertEqual(blocked.code, 'E_MACHINE_READABLE_STALE', '机读信息未派生时，归档导出应被挡');
     assertEqual((await post('/api/refresh-machine', {})).ok, true, '重算机读信息应成功（界面上是「机读信息 → 重算」）');
@@ -3505,7 +3166,6 @@ async function main(): Promise<void> {
       ((await state()).log[0]?.action ?? '').includes('区间 2~2'),
       '留痕要写明改动区间，否则"改了一个标点"会表现成"整段重写"',
     );
-    /* 文本没变 → 不提交、不留痕：点进点出编辑框不该留下记录 */
     const logBefore = (await state()).log.length;
     const noop = await post('/api/edit', { nodeId: target!.id, text: edited });
     assertEqual(noop.ok, true, '无改动应正常返回');
@@ -3537,17 +3197,12 @@ async function main(): Promise<void> {
     assertEqual(removed.ok, true, `删除段落应成功：${removed.code ?? ''} ${removed.message ?? ''}`);
     assertEqual((await state()).items.some((item) => item.id === newTextId), false, '段落应被删除');
 
-    /* ⑤ 关键内容禁删：删父节点（段落子树）也不能绕过，演示病历里"主诉"就是关键内容。
-       这一条是本轮修掉的漏洞：原先禁删只看目标节点，而 keyContent 标在文本节点上，
-       于是"删段落"可以把它连带删掉。 */
     const keyItem = (await state()).items.find((item) => item.kind === 'text' && item.keyContent === true);
     assert(!!keyItem, '用例前提：演示病历里应有标为关键内容的段落');
     const keyDelete = await post('/api/delete-node', { nodeId: keyItem!.id });
     assertEqual(keyDelete.code, 'E_KEY_CONTENT_PROTECTED', '关键内容必须禁止删除，删父节点也不行');
     assertEqual((await state()).items.some((item) => item.id === keyItem!.id), true, '被拒后内容必须原样还在');
 
-    /* ⑥ 界面契约：段落按钮存在；关键内容的「删段」在渲染时就是禁用的；
-       首/末段的「↑」「↓」同理，界面上不该摆按下去必然失败的按钮；插入后要聚焦新段落 */
     assert(
       /data-para-insert=/.test(script) && /data-para-up=/.test(script) && /data-para-down=/.test(script) && /data-para-delete=/.test(script),
       '应有段落级增 / 移 / 删按钮',
@@ -3614,13 +3269,10 @@ async function main(): Promise<void> {
     assertEqual(resigned.ok, true, `解锁改完后应能重新签章：${resigned.code ?? ''} ${resigned.message ?? ''}`);
     assertEqual((await state()).doc.status, 'signed', '重新签章后应回到 signed');
 
-    /* ⑤ 撤销槽位在签章后清空：撤销不能变成"绕过签章去改内容"的旁路 */
     assertEqual((await state()).undo, null, '签章之后必须没有可撤销项');
     assertEqual((await post('/api/undo', {})).code, 'E_NOTHING_TO_UNDO', '签章后撤销应被明确拒绝');
 
     assert(/id="btnUndo"/.test(markup) && /id="btnUnlock"/.test(markup) && /id="docNotice"/.test(markup), '应有撤销/解锁按钮与正文提示位');
-    /* 解锁理由在界面上问出来（自定义弹框的输入态），并要求非空：
-       空的理由不许解锁，也不许"先关掉再说一句必须填"（那样理由已经没了） */
     assert(/askText\(\s*'解锁理由/.test(script), '解锁必须在界面就问理由');
     assert(/requiredHint: '必须填写解锁理由。'/.test(script), '解锁理由为空要当场拦住并说明');
     assert(/classList\.toggle\('hide', S\.doc\.status !== 'signed'\)/.test(script), '「解锁修改」只在已签章时出现');
@@ -3629,8 +3281,6 @@ async function main(): Promise<void> {
 
   await test('B27 已签章只读 + 解锁后区分"原签章已作废"（不与"被篡改"混为一谈）', async () => {
     assert(/const immutable = signed \|\| S\.doc\.status === 'archived'/.test(script), '只读判据应与内核 commit() 的门一致（signed/archived）');
-    /* 只读形态由共用的 `/doc-view.js` 画（参数名是 `readonly`，医生端把 `immutable` 传进去）：
-       管理后台的模板预览走的就是这一条只读路径，所以"预览"与"已签章"长得一样是结构决定的 */
     assert(/data-edit="\$\{esc\(item\.id\)\}"\$\{readonly \? ' readonly' : ''\}/.test(script), '已签章/已归档时正文 textarea 应 readonly');
     assert(/data-field="\$\{esc\(item\.id\)\}" value="\$\{esc\(item\.value\)\}"\$\{readonly \? ' readonly' : ''\}/.test(script), '字段输入框同样应 readonly');
     assert(/immutableHint/.test(script) && /已签章：需先「解锁修改」才能改动/.test(script), '只读必须给出原因');
@@ -3664,15 +3314,12 @@ async function main(): Promise<void> {
       assertEqual(changed.signatureState?.kind, 'voided', '失败的只是验签；"已作废"这个判定不变，两者必须分得开');
     }
 
-    /* ⑤ 界面契约：三态分开呈现；作废时不列"验签失败"的理由
-       （解锁后一旦改过内容，那些理由必然出现，照列会把人推向"被篡改"的结论） */
     assert(/state\.kind === 'voided'/.test(script), '界面必须按内核的 kind 判断，而不是自己从 verified.ok 反推');
     assert(/原签章已作废（已解锁）/.test(script), '作废要用与"验签失败"不同的呈现');
     assert(/不是被篡改/.test(script), '要写明"验签不通过是作废的应有结果，不是被篡改"');
     assert(/voided \? state\.voidedBy/.test(script), '作废时取解锁理由、时间与被作废签章');
     assert(/const reasons = \(!voided && verify && !verify\.ok/.test(script), '作废时不得再列"验签失败"的理由');
 
-    /* ⑥ 复原：把改过的段落确认后重新签章，回到"当前有效"（不影响其它用例） */
     if (editable) await post('/api/confirm', { nodeId: editable.id });
     const restored = await post('/api/sign', { acknowledgeUnconfirmed: true });
     assertEqual(restored.ok, true, `复原重新签章应成功：${restored.code ?? ''} ${restored.message ?? ''}`);
@@ -3694,11 +3341,8 @@ async function main(): Promise<void> {
 
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
-    /* 登录搬到独立登录页（`/login`）之后，这两份才是"登录字段该在的地方" */
     const loginMarkup = readFileSync(join(ROOT, 'src', 'demo', 'login.html'), 'utf8');
     const loginScript = readFileSync(join(ROOT, 'src', 'demo', 'login.js'), 'utf8');
-    /* 注意：这里不能断言"医生端没有 cfg* 控件"，那份标记还在（惰性，见 A6 的过渡期说明），
-       删它要同步改本用例。现在能断言的是"入口已经换成管理后台"。 */
     assert(/id="btnAdmin"/.test(html), '医生端应只剩通往管理后台的入口');
     assert(
       /id="loginUsername"[^>]*required/.test(loginMarkup) && /id="loginPassword"[^>]*required/.test(loginMarkup),
@@ -3719,8 +3363,6 @@ async function main(): Promise<void> {
     assert(/请填「账号」与「口令」/.test(loginScript), '缺字段时要指出缺哪一格，而不是让服务端回一句错误码');
     assert(/\.focus\(\)/.test(loginScript), '缺字段时应把焦点送过去');
     assert(/classList\.toggle\('bad'/.test(loginScript), '状态行失败要标红（与"已保存"同色时会被当成提示扫过去）');
-    /* `?next=` 是可以被手改的：不校验就等于把登录页做成开放重定向的跳板，
-       而它长得就像"我们医院的登录页"，一条 `/login?next=https://evil.example` 足够用来钓口令 */
     assert(
       /isSafeNext/.test(loginScript) && /startsWith\('\/\/'\)/.test(loginScript),
       'next 必须做站内校验（`//evil.example` 是协议相对 URL，浏览器会当成站外域名）',
@@ -3735,12 +3377,9 @@ async function main(): Promise<void> {
     assertEqual(spoofed.ok, false, '未登录时不应改得动配置（自报的 adminId 不再被采信，这正是本条要证的事）');
     assert(String(spoofed.message ?? '').includes('管理后台'), `拒绝理由要指向登录入口，实际：${spoofed.message ?? ''}`);
 
-    /* 登录后可写（`post()` 自动带上会话 cookie） */
     const logged = await post('/api/placement-config', placementBody);
     assertEqual(logged.ok, true, `登录后应能保存：${logged.code ?? ''} ${logged.message ?? ''}`);
 
-    /* 操作者来自会话：留痕里是登录身份与角色，不是请求里写的那个。
-       角色也进了留痕：同一个人可能持有不同角色的会话，"谁改的"要能看出"他以什么身份改的"。 */
     const actions = (await state()).log.map((item) => String(item.action ?? ''));
     assert(
       actions.some((text) => text.includes('落位配置变更（操作者 ADMIN · 管理员）')),
@@ -3752,7 +3391,7 @@ async function main(): Promise<void> {
     assertEqual((await post('/api/admin/logout', {})).ok, true, '退出应成功');
     const afterLogout = await postNoAuth('/api/placement-config', placementBody);
     assertEqual(afterLogout.ok, false, '退出后不应再改得动配置');
-    await adminLogin(); /* 复原：后续用例与静态检查都依赖这个会话 */
+    await adminLogin();
   });
 
   await test('B30 管理动作审计：记下"从什么改成什么"，而密钥值一个字都进不去', async () => {
@@ -3763,16 +3402,8 @@ async function main(): Promise<void> {
       code?: string;
     };
     assertEqual(unauth.ok, false, '未登录不应读到审计');
-    /* 拒绝码在这里分成了两档：`E_AUTH_REQUIRED` = 没有会话；
-       `E_PERMISSION_DENIED` = 有会话但这个角色不能做。
-       原先只有 `E_ADMIN_REQUIRED` 一档，表达不了后者，而两者的处置完全不同
-       （去登录 vs 去换人），运维不该只能看到同一句话。 */
     assertEqual(unauth.code, 'E_AUTH_REQUIRED', '未登录读审计应报"需要登录"');
 
-    /* 前置：清掉密钥，并把 endpoint 设成一个别的值。
-       两个目的都为了"变化必然出现"：密钥从无到有、地址从旧到新。
-       实测踩到过：前置与保存用了同一个地址，于是审计里只剩一条 apiKeyPresent 变化，
-       而"审计应记下 endpoint 的变化"落空，断言是对的，是前置没把差异造出来。 */
     const clearedFirst = await post('/api/model-config', {
       ...MODEL_BASE,
       endpoint: 'http://127.0.0.1:9999/v1',
@@ -3817,15 +3448,11 @@ async function main(): Promise<void> {
     }
 
     const before = fingerprints['模型接入配置'];
-    /* 换一把密钥：指纹必须不变。否则把指纹贴给对方比对时，
-       会把"我们换了密钥"透露出去，也可能被误读成"配置变了"。 */
     const rotated = await post('/api/model-config', { ...MODEL_BASE, apiKey: 'sk-live-another-secret-31415926' });
     assertEqual(rotated.ok, true, `换密钥应保存成功：${rotated.code ?? ''} ${rotated.message ?? ''}`);
     const afterKey = (await getAuth('/api/admin/system') as unknown as AdminSystemView).configFingerprints?.['模型接入配置'];
     assertEqual(afterKey, before, '同一份配置换密钥后，生效配置指纹必须不变');
 
-    /* 反过来：清掉密钥时指纹必须变，"配没配密钥"确实是一项配置事实，
-       若这里也不变，说明 apiKeyPresent 漏出了白名单（那审计里也会跟着少一条）。 */
     const cleared = await post('/api/model-config', { ...MODEL_BASE, apiKey: null });
     assertEqual(cleared.ok, true, `清密钥应保存成功：${cleared.code ?? ''} ${cleared.message ?? ''}`);
     const afterClear = (await getAuth('/api/admin/system') as unknown as AdminSystemView).configFingerprints?.['模型接入配置'];
@@ -3833,39 +3460,26 @@ async function main(): Promise<void> {
   });
 
   await test('B32 未登录访问 /admin：服务端直接重定向，响应体里没有配置体', async () => {
-    /* 这条守的是"独立登录页"唯一值钱的地方：未登录者拿不到配置体的 DOM。
-       原先登录控件与配置体同页，`hidden` 只挡住"看得见"，五个子页签、字段名、
-       签名字段映射的占位符仍躺在响应体里。它不含密钥值，
-       但"这家医院接了签名服务、映射写到哪一格"本身就是信息。 */
     const res = await fetch(`http://127.0.0.1:${PORT}/admin`, { redirect: 'manual' });
     assertEqual(res.status, 302, '未登录访问 /admin 应重定向，而不是把页面发下来');
     assertEqual(res.headers.get('location'), '/login?next=%2Fadmin', '重定向要带 next，登录后能回到后台');
     const body = await res.text();
-    /* 判据用 `data-admin-view`（分区按钮的特征属性）而不是某个 class 名：
-       布局改过一轮（横排导航 → 左栏），class 跟着变过；这个属性才是"后台结构在不在"的稳定标记 */
     assert(!body.includes('cfg-tabs') && !body.includes('data-admin-view'), '重定向的响应体里不得出现配置体或分区标记（哪怕只是片段）');
 
     /* 登录页自己也不该泄露后台结构，否则"独立"就白做了 */
     const login = await (await fetch(`http://127.0.0.1:${PORT}/login`)).text();
     assert(login.includes('id="loginUsername"') && login.includes('id="loginPassword"'), '登录页应有账号 + 口令两个字段');
     assert(!login.includes('cfg-tabs') && !login.includes('data-admin-view'), '登录页不得含后台结构标记');
-    /* 口令绝不出现在页面上。这一条取代了原先的"口令分档显示"：
-       内置演示口令已经取消，而"演示时找不到口令"现在由启动日志与初始化流程解决，不由页面解决。
-       写成"不含任何口令字样"太宽（提示文案里会有"口令"两字），所以钉的是值。 */
     assert(!login.includes('demo-admin-token'), '页面上不得出现任何内置口令值（产品里已经没有了）');
     assert(!/demo-(admin|qc|clinician)-token/.test(serverSource), '服务端源码里也不得再有内置口令兜底，那正是这一轮要去掉的东西');
-    /* 已初始化 → 不下发初始化表单：下发什么就等于承认什么，
-       把初始化表单发给一台已经有账号的机器，就是在告诉每个访问者"也许还有一次机会"。 */
     assert(!login.includes('id="bootstrapForm"'), '已有账号时不得下发初始化表单（入口是一次性的）');
     assert(!login.includes('admin_users'), '登录页不再出现账号所在的库表名');
     assert(!login.includes('<!--ADMIN_TOKEN_NOTE-->'), '服务端必须把占位注释替换掉（留着它就等于漏了实现细节）');
 
-    /* 登录后，同一个地址直接给页面 */
     const authed = await fetch(`http://127.0.0.1:${PORT}/admin`, { headers: { Cookie: adminCookie }, redirect: 'manual' });
     assertEqual(authed.status, 200, '登录后 /admin 应直接返回后台页面');
     assert((await authed.text()).includes('data-admin-view'), '后台页面应含分区导航（登录后才拿得到）');
 
-    /* 已登录再打开登录页 → 直接送去后台，而不是让人"再登一次" */
     const again = await fetch(`http://127.0.0.1:${PORT}/login`, { headers: { Cookie: adminCookie }, redirect: 'manual' });
     assertEqual(again.status, 302, '已登录访问 /login 应重定向到后台');
     assertEqual(again.headers.get('location'), '/admin', '应指向 /admin');
@@ -3915,21 +3529,13 @@ async function main(): Promise<void> {
     assertEqual(onState.knowledgePacks.contentFingerprint, contentFp, '内容指纹自始至终不变');
     assertEqual(onState.doc.rev, docRevBefore, '整个过程病历一个字都没动');
 
-    /* ⑤ 审计要能回答"哪一条、从什么改成什么"，而不是只记一句"改过质控配置"。
-       取停用那一条而不是最新一条：最新是"开回来"，那一条里 itemId 前后相同（都是 R-FORM-02），
-       按"变化即记录"的口径它不该出现，拿它去断言等于在考审计工具，而不是考这次改动。 */
     const audit = (await getAuth('/api/admin/audit')) as unknown as AdminAuditView;
-    /* 审计主体是「包条目」而不是「规则包」：规则条目与模板条目走同一个开关接口，
-       写成"规则包"会把"停了一份文书"记成"改了判定标准"。 */
     const packEntries = (audit.entries ?? []).filter((item) => item.subject === '包条目');
     assert(packEntries.length >= 2, `审计里应有包条目开关记录，实际 ${packEntries.length} 条`);
     const disableEntry = packEntries.find((item) => item.changes.some((change) => change.field === 'enabled' && change.after === '否'));
     assert(!!disableEntry, `审计里应有"停用"那一条，实际：${JSON.stringify(packEntries.map((item) => item.changes))}`);
     const enabledChange = (disableEntry?.changes ?? []).find((change) => change.field === 'enabled');
     assert(!!enabledChange && enabledChange.before === '是' && enabledChange.after === '否', '审计要记下"从什么改成什么"');
-    /* "动的是哪一条"由 `note` 承担，而不是出现在 `changes` 里，
-       因为 itemId 前后相同（都是 R-FORM-02），按"变化即记录"的口径它本就不该出现。
-       这条差异是口径，不是遗漏：把没变的东西记成"变化"，会让审计里全是噪声。 */
     assert(String(disableEntry?.note ?? '').includes('R-FORM-02'), `审计要记下动的是哪一条，实际：${disableEntry?.note ?? '（无）'}`);
 
     /* ⑥ 未知条目必须显式报错（不静默无动作） */
@@ -3975,8 +3581,6 @@ async function main(): Promise<void> {
     const gestational = after.items.find((item) => item.kind === 'field' && item.tags?.[0]?.display === '孕周');
     assert(!!gestational, '产科模板应有「孕周」派生值节点（专科控件）');
     assertEqual(gestational?.value, '', '缺末次月经时孕周是"算不出"（空），不是 0');
-    /* 告警必须用医生看得懂的名字（"还缺 末次月经"），而不是模板内部的 slot key
-       （`lmpDate`），界面在临床模式下收起内部标识，告警里漏出去等于绕过那条纪律。 */
     assert(
       (createdData.warnings ?? []).some((warning) => warning.includes('孕周') && warning.includes('末次月经')),
       `告警要指出"缺哪一格"并说清这是自动计算，实际：${JSON.stringify(createdData.warnings ?? [])}`,
@@ -3998,7 +3602,6 @@ async function main(): Promise<void> {
     assert(!!lmp, '产科模板应有「末次月经」填写项');
     const revBeforeRecompute = after.doc.rev;
 
-    /* 让孕周正好 4 周：末次月经取"就诊时间往前 28 天" */
     assertEqual((await post('/api/set-field', { nodeId: lmp!.id, value: '2026-09-10T01:00:00Z' })).ok, true, '填写末次月经应成功');
     const recomputed = await post('/api/template-recompute', {});
     assertEqual(recomputed.ok, true, `重算应成功：${recomputed.code ?? ''} ${recomputed.message ?? ''}`);
@@ -4008,12 +3611,9 @@ async function main(): Promise<void> {
     assertEqual((await state()).items.find((item) => item.id === gestational?.id)?.value, '4', '28 天 → 孕周 4 周');
     assert((recomputed.state?.doc.rev ?? 0) > revBeforeRecompute, '重算是一次真实写入（进留痕，可追溯）');
 
-    /* 同值再算：幂等，不产生多余留痕（留痕是审计证据，不能被噪声淹没） */
     const revAfterFirst = (await state()).doc.rev;
     assertEqual((await post('/api/template-recompute', {})).state?.doc.rev, revAfterFirst, '同值重算不应再写一条留痕');
 
-    /* 医生确认了这个派生值 → 之后输入变了也不再自动改它
-       （"确认"的含义是"我看过并认可"，系统不该背着他改掉） */
     assertEqual((await post('/api/confirm', { nodeId: gestational!.id })).ok, true, '确认孕周应成功');
     assertEqual((await post('/api/set-field', { nodeId: lmp!.id, value: '2026-09-24T01:00:00Z' })).ok, true, '改末次月经（14 天前 → 本该是 2 周）');
     const third = await post('/api/template-recompute', {});
@@ -4021,7 +3621,6 @@ async function main(): Promise<void> {
     assertEqual(((third.data ?? {}) as { skipped?: unknown[] }).skipped?.length, 1, '应报"被跳过"，而不是静默不动');
     assertEqual((await state()).items.find((item) => item.id === gestational?.id)?.value, '4', '已确认的值必须原样保留（没有被算成 2）');
 
-    /* ⑤ 未知模板 / 已停用的模板：都要明确报错，而不是开出一份空文书 */
     assertEqual((await post('/api/template-create', { templateId: 'tpl.not-exist' })).code, 'E_TPL_TEMPLATE_UNKNOWN', '未知模板');
     await adminLogin();
     const off = await post('/api/knowledge-pack-toggle', { packId: 'doc.template.builtin', itemId: 'tpl.obstetric.outpatient', enabled: false });
@@ -4030,7 +3629,6 @@ async function main(): Promise<void> {
     assertEqual((await post('/api/template-create', { templateId: 'tpl.obstetric.outpatient' })).code, 'E_TPL_TEMPLATE_UNKNOWN', '停用的模板开不出来');
     assertEqual((await post('/api/knowledge-pack-toggle', { packId: 'doc.template.builtin', itemId: 'tpl.obstetric.outpatient', enabled: true })).ok, true, '复原：重新启用');
 
-    /* ⑥ 复位（后面没有用例了，但不把状态留给下一次运行） */
     assertEqual((await resetWorkspace()).ok, true, '复位应成功');
     assertEqual(docCountOf(await state()), countBefore, '复位后回到初始份数');
   });
@@ -4145,8 +3743,6 @@ async function main(): Promise<void> {
       true,
       '导入平台签发的凭据',
     );
-    /* 授权登记与包、审计同一条路：一条授权一行（`persistence.table`），
-       不再是"整份密封文件"—— 所以"落盘"验的是库里那张表，而不是找一个已经不存在的文件。  */
     const grantsTable = (await state()).reading.persistence.table;
     assertEqual(grantsTable, 'reading_grants', '授权登记应落在库里的一张表上（一条授权一行）');
     assert((await state()).reading.persistence.total >= 1, '全局授权条数应 >= 1');
@@ -4166,7 +3762,6 @@ async function main(): Promise<void> {
     assertEqual(afterReset.reading.persistence.total, 0, '重置要连授权登记一起清（重置后旧授权只会得到 E_DOCUMENT_CHANGED，留着就是一堆必然失败的凭据）');
     assertEqual(countGrants(), 0, '库里那张授权表也要被清干净（否则重启后又读回来一批必然失败的凭据）');
 
-    /* 复位信任根（后面没有用例了，但"改过就复原"是好习惯） */
     await post('/api/reading-authority', { adminId: 'ADMIN' });
   });
 
@@ -4177,10 +3772,6 @@ async function main(): Promise<void> {
     const field = before.items.find((item) => item.kind === 'field');
     assert(!!field, '前置：当前文书应有可填写的字段（否则这条用例在测别的东西）');
 
-    /**
-     * 从测试进程打开同一个库文件（服务端读的就是它）。
-     * 这与"另一个实例在写"同构：跨进程、同一个库，而不是往库里塞一份服务端读不到的东西。
-     */
     const withStore = <T,>(fn: (store: WorkStore) => T): T => {
       const opened = openDatabase(dbFile, { schemaVersion: STORAGE_SCHEMA_VERSION, migrations: MIGRATIONS });
       const store = new WorkStore(opened.db, STATE_KEY);
@@ -4219,13 +3810,10 @@ async function main(): Promise<void> {
       `操作日志里要有"未落盘"这一条，实际最近几条：${JSON.stringify(logAfter.log.slice(0, 3).map((item) => item.action))}`,
     );
 
-    /* ⑤ 冲突不该被"洗白"：基线保持不动，下一次陈旧写入仍然被拒 */
     const third = await post('/api/set-field', { nodeId: field!.id, value: '37.1' });
     assertEqual((third as { persisted?: { ok: boolean } }).persisted?.ok, false, '冲突过后再写仍要拒（改了基线就等于放行陈旧写入）');
     assertEqual((await state()).sidecar.conflict, true, '冲突状态要下发到界面，否则「重新载入旁挂数据」这个出路永远不会出现');
 
-    /* ⑥ 死路必须能走出来：重新载入 = 接受盘上那一版（放弃本终端尚未落盘的旁挂改动）。
-       没有这一步，"请重新载入后再改"就是一句做不到的承诺。 */
     const reload = await post('/api/reload-sidecars', {});
     assertEqual(reload.ok, true, `重新载入应成功：${reload.code ?? ''} ${reload.message ?? ''}`);
     const forth = await post('/api/set-field', { nodeId: field!.id, value: '37.2' });
@@ -4240,15 +3828,12 @@ async function main(): Promise<void> {
     assert(finalSide.ok && finalSide.found ? finalSide.digest !== foreignDigest : false, '恢复之后确实写进去了（换成了本终端这一版）');
     assertEqual((await state()).sidecar.conflict, false, '重新载入后冲突状态应清除（界面上的出路随之收起）');
 
-    /* 收尾：复位工作区（连库一起清），把状态留给下一轮 */
     assertEqual((await resetWorkspace()).ok, true, '复位应成功');
     const afterResetSidecars = withStore((store) => store.loadSidecars(docId));
     assertEqual(afterResetSidecars.ok && afterResetSidecars.found, false, '复位应把库里的旁挂数据一并清掉（重置必须真的清库）');
   });
 
   await test('B37 严格模式（库里的 config.system.authMode=strict）：写路径按角色判、"没登录"与"角色不够"分开报、归属取自会话、登录可被限流', async () => {
-    /* 这个实例是"另一台机器"：状态目录与运行时目录各一套，用完就删（下面 finally 与结尾清理各兜一层），
-       免得含合成手机号的落盘快照、以及带密封口令的配置文件留在工作区。 */
     const strictDir = process.env.L0_UI_SELFTEST_STRICT_STATE_DIR ?? join(ROOT, 'artifacts', 'state-selftest-strict');
     const strictRuntimeDir = process.env.L0_UI_SELFTEST_STRICT_RUNTIME_DIR ?? join(ROOT, 'artifacts', 'runtime-selftest-strict');
     const strictPort = Number(process.env.L0_UI_SELFTEST_STRICT_PORT ?? 8801);
@@ -4256,8 +3841,6 @@ async function main(): Promise<void> {
     for (const dir of [strictDir, strictRuntimeDir]) {
       if (existsSync(dir)) rmRecursive(dir, { recursive: true, force: true });
     }
-
-    // （角色口令一个都不给：角色现在来自账号，不是来自环境变量）。
 
     writeServerConfig({ bootstrapToken: STRICT_DEPLOY_TOKEN, targetRuntimeDir: strictRuntimeDir });
     seedSystemConfig(strictDir, {
@@ -4302,12 +3885,6 @@ async function main(): Promise<void> {
       assertEqual(payload.ok, true, `登录应成功（${username}）：${payload.message ?? ''}`);
       return String(res.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     };
-    /**
-     * 与 `login` 同一条路，但把登录响应里的 `expiresAt` 一并取回来。
-     *
-     * §⑨ 要验"到点即失效"，而会话寿命现在是库里配的（最小 1 分钟），
-     * 所以必须知道"该等到什么时候"，不能再像原来那样等一个固定的 3.3 秒。
-     */
     const loginWithExpiry = async (username: string, password: string): Promise<{ cookie: string; expiresAt: number }> => {
       const res = await fetch(`${base}/api/admin/session`, {
         method: 'POST',
@@ -4326,12 +3903,6 @@ async function main(): Promise<void> {
     };
 
     try {
-      /* 窗口给到 60 秒：空库启动要跑一次密钥派生，纯 JS 的 PBKDF2-HMAC-SM3（20 万次）
-         在这台机器上实测 12.5 秒（`node -e` 直接量过），加上播种与迁移约 15 秒。
-         窗口放宽不是因为它慢就放它过，这条用例要验的是"角色判定对不对"，
-         不是"启动快不快"；而原来那个 15 秒窗口是照当时的实测值定的，刚好卡在边界上
-         （实测 15.1 秒，红过一次）。真出问题时会以超时的形式报出来，
-         所以把它量出来并写进失败信息里，比调大数字更有用。 */
       const started = Date.now();
       const deadline = started + 60000;
       let ready = false;
@@ -4344,18 +3915,12 @@ async function main(): Promise<void> {
       const startupSeconds = ((Date.now() - started) / 1000).toFixed(1);
       assert(ready, `严格模式实例应在 60 秒内就绪（实测已等 ${startupSeconds} 秒；空库启动含一次密钥派生约 12.5 秒）`);
 
-      /* 初始化之前，登录页应当是"首次初始化"形态，这是服务端二选一的另一半，
-         在主实例上验不到（它那时已经有账号了）。 */
       const freshLogin = await (await fetch(`${base}/login`)).text();
       assert(freshLogin.includes('id="bootstrapForm"'), '空库时登录页应下发初始化表单');
       assert(!freshLogin.includes('id="loginForm"'), '空库时不该下发登录表单（还没有账号可登）');
       const noToken = await call('/api/admin/bootstrap', '', { username: ADMIN_USER, password: ADMIN_PASSWORD });
       assertEqual(noToken.code, 'E_BOOTSTRAP_DEPLOY_TOKEN', '配置文件给出了 bootstrap.token 时，初始化必须同时给出它');
       const strictAdmin = await provisionAccounts(base, STRICT_DEPLOY_TOKEN);
-      /* 严格模式实例是另一台机器（另一个库）：包是部署产物，新库就是空的，
-         而 §⑤ 要验"质控员能开关规则包"，前提是这台机器上真的装了包。
-         这一步就是测试在声明这个前提（与主实例开头那次 `loadSamplePacks()` 同一件事）。
-         漏了它，§⑤ 会以"包尚未装载"失败，那看起来像权限判错了，实际只是夹具缺了一半。 */
       const strictSeeded = await call('/api/knowledge-pack-load', strictAdmin, { sample: true });
       assertEqual(strictSeeded.ok, true, `严格模式实例应能载入样例包：${String(strictSeeded.message ?? '')}`);
       const madeViewer = await call('/api/admin/users', strictAdmin, { username: BRUTE_USER, password: BRUTE_PASSWORD, role: 'viewer' });
@@ -4370,8 +3935,6 @@ async function main(): Promise<void> {
       assertEqual(anon.code, 'E_AUTH_REQUIRED', '应报"需要登录"');
       assert(String(anon.message ?? '').includes('登录'), `理由要指向登录，实际：${String(anon.message)}`);
 
-      // ③ 医生会话可以写（这一步还会把落盘口令的派生算一次，之后都走缓存）
-
       const clinician = await login(...AS_CLINICIAN);
       const wrote = await call('/api/set-field', clinician, { nodeId: 'n_s3_p1_f1', value: '36.6' });
       assertEqual(wrote.ok, true, `医生会话应能写：${String(wrote.message ?? '')}`);
@@ -4381,7 +3944,6 @@ async function main(): Promise<void> {
       assertEqual(qcWrite.code, 'E_PERMISSION_DENIED', '应报"角色不够"（与"没登录"分开的另一种码）');
       assert(String(qcWrite.message ?? '').includes('医生'), `理由要说清哪些角色可以，实际：${String(qcWrite.message)}`);
 
-      /* ⑤ 权限表不是"全有或全无"：质控员能开关规则包，但改不了模型接入配置 */
       const qc = await login(...AS_QC);
       const qcToggle = await call('/api/knowledge-pack-toggle', qc, { packId: 'qc.form.builtin', itemId: 'R-FORM-03', enabled: false });
       assertEqual(qcToggle.ok, true, `质控员应能开关规则包：${String(qcToggle.message ?? '')}`);
@@ -4394,8 +3956,6 @@ async function main(): Promise<void> {
       assertEqual(doctorCall.ok, false, '医生不得触发模型外呼');
       assertEqual(doctorCall.code, 'E_PERMISSION_DENIED', '同上');
 
-      /* ⑦ 身份与租户只能来自会话：请求体里带 actorId / tenant 一律被忽略。
-         这不是"顺手加的防护"，而是这类系统最常见漏洞的入口，从请求决定身份或租户。 */
       const clinician2 = await login(...AS_CLINICIAN);
       const spoofed = await call('/api/set-field', clinician2, {
         nodeId: 'n_s3_p1_f1',
@@ -4411,10 +3971,6 @@ async function main(): Promise<void> {
       assertEqual(info.mode, 'strict', '会话接口要报出鉴权模式');
       assertEqual(info.tenant, 'default', '租户来自会话（当前恒为 default），绝不由 URL / 请求体决定');
 
-      /* ⑧ 归属也取自会话：只做门禁不改归属，"谁写的"就还是假的。
-         做法：医生会话产出并采纳一条建议，看节点上的 acceptedBy 记的是谁。
-         目标节点从状态里取（不写死 id）：节点标识随模板变过，写死会让用例在下一次
-         改模板时以"节点不存在"的形式失败，那看起来像鉴权坏了，实际只是夹具过期了。 */
       const clinician3 = await login(...AS_CLINICIAN);
       const textNodeId = String(
         ((await stateOf(clinician3)).items as Array<{ id: string; kind: string }>).find((item) => item.kind === 'text')?.id ?? '',
@@ -4432,13 +3988,6 @@ async function main(): Promise<void> {
       assert(acceptedBy.includes(CLINICIAN_USER), `采纳者应记会话身份（${CLINICIAN_USER}），实际：${acceptedBy || '（无）'}`);
       assert(!acceptedBy.includes('DR_DEMO'), '不得记成病历创建人，那正是"鉴权只做了一半"的形态');
 
-      /* ⑨ 会话到点即失效，且与"没登录"分开报（医生刚登录不该被说成没登录）。
-         会话寿命来自库里的 `config.system.sessionTtlMinutes`（本实例设成 1 分钟，
-         即校验允许的最小正整数），所以这条要真的等到它过期：
-         先确认登录响应给出的失效时刻确实按 1 分钟算（证明寿命真的来自库里的配置），
-         再等到那一刻之后断言拒绝。
-         （原先用 `L0_SESSION_TTL_MINUTES=0.05` 让会话 3 秒就过期；那条路随环境变量一起删掉了 ——
-           库里的寿命只收正整数，秒级的过期现在表达不了，所以这里改成等真正的到点时刻。）  */
       const expiring = await loginWithExpiry(...AS_CLINICIAN);
       const minutesAway = (expiring.expiresAt - Date.now()) / 60000;
       assert(
@@ -4446,8 +3995,6 @@ async function main(): Promise<void> {
         `会话寿命应来自库里的 sessionTtlMinutes=1（登录后约 1 分钟内失效），实际 ${minutesAway.toFixed(2)} 分钟`,
       );
       assertEqual((await call('/api/set-field', expiring.cookie, { nodeId: 'n_s3_p1_f1', value: '36.8' })).ok, true, '前置：会话有效时可写');
-      /* `/api/session` 会滑动续期并回显新的失效时刻：以它为准算"还要等多久"，
-         这样无论前面几次续期把到期时刻推到了哪里，等到它之后都必然已过期。  */
       const live = (await call('/api/session', expiring.cookie)).data as { expiresAt?: string } | undefined;
       const liveExpiresAt = Date.parse(String(live?.expiresAt ?? ''));
       assert(Number.isFinite(liveExpiresAt), `会话接口应回显失效时刻（否则无从知道该等到何时），实际：${String(live?.expiresAt)}`);
@@ -4458,8 +4005,6 @@ async function main(): Promise<void> {
       assertEqual(expired.code, 'E_SESSION_EXPIRED', '应报"已过期"而不是"需要登录"');
       assert(String(expired.message ?? '').includes('过期'), `理由要说清是过期，实际：${String(expired.message)}`);
 
-      // ⑩ 登录失败有代价（原先可以无限猜口令），且成功会清零该账号的失败计数。
-
       const wrong = async (): Promise<Json> => {
         const res = await fetch(`${base}/api/admin/session`, {
           method: 'POST',
@@ -4468,11 +4013,8 @@ async function main(): Promise<void> {
         });
         return (await res.json()) as Json;
       };
-      /* 先证"成功会清零"：失败一次 → 正确口令登录成功（清零）→ 紧接着的失败应重新从 1 数起。
-         不证这一条的话，手滑两次的正常用户会被关在门外五分钟。 */
       const firstWrong = await wrong();
       assertEqual(firstWrong.ok, false, '第 1 次失败');
-      /* 失败码与文案都不区分"账号不存在"与"口令错"：分开说就是给爆破者一个"这个账号存在"的反馈 */
       assertEqual(firstWrong.code, 'E_LOGIN_FAILED', '口令错应报统一的 E_LOGIN_FAILED');
       assert(!String(firstWrong.message ?? '').includes('不存在'), '文案不得透露账号是否存在');
       assert((await login(BRUTE_USER, BRUTE_PASSWORD)) !== '', '此时还没到上限，正确口令应能登录');
@@ -4483,9 +4025,6 @@ async function main(): Promise<void> {
       assertEqual(blocked.code, 'E_RATE_LIMITED', '第 3 次应被限流');
       assert(Number(blocked.retryAfterSec ?? 0) >= 1, `应给出可执行的重试间隔，实际：${String(blocked.retryAfterSec)}`);
 
-      /* 限流窗口内连正确口令也要等。这是有意的：限流发生在验口令之前，
-         否则攻击者只要每几次混入一个正确口令就能把窗口重置掉，限额也就白设了。
-         代价是手滑的正常用户要等一个窗口，这个代价摆在这里，不假装不存在。 */
       const duringWindow = await fetch(`${base}/api/admin/session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4506,7 +4045,6 @@ async function main(): Promise<void> {
       /* ⑫ 管理视图的收口在两种模式下一致：未登录读不到审计 */
       assertEqual((await call('/api/admin/audit', '')).ok, false, '未登录不得读审计');
 
-      /* ⑬ 被拒的动作进审计："谁试图做什么被拦下"是审计最该有的内容之一 */
       const auditRes = await call('/api/admin/audit', await login(...AS_ADMIN));
       const auditEntries = (auditRes.entries ?? []) as Array<{ subject?: string; note?: string }>;
       assert(
@@ -4514,12 +4052,7 @@ async function main(): Promise<void> {
         `审计里应有被拒绝的记录，实际最近几条：${JSON.stringify(auditEntries.slice(0, 3).map((item) => item.subject))}`,
       );
     } finally {
-      /* 先等进程真的退出再删：`kill()` 之后立刻删会撞 EPERM（库文件还被占着），
-         而这个 EPERM 会把"上面那些断言全过了"变成一个 FAIL —— 收尾的意外不该改写结论。 */
       await killAndWait(strict);
-      /* 用完就删：状态目录里会留下含合成手机号的落盘快照，运行时目录里则是带密封口令的配置文件，
-         留在仓库里会让隐私排查多出几条"需人工确认"（实测发现：排查因此多报 3 处命中、
-         还要人去复核一堆每次运行都会变的行号）。测试造的产物不该让排查反复审。 */
       for (const dir of [strictDir, strictRuntimeDir]) {
         if (!existsSync(dir)) continue;
         try {
@@ -4532,7 +4065,6 @@ async function main(): Promise<void> {
   });
 
   await test('B38 时限类质控：按文书类型与入院时刻判定；不适用 ≠ 未判定（三态分清楚）', async () => {
-    /* 先切到一份住院文书：新建的文书会挂在它的就诊下（入院时间 2026-10-05） */
     const inpatient = (await state()).tree
       .flatMap((patient) => patient.visits)
       .find((visit) => visit.visitType === 'inpatient');
@@ -4595,10 +4127,6 @@ async function main(): Promise<void> {
   });
 
   await test('B39 演示模式（open）：医生端动作不带会话也必须能用（这是"打开就能用"的定义）', async () => {
-    /* 这条是 B29/B33 的镜像：那两条证明"改配置要登录"，这条证明"医生干活不用登录"。
-       它守的是一个真实的坑：把某个医生端路由误放进"两种模式都要鉴权"的表里，
-       浏览器上没有会话 → 按钮点了没用，而带 cookie 的用例照样全绿（实测踩到）。
-       所以这里一律用 `postNoAuth`，与浏览器里的医生处境一致。 */
     for (const [label, path, body] of [
       ['质控扫描', '/api/qc-form-check', {}],
       ['一致性检查', '/api/check-consistency', {}],
@@ -4608,10 +4136,6 @@ async function main(): Promise<void> {
       assertEqual(result.ok, true, `演示模式下「${label}」不带会话也应可用，实际：${result.code ?? ''} ${result.message ?? ''}`);
     }
 
-    /* 而"改部署参数"与"清空工作区"这两件事，即使在演示模式下也要登录，
-       边界在同一条用例里对照着看。后者是破坏性动作（清空全部病历、已落盘的旁挂数据、
-       阅读授权登记），此前它只在严格模式收口，等于演示模式下任何能访问本端口的人
-       都能一键清空这台机器。那是本仓库最实的一个洞，这条就是它的封口。 */
     for (const [label, path, body] of [
       ['改部署参数', '/api/placement-config', { strategy: 'ordered', confidenceCeiling: 0.85 }],
       ['重置工作区', '/api/reset', {}],
@@ -4628,9 +4152,6 @@ async function main(): Promise<void> {
   });
 
   await test('B40 跨文书时限：间隔看的是这一次就诊的文书时间线，不是当前这一份', async () => {
-    /* 证明"跨文书"真的跨了：当前打开的是一份成文于入院当时的入院记录，
-       而报出来的间隔是"另一份文书（病程记录）之后一直没写"，结论里的时间与文书 id
-       都不是当前这一份的。若引擎只看当前文书，这条永远报不出来。 */
     const inpatient = (await state()).tree
       .flatMap((patient) => patient.visits)
       .find((visit) => visit.visitType === 'inpatient');
@@ -4652,7 +4173,6 @@ async function main(): Promise<void> {
     /* 锚点落在当前文书的根节点上：跨文书结论必须有归属地，否则它在界面上无处可看 */
     assertEqual(gap?.nodeId, 'n_root', '跨文书提示应挂在当前文书的根节点上');
 
-    /* 判得了就不该混进"未判定"：这条路径拿到了就诊文书清单 */
     const data = scan.data as { unevaluated: Array<{ ruleId: string }> };
     assert(
       data.unevaluated.every((item) => item.ruleId !== 'R-TIME-03'),
@@ -4674,8 +4194,6 @@ async function main(): Promise<void> {
       trend: { changes: Array<{ detail: string }>; skipped: Array<{ reason: string }> };
     };
 
-    /* 不断言"轴上只有这三份"：别的用例会往同一次就诊里再开文书（`doc_tpl_*`），
-       那样断言会把这条用例变成"考测试执行顺序"，而不是考这条轴 */
     const order = data.docs.map((doc) => doc.docId);
     const seeded = ['doc_002_adm', 'doc_002_prog', 'doc_002_dis'];
     const positions = seeded.map((docId) => order.indexOf(docId));
@@ -4684,7 +4202,6 @@ async function main(): Promise<void> {
     assertEqual(data.docs.filter((doc) => doc.isCurrent).map((doc) => doc.docId), ['doc_002_prog'], '当前文书要标出来');
     assertEqual(data.dischargedAt !== null && data.endAt === data.dischargedAt, true, '已出院的就诊，间隔的右端应是出院时刻');
 
-    /* 病程记录之后到出院那一段：54 小时（> 24 小时时限）—— 这正是"线上看出来的缺口" */
     const tail = data.segments.find((segment) => segment.docTypeCode === 'WST500.3' && segment.fromDocId === 'doc_002_prog');
     assert(!!tail, `应有"第一份病程记录之后"那一段，实际：${JSON.stringify(data.segments)}`);
     assert(tail !== undefined && tail.hours >= 54, `出院前至少 54 小时没有病程记录（后续用例可能再加文书，只会更长），实际 ${tail?.hours ?? 0}`);
@@ -4712,9 +4229,6 @@ async function main(): Promise<void> {
   });
 
   await test('B41 落库实证：重启服务之后写入仍在，而且是从库里读回来的', async () => {
-    /* 这是"存储落到数据库"这件事的唯一硬证据：进程重启之后数据还在。
-       关键是重启不擦库（`restartServer` 与开头那次不同），
-       擦掉库再起只能证明"出厂播种还在"，证明不了任何东西。 */
     const beforeState = await state();
     assert(beforeState.database.file.endsWith('l0.db'), `工作数据应落在数据库文件上，实际：${beforeState.database.file}`);
     assert(beforeState.database.documents > 0, `库里应有文书，实际 ${beforeState.database.documents} 份`);
@@ -4728,9 +4242,6 @@ async function main(): Promise<void> {
 
     await restartServer();
 
-    /* 重启后当前打开的文书会回到库里第一份，这一条是不落库的：
-       "打开的是哪一份"是视图状态，多用户系统里它属于会话而不是全局数据。
-       所以这里显式打开刚才那一份，再验"数据还在不在"。 */
     assertEqual((await post('/api/open', { docId })).ok, true, `重启后应能打开 ${docId}`);
     const afterState = await state();
     assertEqual(afterState.activeDocId, docId, '显式打开后应是那一份');
@@ -4743,13 +4254,6 @@ async function main(): Promise<void> {
   });
 
   await test('B73 重启装载：库里文书的机读信息陈旧不该拦住启动（导出照旧被拦）', async () => {
-    /* 这条守的是一个真发生过的故障（2026-10-17）：
-       在浏览器里改了一段字（机读信息随之变旧），随后重启服务 —— 装载路径走的是
-       `WriteSession.open`，它把「机读信息陈旧」判成"文档不合法"，于是整台服务退出
-       （实测：doc_001_opd 的 sourceHash 与当前内容指纹不一致，进程起不来）。
-       而机读信息新鲜度是导出的门，不是"能不能装载"的门 —— 两件事必须分开。
-       这条把它钉住：装载必须放行，且不许偷偷重算（陈旧这个事实要留着，界面才说得出"需重算"），
-       导出的门一分钟都不能松。  */
     await adminLogin();
     assertEqual((await post('/api/reset', {})).ok, true, '前置：复位工作区（从播种态出发）');
     const before = await state();
@@ -4782,9 +4286,6 @@ async function main(): Promise<void> {
   });
 
   await test('B42 医生端登录：入口就在医生端（/api/session），身份决定"能做什么"，可退出；重置的留痕跨重置留存', async () => {
-    /* ⓪ 先复位：本用例要断言"医生写病历成功"，而工作区此刻可能是已签章的
-       （签章之后写入会被拒，那是另一条用例在管的事）。不先复位的话，这条断言会
-       因为前面用例留下的状态而变红，那看起来像鉴权坏了，实际只是夹具过期了。 */
     await adminLogin();
     assertEqual((await post('/api/reset', {})).ok, true, '前置：复位工作区');
 
@@ -4823,14 +4324,10 @@ async function main(): Promise<void> {
       `理由要说清需要什么身份，实际：${String(denied.message)}`,
     );
 
-    /* ⑤ 退出：会话被吊销，同一个 cookie 立刻失效 */
     assertEqual((await callWith('/api/session/logout', clinician, {})).ok, true, '退出应成功');
     const after = (await callWith('/api/session', clinician)).data as { authenticated?: boolean };
     assertEqual(after.authenticated, false, '退出之后同一个 cookie 不该还能用');
 
-    /* ⑥ 管理员重置 → 成功；而且留痕留在管理审计里。
-       这一条是这条用例的重点：工作区被清空之后，门控日志也跟着被清掉了，
-       只有管理审计还答得出"谁在什么时候清空了这台机器"。 */
     await adminLogin();
     assertEqual((await post('/api/reset', {})).ok, true, '管理员应能重置');
     const audit = await getAuth('/api/admin/audit');
@@ -4853,8 +4350,6 @@ async function main(): Promise<void> {
   });
 
   await test('B43 后台账号：用户名+口令入库、可增删改停用、改完即踢会话、清单只给管理员', async () => {
-    // 这一轮的交付物：口令从环境变量搬进数据库。要证的五件事，
-// ③ 改角色 / 停用 / 重设口令都会立刻吊销该账号的会话，
 
     const tmpUser = 'acct-b43';
     const tmpPass1 = 'selftest-tmp-password-1';
@@ -4921,7 +4416,6 @@ async function main(): Promise<void> {
     assertEqual((await post('/api/admin/users/disabled', { username: tmpUser, disabled: false })).ok, true, '启用应成功');
     assertEqual((await loginAt(BASE, tmpUser, tmpPass1)).length > 0, true, '启用后应能重新登录');
 
-    /* ⑤ 重设口令 → 旧的失效、新的可用；升级为管理员再删掉，确认删除真的落库 */
     assertEqual((await post('/api/admin/users/password', { username: tmpUser, password: tmpPass2 })).ok, true, '重设口令应成功');
     assertEqual(
       (await callWith('/api/admin/session', '', { username: tmpUser, password: tmpPass1 })).code,
@@ -4930,8 +4424,6 @@ async function main(): Promise<void> {
     );
     assertEqual((await loginAt(BASE, tmpUser, tmpPass2)).length > 0, true, '新口令应可用');
 
-    /* ⑥ 红线（HTTP 上能验到的那条）：不许把自己关在门外，
-       停用自己、删除自己、改自己的角色都不行（改自己的口令可以，那是该让人自己做的事） */
     assertEqual((await post('/api/admin/users/disabled', { username: ADMIN_USER, disabled: true })).code, 'E_USER_SELF_LOCKOUT', '不得停用自己');
     assertEqual((await post('/api/admin/users/remove', { username: ADMIN_USER })).code, 'E_USER_SELF_LOCKOUT', '不得删除自己');
     assertEqual((await post('/api/admin/users/role', { username: ADMIN_USER, role: 'viewer' })).code, 'E_USER_SELF_LOCKOUT', '不得改自己的角色');
@@ -4945,7 +4437,6 @@ async function main(): Promise<void> {
       '删除后不得登录（且不区分"账号不存在"与"口令错"）',
     );
 
-    /* ⑦ 审计：谁对哪个账号做了什么；口令一个字都不进审计 */
     const audit = (await getAuth('/api/admin/audit')) as unknown as AdminAuditView;
     const accountEntries = (audit.entries ?? []).filter((item) => item.subject === '后台账号');
     assert(accountEntries.length >= 5, `审计里应有账号变更记录，实际 ${accountEntries.length} 条`);
@@ -4964,8 +4455,6 @@ async function main(): Promise<void> {
   });
 
   await test('B43 内涵类质控：契约可查、未接入报告、且绝不静默成"0 命中"', async () => {
-    /* 这条守的是内涵类质控最容易撒的谎：把"引擎没接上"显示成"查过了没问题"。
-       这两件事在数据与界面上都必须分得开，前者要人去配引擎，后者是"确实干净"。 */
     const contract = (await get('/api/qc-content-contract')).data as {
       api?: string;
       constraints?: string[];
@@ -5005,7 +4494,6 @@ async function main(): Promise<void> {
       `原因要能直接显示给人看，实际：${String(after.qcContent?.reason)}`,
     );
 
-    /* ⑤ 门控日志里也要有一条：只说"跑完了"，会把"根本没判"读成"查过了" */
     assert(
       after.log.some((item) => String(item.action ?? '').includes('内涵类质控')),
       `日志要记这一次的结果，实际最近几条：${JSON.stringify(after.log.slice(0, 3).map((item) => item.action))}`,
@@ -5013,16 +4501,11 @@ async function main(): Promise<void> {
   });
 
   await test('B44 部署参数落库：能在库里查到，且**重置工作区不会顺手清掉它**', async () => {
-    /* 这条守的是"部署参数与工作区数据必须分开"的新载体：
-       它们原先靠"重置时跳过一张文件名白名单"存活；现在它们连文件都没有了 ——
-       靠的是"重置只清工作数据"（`clearWorkData` 不碰 `sealed_kv`）。
-       白名单会漏（漏一个就是"重置顺手清了配置"，而现场只会看到配置悄悄变了），"不同的表"不会。  */
     await adminLogin();
     const saved = await post('/api/placement-config', { strategy: 'section-title', confidenceCeiling: 0.8 });
     assertEqual(saved.ok, true, `保存落位配置应成功：${saved.code ?? ''} ${saved.message ?? ''}`);
     assertEqual((await state()).placement?.source, 'store', '来源应变成"配置界面"');
 
-    /* 直接查库里的行（不听服务端自报）  */
     const dbFile = join(stateDir, 'l0.db');
     const opened = openDatabase(dbFile, { schemaVersion: STORAGE_SCHEMA_VERSION, migrations: MIGRATIONS });
     try {
@@ -5052,7 +4535,6 @@ async function main(): Promise<void> {
     const before = await state();
     assert(!!before.capture, 'state 应下发采集配置视图（界面据此置灰入口并说明原因）');
 
-    /* 未登录改不动：端点决定音频发去哪，属数据流向变更（与落位 external 同类） */
     const spoofed = await postNoAuth('/api/capture-config', { endpoint: CAPTURE_ASR_URL, modelId: CAPTURE_MODEL });
     assertEqual(spoofed.ok, false, '未登录不应改得动采集配置（自报身份不再被采信）');
 
@@ -5068,7 +4550,6 @@ async function main(): Promise<void> {
     /* 体不是 multipart（例如默认的 JSON）→ 明确拒绝，而不是当成"这段没说话" */
     const badBody = await post('/api/dictation/capture/segment?sessionId=sess-b45&index=1', { audio: 'x' });
     assertEqual(badBody.code, 'E_CAPTURE_UPLOAD_INVALID', '非 multipart 体应被明确拒绝（E_CAPTURE_UPLOAD_INVALID）');
-    /* 缺段号：段号是时间区间的锚，服务端不代编 */
     const noIndex = await postAudio('/api/dictation/capture/segment?sessionId=sess-b45', 'sess-b45#1.wav', CAPTURE_AUDIO);
     assertEqual(noIndex.code, 'E_CAPTURE_UPLOAD_INVALID', '缺 index 应被拒绝（不代编一个段号）');
 
@@ -5114,7 +4595,6 @@ async function main(): Promise<void> {
     assertEqual(after.doc.rev, before.doc.rev, '采集不得改动文档 rev');
     assertEqual(after.suggestions.length, before.suggestions.length, '采集本身不产生建议');
 
-    /* 审计：改端点与"开始一次采集"都要留痕，且都不含音频内容 */
     const audit = (await getAuth('/api/admin/audit')) as AdminAuditView;
     const entries = audit.entries ?? [];
     assert(entries.some((item) => item.subject === '采集配置'), '改采集配置应进管理审计');
@@ -5123,12 +4603,6 @@ async function main(): Promise<void> {
   });
 
   await test('B46 真实转写 → 建议：采集端给文本与时间区间，服务端只校验不代编；带 confidence 一律拒', async () => {
-    /* 这条补上的是"落地使用"里最后一处断链：C2 拿回了文本，但在此之前没有任何路径
-       能把真实文本变成建议（`/api/dictate` 只认服务端内置的模拟转写 ——
-       "能采到文本"与"文本能进病历"是两件事，中间那一跳一直没有）。
-       它同时是唯一一处调用方能把置信度塞进建议的入口，所以这里逐条挡死。  */
-    /* 落位策略固定成 ordered：前面几条用例改过它，不固定的话这条会因为"未落位"而变红，
-       那看起来像链路断了，实际只是夹具过期（同 B42 开头复位工作区的理由）。 */
     assertEqual(
       (await post('/api/placement-config', { strategy: 'ordered', confidenceCeiling: 0.85 })).ok,
       true,
@@ -5168,7 +4642,6 @@ async function main(): Promise<void> {
     assertEqual(fresh?.mode, 'voice', '建议卡应标成语音来源');
     assertEqual(fresh?.status, 'pending', '建议一出现都是待处理（采纳时才逐条过门控）');
 
-    /* 拒绝项：这几处是"能把内容或置信度塞进建议"的全部入口，逐条挡死 */
     const rejects: Array<[string, Record<string, unknown>, string]> = [
       [
         '带 confidence（想让建议直接过关键内容阈值）',
@@ -5207,7 +4680,6 @@ async function main(): Promise<void> {
     }
     assertEqual((await state()).doc.rev, after.doc.rev, '被拒的提交更不该留下任何痕迹');
 
-    /* 模拟路径不能被顺手弄丢：它是离线演示与回归的唯一入口 */
     const demo = await post('/api/dictate', {});
     assertEqual(demo.ok, true, '不带 segments 时应仍走内置模拟转写（演示路径）');
     assertEqual((demo.data as { source?: string } | undefined)?.source, 'demo', '模拟转写必须如实标成 demo');
@@ -5242,8 +4714,6 @@ async function main(): Promise<void> {
     );
     const before = await state();
     const run = await post('/api/dictation/capture/demo-run', {
-      /* 脚本：1s 人声 + 1s 静音 + 1s 人声 → `silenceMs` 800 会把它切成 2 段。
-         刻意用短脚本：这条用例是按真实时间跑的（每帧 0.5s）。  */
       timeline: [
         { seconds: 1, voiced: true },
         { seconds: 1, voiced: false },
@@ -5300,15 +4770,12 @@ async function main(): Promise<void> {
   });
 
   await test('B48 医生按停：当前那一段立刻定稿（已经说出口的话不丢），已完成的段不受影响', async () => {
-    /* 设计第四节的"手动停止"：医生按停 = 立即定稿当前分片。
-       这一条要证明的是"按停不是丢弃"：段被人为截断，但它照样被转写、照样进建议。  */
     assertEqual(
       (await post('/api/placement-config', { strategy: 'ordered', confidenceCeiling: 0.85 })).ok,
       true,
       '前置：落位策略固定为 ordered',
     );
     const before = await state();
-    /* 一段 6s 人声：不停的话要 6s 才走完；这里约 1.8s 后按停 */
     const pending = post('/api/dictation/capture/demo-run', { timeline: [{ seconds: 6, voiced: true }] });
     await new Promise((resolve) => setTimeout(resolve, 1800));
     const stopped = await post('/api/dictation/capture/demo-stop', {});
@@ -5391,7 +4858,6 @@ async function main(): Promise<void> {
         assertEqual(audio.status, 200, `第 ${meta.index} 段的音频应可取`);
         const parsed = parseCaptureWav(audio.bytes);
         assertEqual([parsed.sampleRate, parsed.channels, parsed.bitsPerSample], [16_000, 1, 16], '桥给的音频必须是 16k/单声道/16-bit');
-        /* 页面在这一步会把它 POST 给同源采集路由（那条链由 B45 守着），这里只确认 ack 语义 */
         const acked = await bridgeCall('/dictation-capture/ack', { method: 'POST', body: { index: meta.index, ok: true } });
         assertEqual(acked.json.ok, true, `第 ${meta.index} 段应能确认`);
         assertEqual((await bridgeAudio(meta.index)).status, 404, 'ack 之后音频应释放（否则一次门诊录音会在内存里堆几十 MB）');
@@ -5407,7 +4873,6 @@ async function main(): Promise<void> {
     assertEqual(done?.shortDropped, 0, '没有过短的片');
     assertEqual(done?.failures, [], '本次没有失败段');
 
-    /* ⑤ 医生按停：当前那一段立刻定稿（已说出口的话不丢）—— 这是页面上「停止采集」走的路径 */
     const started2 = await bridgeCall('/dictation-capture/start', { method: 'POST', body: { silenceMs: 800, maxSeconds: 30, minSeconds: 1 } });
     assertEqual(started2.json.ok, true, '第二轮应能开始');
     await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -5429,7 +4894,6 @@ async function main(): Promise<void> {
     assert(stoppedDone, '按停后整次交接应能收尾');
     assertEqual(stoppedChunks, 1, '按停时应把当前那一段定稿（不丢掉医生已经说出口的话）');
 
-    /* ⑥ 乱序 ack：拒绝，且不从队列里"顺手删一个" */
     const started3 = await bridgeCall('/dictation-capture/start', { method: 'POST', body: { silenceMs: 800, maxSeconds: 30, minSeconds: 1 } });
     assertEqual(started3.json.ok, true, '第三轮应能开始');
     await new Promise((resolve) => setTimeout(resolve, 3600));
@@ -5441,8 +4905,6 @@ async function main(): Promise<void> {
   await test('B50 模板库：名称与适用科室可改，改的是"换一版内容"（内容指纹变、审计留痕、开关与骨架不被动）', async () => {
     await adminLogin();
 
-    /* 科室字典先保底建好：下面要配"限某个科"，而科室只能从字典里选
-       （编码打错一个字母，这份文书就谁都开不出）。字典本身的完整验证在 B52。  */
     const seededDepts = await post('/api/departments', {
       items: [
         { code: 'DEPT_RESP', name: '呼吸内科', enabled: true },
@@ -5467,8 +4929,6 @@ async function main(): Promise<void> {
     const unauth = await postNoAuth('/api/template-item-update', { packId, itemId: id, name: '随便改' });
     assertEqual(unauth.ok, false, '未登录不得改模板');
 
-    /* 科室编码必须在字典里（见 B52 建立的那份）：一个对不上任何人的编码，
-       后果是这份文书谁都开不出，所以保存时就拦，而不是等医生开的时候才发现  */
     const badDept = await post('/api/template-item-update', { packId, itemId: id, departments: ['DEPT_NOT_EXIST'] });
     assertEqual(badDept.ok, false, '字典里没有的科室编码应被拒');
     assertEqual(String(badDept.code ?? ''), 'E_TPL_DEPT_UNKNOWN', '错误码要能定位到"科室对不上"');
@@ -5482,8 +4942,6 @@ async function main(): Promise<void> {
     const after = (afterState.templateCatalog ?? []).find((item) => item.itemId === id);
     assertEqual(after?.name, '产科门诊病历（2026 版）', '目录里的名称应是改后的');
     assertEqual(JSON.stringify(after?.departments ?? []), JSON.stringify(['DEPT_OB', 'DEPT_GI']), '科室按分隔符切成两条（切分规则只该有一处：服务端）');
-    /* 列表显示名称（服务端按字典翻译好下发）：编码是给判定用的，
-       摆进列表只会让人去猜 DEPT_OB 是哪个科  */
     assertEqual(JSON.stringify(after?.departmentNames ?? []), JSON.stringify(['产科', '消化内科']), '科室显示的是字典里的名称，不是编码');
     assert(afterState.knowledgePacks.contentFingerprint !== contentBefore, '改的是包内容：内容指纹必须变（否则"换了一版"没人看得出来）');
     assertEqual(after?.enabled, false, '停用的文书不会因为改了个名字被顺手打开');
@@ -5507,7 +4965,6 @@ async function main(): Promise<void> {
     assertEqual((finalState.templates ?? []).some((item) => item.templateId === id), true, '启用后医生端又能开它');
     assertEqual(finalState.knowledgePacks.contentFingerprint, contentBefore, '改回原样应回到原内容指纹（可复现）');
 
-    /* ⑤ 边界：控件条目不许走这条路；名称不能为空 */
     const onControl = await post('/api/template-item-update', { packId, itemId: 'expr.bmi', name: '改个名' });
     assertEqual(onControl.ok, false, '医学表达式控件不在这条编辑口子里（它的名字与公式就是它本身）');
     assertEqual(String(onControl.code ?? ''), 'E_TPL_ITEM_NOT_TEMPLATE', '错误码要说清是哪一类问题');
@@ -5563,7 +5020,6 @@ async function main(): Promise<void> {
       false,
       '限产科的文书在呼吸内科的就诊下开不出（发布 ≠ 谁都能开）',
     );
-    /* 改成通用（不配科室）之后它才真的进入名单 —— 科室随时可改，它不进任何已开出的病历 */
     const generic = await post('/api/template-item-update', { packId, itemId, departments: [] });
     assertEqual(generic.ok, true, '已发布的文书可以改科室');
     const afterGeneric = await state();
@@ -5608,13 +5064,9 @@ async function main(): Promise<void> {
     assertEqual(metaSlot.tags?.[0]?.display, '体温', '显示名落在数据元标签上（医生端就按它显示字段名）');
     assertEqual(metaSlot.tags?.[0]?.system, 'local', '原来没绑数据元的槽位按本机构自定义（local）记一条');
     assertEqual(metaSlot.tags?.[0]?.code, 'cc', '编码用槽位名：跨文书比对认的是 system + code，不能只剩一个中文名');
-    /* 目录要把编辑抽屉要回显的字段一起带出来（单位 / 从系统带入 / 必填 / 数据类型）：
-       少给一个，界面就显示成空的，而人一保存就把库里那份覆盖没了 —— 没有任何地方会报错  */
     assertEqual(metaSlot.from, 'patient.nameMasked', '"从系统带入"要能回显，否则界面显示成空的、一保存就覆盖没了');
     assertEqual(metaSlot.unit, '℃', '单位同样要能回显（同一条理由）');
     assertEqual(metaSlot.required, true, '必填也要能回显');
-    /* 关键内容 / 默认值 / 参考范围 / 另起一段走的是同一条回显纪律：
-       目录少给一项，编辑框里就是空的，而人一保存就把库里那份覆盖没了 —— 全程不报错  */
     assertEqual(metaSlot.keyContent, true, '关键内容要能回显（"未人工确认就签不出去"那道门控按它判）');
     assertEqual(metaSlot.value, '正常', '默认值要能回显（它是模板预设的机器真值，不是展示文本）');
     assertEqual(metaSlot.referenceRange?.text, '阴性', '参考范围要能回显（趋势按它标偏高 / 偏低；判不了数的用 text）');
@@ -5633,7 +5085,6 @@ async function main(): Promise<void> {
     assertEqual(previewField.label, '体温', '字段名来自数据元标签：预览与医生端读的是同一个名字');
     /* 默认值要真的落进那一格：只写进包、开文书时不用它，等于界面配了个寂寞  */
     assertEqual(previewField.value, '正常', '模板预设的默认值要落进正文视图（这一格不再是空待填）');
-    /* 连 `rev` 这种"只读态渲染才会用到"的字段也要在：形状缺一块，渲染里那条分支在预览里就走不到 */
     assert(typeof previewField.rev === 'number', '预览的节点也要带 rev（只读态渲染要用它）');
 
     const deleted = await post('/api/template-item-delete', { packId, itemId });
@@ -5691,7 +5142,6 @@ async function main(): Promise<void> {
     });
     assertEqual(edited.ok, true, `列表骨架应能存进草稿：${edited.code ?? ''} ${edited.message ?? ''}`);
 
-    /* 目录：编辑抽屉靠它回显（项 / 有序性 / 一行人话），少一样就是"一保存就清掉" */
     const catalogSlot = ((await state()).templateCatalog ?? [])
       .find((item) => item.itemId === itemId)?.sections?.[0]?.slots?.[0] as
       { kind?: string; items?: Array<{ text?: string }>; ordered?: boolean; detail?: string } | undefined;
@@ -5733,7 +5183,6 @@ async function main(): Promise<void> {
     );
     assertEqual(duplicated.length, 0, '列表项里的文字不得再作为独立文本项出现（否则屏幕上一句话出现两遍）');
 
-    /* 清理：删模板 + 复位工作区，不把这份自测文书留给后面的用例 */
     assertEqual((await post('/api/template-item-delete', { packId, itemId })).ok, true, '删除应成功');
     assertEqual((await resetWorkspace()).ok, true, '复位应成功');
   });
@@ -5745,8 +5194,6 @@ async function main(): Promise<void> {
     assertEqual(readable?.source, 'store', '科室字典应已落库（B50 已建立）');
     assert(deptState.encounter.dept === 'DEPT_RESP', `当前就诊科室应是编码（实际 ${deptState.encounter.dept}）`);
     assertEqual((deptState.encounter as { deptName?: string }).deptName, '呼吸内科', '就诊科室另给一份**名称**给人看（编码只用于判定）');
-    /* 工作区树：名称给人看、编码给判定，两个字段都给（界面用前者，判定用后者）。
-       只给编码会让树上显示一串 DEPT_RESP，只给名称则判定无处取数。  */
     const treeVisits = (deptState.tree ?? []).flatMap((patient) => (patient.visits ?? []).map((visit) => ({
       dept: visit.dept,
       deptCode: (visit as { deptCode?: string }).deptCode,
@@ -5794,7 +5241,6 @@ async function main(): Promise<void> {
     const opened = await post('/api/template-create', { templateId: id });
     assertEqual(opened.ok, true, `科室匹配时应能开出文书：${opened.code ?? ''} ${opened.message ?? ''}`);
 
-    /* ⑤ 停用一个科室：它从"可选"里消失，但既有模板不受影响（这里是"配了就停用"的边界）  */
     const disabled = await post('/api/departments', {
       items: [
         { code: 'DEPT_RESP', name: '呼吸内科', enabled: true },
@@ -5812,7 +5258,6 @@ async function main(): Promise<void> {
       '停用科室不动既有模板：这份文书限呼吸内科 / 产科，当前就诊是呼吸内科，仍然开得出',
     );
 
-    /* ⑥ 复原：科室清单恢复全启用，模板回到"通用"（不留痕给后面的排查添噪声） */
     const restoredDepts = await post('/api/departments', {
       items: [
         { code: 'DEPT_RESP', name: '呼吸内科', enabled: true },
@@ -5874,7 +5319,6 @@ async function main(): Promise<void> {
     assertEqual(both.ok, true, `跨体系同码应能保存：${both.code ?? ''} ${both.message ?? ''}`);
     assertEqual(both.data?.enabledCount, 2, '两个都应启用（缺省即启用）');
 
-    /* ⑤ 停用：新建时选不到它，但既有内容一个字都不改（字典只管"能不能选"，不管"已经开出来的"）  */
     const disabled = await post('/api/doc-types', {
       items: [
         { system: 'WST500', code: 'X1', display: '国标甲', enabled: false },
@@ -5885,7 +5329,6 @@ async function main(): Promise<void> {
     assertEqual(disabled.data?.enabledCount, 1, '启用数只数启用中的那一个');
     assertEqual((await state()).docTypes?.enabledCount, 1, '状态投影里的字典要与写入结果同口径');
 
-    /* ⑥ 复原：回到出厂那四种类型（不留痕给后面的排查添噪声） */
     const restored = await post('/api/doc-types', {
       items: [
         { system: 'WST500', code: 'WST500.1', display: '入院记录', enabled: true },
@@ -5952,12 +5395,9 @@ async function main(): Promise<void> {
         sectionCode: 'body',
         title: '正文',
         slots: [
-          /* 从系统带入：患者姓名由系统填进来（模板只声明"从哪儿取"） */
           { slot: 'field', key: 'pname', dataType: 'text', from: 'patient.nameMasked' },
           { slot: 'field', key: 'weight', dataType: 'number', unit: 'kg' },
           { slot: 'field', key: 'height', dataType: 'number', unit: 'cm' },
-          /* 派生值是自己的槽位类别（`slot: 'expression'`），不是"带公式的填写项"：
-             它不可手填（手填会让"这个数怎么来的"没有答案），所以它与填写项是两类节点  */
           { slot: 'expression', key: 'bmi', useExpression: exprId, unit: 'kg/m²' },
         ],
       }],
@@ -5970,14 +5410,9 @@ async function main(): Promise<void> {
     const openedState = await state();
     assertEqual(openedState.activeDocId, String(opened.data?.docId ?? ''), '新建后应自动切到新文书');
     assertEqual(openedState.doc.docType, '自测引用控件的文书', '文书类型来自模板声明的 docType');
-    /* 闭环的关键一条：这份文书里"由公式算出来"的字段应有恰好一个 ——
-       它证明我新建的那个控件真的被引擎当成了派生值（不是一串躺在包里的 JSON）。  */
     assertEqual(openedState.derivedCount, 1, '新建的控件应被引擎认作派生值（否则它只是躺在包里的一条数据）');
-    /* 输入项还空着：派生值这时是"算不出"，不是 0 */
     const derived = openedState.items.filter((item) => item.kind === 'field');
     assert(derived.length >= 2, '前置：这份文书应有填写项');
-    /* 从系统带入的那一格：界面上必须能说清"这个值是从哪儿来的" ——
-       它和"模板给了个空骨架"共用 `origin: system`，不分开写，医生就会以为姓名没带进来 */
     const broughtIn = openedState.items.find((item) => (item as { fromRef?: string }).fromRef === 'patient.nameMasked');
     assert(!!broughtIn, '从系统带入的格子要能指认出"从哪儿带进来的"');
     assertEqual(
@@ -5990,7 +5425,6 @@ async function main(): Promise<void> {
       '带进来的是**真的患者姓名**（空串会与"没带进来"长得一模一样）',
     );
 
-    /* ⑤ 收拾干净：删掉自测文书，控件留着无妨（它是"本院自建"的正常产物） */
     const cleaned = await post('/api/template-item-delete', { packId, itemId: tplId });
     assertEqual(cleaned.ok, true, '自测文书应能删除');
   });
@@ -6076,7 +5510,6 @@ async function main(): Promise<void> {
       `拒绝理由要点出是哪份文书在用，实际：${blocked.message ?? ''}`,
     );
 
-    /* ⑤ 删掉那份文书之后就能删控件 —— 这条路必须走得通，否则"拦住"就变成了"卡死" */
     assertEqual((await post('/api/template-item-delete', { packId: tplPackId, itemId: tplId })).ok, true, '应能删掉那份文书');
     const deleted = await post('/api/expression-item-delete', { packId, itemId: exprId });
     assertEqual(deleted.ok, true, `没人用之后应能删：${deleted.code ?? ''} ${deleted.message ?? ''}`);
@@ -6090,11 +5523,6 @@ async function main(): Promise<void> {
     assertEqual((await postNoAuth('/api/expression-item-delete', { packId, itemId: exprId })).ok, false, '未登录删不了控件');
   });
 
-  /* 专科控件与表达式控件不是同一件事（一个是"这个值怎么算"，一个是"长什么样、填什么"），
-     所以它有自己的一页、自己的增删改；而它在包里同样只是一条声明 ——
-     要算的格子引用表达式控件，控件自身不带任何可执行内容。
-     本系统不预置内置控件：所以这条"从零建起来"的路必须真的走得通，
-     否则「基础数据 → 专科控件」这一页永远是空表，等于没做。  */
   await test('B70 专科控件：可新建 / 可改（字段语义一变自动升版）/ 可删；形状与引用当场校验', async () => {
     await adminLogin();
 
@@ -6121,8 +5549,6 @@ async function main(): Promise<void> {
     assert(/^ctrl\.custom\.\d+$/.test(ctrlId), `控件 id 应是 ctrl.custom.N，实际 ${ctrlId}`);
 
     const catalog = (await state()).templateCatalog ?? [];
-    /* 目录条目是联合：控件条目才带 shape / controlKind / fields / controlVersion，
-       模板条目没有。取之前先落到控件那一支，否则这几格在类型上"不存在"。  */
     const entry = catalog.find((item) => item.itemId === ctrlId) as
       | { itemId: string; itemType?: string; shape?: string; controlKind?: string; fields?: unknown[]; controlVersion?: number }
       | undefined;
@@ -6145,15 +5571,12 @@ async function main(): Promise<void> {
     });
     assertEqual(badRef.ok, false, 'useExpression 指向本包里不存在的表达式控件应被拒');
 
-    /* ⑥ 只改名称与说明：定义版本不动（版本回答的是"改到第几版"，不是"改过几次"）  */
     const renamed = await post('/api/control-item-update', {
       packId: String(created.data?.packId ?? ''), itemId: ctrlId, name: '自测体温记录', description: '改了说明',
     });
     assertEqual(renamed.ok, true, `改名应成功：${renamed.code ?? ''} ${renamed.message ?? ''}`);
     assertEqual((renamed.data as { version?: number } | undefined)?.version, 1, '只改名称与说明不该升版');
 
-    /* ⑦ 改字段：定义自动升一版 —— 已开出的病历存着当时那份字段快照，
-       原地改会让同一份 payload 在两次导出里被解读成两种意思  */
     const packId = String(created.data?.packId ?? '');
     const patched = await post('/api/control-item-update', {
       packId, itemId: ctrlId,
@@ -6185,7 +5608,6 @@ async function main(): Promise<void> {
       '未登录删不了控件',
     );
 
-    /* ⑩ 删除：从目录里消失（今天没有任何东西引用控件，所以不拦；等槽位能引用它之后要补这条检查） */
     const deleted = await post('/api/control-item-delete', { packId, itemId: ctrlId });
     assertEqual(deleted.ok, true, `删除应成功：${deleted.code ?? ''} ${deleted.message ?? ''}`);
     assertEqual(
@@ -6211,9 +5633,6 @@ async function main(): Promise<void> {
     const contentBefore = before.knowledgePacks.contentFingerprint;
     const rulesBefore = (before.knowledgePacks.rules ?? []).length;
 
-    /* 判定方式是包内容：这条规则要换成"引用一条判定方式"，那条判定方式就得在它所在的包里
-       （引用只在本包内解析，见 R13）。所以先在本包建一条自测用的（收尾删掉）——
-       这一步顺带就是"包内的判定方式能被本包规则引用"的正面证据。  */
     const tempCondition = await post('/api/qc-condition-create', {
       packId,
       name: '自测：记录写入时刻超时限',
@@ -6224,9 +5643,6 @@ async function main(): Promise<void> {
     assertEqual(tempCondition.ok, true, `在规则所在的包里建一条判定方式应成功：${tempCondition.code ?? ''} ${tempCondition.message ?? ''}`);
     const tempConditionId = String((tempCondition.data as { itemId?: string } | undefined)?.itemId ?? '');
 
-    /* "能配哪些参数"只该有一处（谓词注册表）：界面照下发的规格生成参数表单，
-       所以下发的那份必须带人话名、说明与参数规格 —— 否则前端只能自己抄一份，
-       而抄出来的那份与引擎不一致时，表现是"界面能配、引擎不认" */
     const catalog = before.qcPredicates ?? [];
     assertEqual(catalog.length, 7, '要下发全部判定方式（界面不许自己抄一份谓词清单）');
     assert(
@@ -6238,14 +5654,8 @@ async function main(): Promise<void> {
       (timeLimit?.params ?? []).some((spec) => spec.name === 'limitHours' && spec.required === true),
       '必填参数要标出来（界面据此在提交前先拦一次）',
     );
-    /* 第七种（条件树）：它的参数是条件，所以除了规格本身，还要下发字段表与算子表 ——
-       没有那两张表，界面上的构造器是个空壳（能选，但没有可选项）  */
     const condition = catalog.find((item) => item.params.some((spec) => spec.kind === 'condition'));
     assert(!!condition, '要下发"自定义条件"那一种判法（否则规则库里拼不出条件）');
-    /* "必须给一个条件"这件事，`required` 这个旗标表达不了：`conditionId`（引用一条判定方式）
-       与 `when`（就地拼一条）是两选一，把任一格标成必填，另一条正当路径就会被界面判成"没填"。
-       所以这里钉的是它的真实形态：两格都不标必填，而"一个条件都没有"由引擎当场拒 ——
-       没有任何一条路能存下"永远不命中"的规则（它在界面上看起来一切正常）。  */
     const choiceParams = (condition?.params ?? []).filter(
       (spec) => spec.kind === 'condition' || spec.kind === 'condition-ref',
     );
@@ -6277,8 +5687,6 @@ async function main(): Promise<void> {
 
     assertEqual((await post('/api/knowledge-pack-toggle', { packId, itemId, enabled: false })).ok, true, '停用应成功');
 
-    /* 改的是"引用哪一条判定方式、实参是多少" —— 规则库这一层不再有"内核判法"可选，
-       所以这一改也顺带钉住：界面/接口交上去的形态就是 `field-condition` + `conditionId` + `args`。  */
     const edited = await post('/api/rule-item-update', {
       packId,
       itemId,
@@ -6342,8 +5750,6 @@ async function main(): Promise<void> {
     assert(entries.length >= 1, `审计里应有这次改规则的记录，实际 ${entries.length} 条`);
     assert((entries[0]?.changes ?? []).some((change) => change.field === '包指纹'), '内容前后指纹要进审计');
 
-    /* ⑤ 复原：标题 / 级别 / 判定方式与参数 / 文案都按目录里的原值写回，
-       内容指纹应逐字回到原值（顺带证明"清掉覆盖"是删字段而不是写空串）  */
     const restored = await post('/api/rule-item-update', {
       packId,
       itemId,
@@ -6354,16 +5760,11 @@ async function main(): Promise<void> {
       suggestion: String(rule?.suggestion ?? ''),
     });
     assertEqual(restored.ok, true, `复原应成功：${restored.code ?? ''} ${restored.message ?? ''}`);
-    /* 自测那条判定方式要收尾删掉（它是这一步临时建进样例包里的）。
-       删得掉的前提是"没人引用它了"：上一步刚把规则复原成原来的判法 ——
-       这正好把删除保护与引用面串了一遍。  */
     const dropTemp = await post('/api/qc-condition-delete', { packId, itemId: tempConditionId });
     assertEqual(dropTemp.ok, true, `收尾删掉自测判定方式应成功：${dropTemp.code ?? ''} ${dropTemp.message ?? ''}`);
     const finalState = await state();
-    /* 指纹要逐字回来：临时建的那条已经删掉，包内容与最开始是同一份 */
     assertEqual(finalState.knowledgePacks.contentFingerprint, contentBefore, '改回原样应回到原内容指纹（可复现）');
     assertEqual((finalState.knowledgePacks.rules ?? []).length, rulesBefore, '编辑不加不减：规则条数不变');
-    /* 这条规则本来是启用着的：把它留在停用态会污染后面的用例（B33 那一类要数规则） */
     assertEqual((await post('/api/knowledge-pack-toggle', { packId, itemId, enabled: true })).ok, true, '复原后应能重新启用');
   });
 
@@ -6372,8 +5773,6 @@ async function main(): Promise<void> {
     const before = await state();
     const revBefore = (before.doc ?? {}).rev;
     const formBefore = (before.formRules ?? []).length;
-    /* 判据要在动手之前取：自建包里除了本院的规则，还有出厂种子的那几条判定方式 ——
-       删掉最后一条规则不该把它们一起带走（下面那两句断言的就是这件事）  */
     const conditionsBefore = (before.qcConditions ?? []).length;
 
     const created = await post('/api/rule-item-create', {
@@ -6382,7 +5781,6 @@ async function main(): Promise<void> {
       predicate: { kind: 'text-missing-time', params: { minLength: 6 } },
     });
     assertEqual(created.ok, true, `新建规则应成功：${created.code ?? ''} ${created.message ?? ''}`);
-    /* 响应里要点明"它是停用的"：界面靠这一句告诉人"下一步去点启用" */
     const createdData = created.data as { packId?: string; itemId?: string; enabled?: boolean } | undefined;
     assertEqual(createdData?.enabled, false, '新建出来必须是停用的');
     const packId = String(createdData?.packId ?? '');
@@ -6396,7 +5794,6 @@ async function main(): Promise<void> {
     assertEqual((afterCreate.formRules ?? []).length, formBefore, '停用中：不进入下一轮质控');
     assertEqual((afterCreate.doc ?? {}).rev, revBefore, '新建规则不改病历');
 
-    /* 非法输入当场拒：判定方式与级别走的是与装载同一段校验 */
     assertEqual(
       (await post('/api/rule-item-create', { title: '   ', severity: 'warn', predicate: { kind: 'text-missing-time' } })).ok,
       false,
@@ -6414,13 +5811,11 @@ async function main(): Promise<void> {
       '未登录不得新建规则',
     );
 
-    /* 启用 → 真的进入质控；开关本身仍然不动病历（与 B33 同一条纪律） */
     assertEqual((await post('/api/knowledge-pack-toggle', { packId, itemId, enabled: true })).ok, true, '启用应成功');
     const onState = await state();
     assert((onState.formRules ?? []).some((item) => String(item.id ?? '') === itemId), '启用后进入下一轮质控');
     assertEqual((onState.doc ?? {}).rev, revBefore, '开关规则不改病历');
 
-    /* 删除：规则库里没有它了，而病历一个字不动 */
     const removed = await post('/api/rule-item-delete', { packId, itemId });
     assertEqual(removed.ok, true, `删除应成功：${removed.code ?? ''} ${removed.message ?? ''}`);
     const afterDelete = await state();
@@ -6428,9 +5823,6 @@ async function main(): Promise<void> {
     assertEqual((afterDelete.formRules ?? []).length, formBefore, '下一轮质控回到原样');
     assertEqual((afterDelete.doc ?? {}).rev, revBefore, '删规则不动病历：已经产生的质控提示是旁挂注解，仍读得出来');
     assertEqual((await post('/api/rule-item-delete', { packId, itemId })).ok, false, '删不存在的条目要明确报出（不是静默成功）');
-    /* 自建包里还有判定方式（出厂种子的那几条），所以"删掉最后一条规则"不会把包一起带走。
-       早先这里断言的是"包随最后一条移除"—— 那是"包里只有规则"的时代。
-       现在真正要守的是：包还在、判定方式一条不少，而规则库里那条规则确实没了。  */
     assert(
       (afterDelete.knowledgePacks.packs ?? []).some((pack) => pack.packId === packId),
       '自建包不随最后一条规则消失：它里面还有判定方式（判定方式也是包内容）',
@@ -6447,7 +5839,6 @@ async function main(): Promise<void> {
     const before = await state();
     const revBefore = (before.doc ?? {}).rev;
 
-    /* 条件写错的四种，全部当场拒 —— 兜底会让"我配的条件没生效"变成没人能发现的事 */
     const badConditions: Array<[string, unknown]> = [
       ['完全没给条件', undefined],
       ['未知字段', { kind: 'atom', field: 'patientName', op: 'contains', value: ['x'] }],
@@ -6525,7 +5916,6 @@ async function main(): Promise<void> {
     const conditionsBefore = (before.qcConditions ?? []).length;
     const revBefore = (before.doc ?? {}).rev;
 
-    /* 不合法的条件树当场拒，且一个字都不入库（兜底会让"我配的条件没生效"变成没人能发现的事） */
     const bad = await post('/api/qc-condition-create', {
       name: '自测条件（不合法）',
       when: { kind: 'atom', field: 'text', op: 'missing-pattern', value: 'phone' },
@@ -6558,7 +5948,6 @@ async function main(): Promise<void> {
     assertEqual((mine?.usedBy ?? []).length, 0, '刚建的条件还没有规则引用');
     assertEqual((afterCreate.doc ?? {}).rev, revBefore, '建条件不改病历一个字');
 
-    /* 引它的规则：改一处会影响的就是这几条 */
     const rule = await post('/api/rule-item-create', {
       title: '自测：引用具名条件',
       severity: 'warn',
@@ -6580,13 +5969,11 @@ async function main(): Promise<void> {
       `引用条件的规则要能回读成人话，并带上条件编码（引用必须被解开，否则表里只有一个孤零零的编码）：实际「${summaryAfterRef}」`,
     );
 
-    /* 删除保护：拒绝，并说清是谁在用（不让一次"删条件"悄悄决定一批规则的存亡） */
     const blocked = await post('/api/qc-condition-delete', { packId, itemId: conditionId });
     assertEqual(blocked.ok, false, '被规则引用的条件不许删');
     assertEqual(String(blocked.code ?? ''), 'E_RULE_CONDITION_IN_USE', '错误码要说清"还有人用"');
     assert(String(blocked.message ?? '').includes('自测：引用具名条件'), '拒绝时要点出引用它的那几条规则');
 
-    /* 改条件：引用它的规则跟着变 —— 这正是具名条件的价值，也是它的代价 */
     const edited = await post('/api/qc-condition-update', {
       packId,
       itemId: conditionId,
@@ -6606,7 +5993,6 @@ async function main(): Promise<void> {
       `改一处、引它的规则一起变：实际「${summaryAfterEdit}」`,
     );
 
-    /* 收尾：先删引用它的规则，再删条件 */
     assertEqual((await post('/api/rule-item-delete', { packId: rulePackId, itemId: ruleItemId })).ok, true, '收尾：删掉引用它的规则');
     const removed = await post('/api/qc-condition-delete', { packId, itemId: conditionId });
     assertEqual(removed.ok, true, `没人引用之后可以删：${removed.code ?? ''} ${removed.message ?? ''}`);
@@ -6617,12 +6003,7 @@ async function main(): Promise<void> {
   });
 
   await test('B59 判定方式的参数与实参：实参照参数表校验，改了实参判定结论就跟着变（出厂那几条也是包内容、也改得）', async () => {
-    /* 这条钉住 T1 的全部价值：一条判定方式被多条规则以不同阈值复用。
-       正例必须证明"实参真的生效"（不是被兜底吃掉），反例必须证明"填了不生效"会被当场拒。
-       另外钉住交付形态：判定方式一律是包内容 —— 出厂那 6 条在首次启动时写进自建包，
-       此后与本院自己建的完全同级（可改、可删、被引用时拒删），不再有"只读"那一档。  */
     await adminLogin();
-    /* 出厂种子写进自建包之后就是普通包内容：断言的正是它带 `packId` 且等于自建包 */
     const seeded = (await state()).qcConditions.find((item) => item.itemId === 'C-BUILTIN-MISSING-TIME') as
       | { itemId: string; name?: string; packId?: string; params?: unknown[]; summary?: string }
       | undefined;
@@ -6633,7 +6014,6 @@ async function main(): Promise<void> {
       String(seeded?.summary ?? '').includes('⟨minLength⟩'),
       `带参数的判定方式在没有实参时，回读要明写占位符而不是编一个数字：实际「${String(seeded?.summary ?? '')}」`,
     );
-    /* 可改：改的就是包内容（内容指纹变、前后指纹进审计）—— 这正是"改为自建"的全部意义 */
     const renamed = await post('/api/qc-condition-update', {
       packId: seeded?.packId ?? '',
       itemId: 'C-BUILTIN-MISSING-TIME',
@@ -6645,7 +6025,6 @@ async function main(): Promise<void> {
       '记录类段落缺记录时间（本院口径）',
       '改完目录里就是新名字（不是"保存成功、读回来还是旧的"）',
     );
-    /* 改回原样：它可能被别的用例引用，别把上下文改了 */
     const restoredSeed = await post('/api/qc-condition-update', {
       packId: seeded?.packId ?? '',
       itemId: 'C-BUILTIN-MISSING-TIME',
@@ -6658,7 +6037,6 @@ async function main(): Promise<void> {
       '改回原样要真的回到原值',
     );
 
-    /* 带参数的判定方式：树里写 `$minLength`，规则里填实参 */
     const created = await post('/api/qc-condition-create', {
       name: '自测判定方式：段落少于 N 字',
       description: '自测用（本用例收尾会删掉）',
@@ -6675,7 +6053,6 @@ async function main(): Promise<void> {
     assertEqual(mine?.params?.[0]?.name, 'minLength', '参数名原样带回');
     assertEqual(mine?.params?.[0]?.required, true, '必填位原样带回');
 
-    /* 参数表与条件树对不上要拒：声明了没用到的参数 = 规则表单上多一个"填了也不生效"的格 */
     const unused = await post('/api/qc-condition-update', {
       packId,
       itemId: conditionId,
@@ -6687,7 +6064,6 @@ async function main(): Promise<void> {
     assertEqual(unused.ok, false, '声明了却没在条件树里用到的参数要拒');
     assertEqual(String(unused.code ?? ''), 'E_RULE_CONDITION_PLACEHOLDER', '错误码要说清是"参数表与条件树对不上"');
 
-    /* 两条规则、同一棵树、不同实参 —— 这就是"复用"的全部意义 */
     const loose = await post('/api/rule-item-create', {
       title: '自测：段落少于 5 字',
       severity: 'warn',
@@ -6709,7 +6085,6 @@ async function main(): Promise<void> {
       `两条规则的回读要显示**各自的实参**（界面看的是"这条规则实际按什么判"）：实际「${looseSummary}」/「${strictSummary}」`,
     );
 
-    /* 反例：必填缺失 / 未知参数名 —— 一律当场拒（"我填的没生效"必须报在保存那一刻） */
     const missing = await post('/api/rule-item-create', {
       title: '自测：漏填实参',
       severity: 'warn',
@@ -6724,7 +6099,6 @@ async function main(): Promise<void> {
     });
     assertEqual(unknownArg.ok, false, '未知实参名要拒（多填一格意味着界面按另一份规格在填）');
 
-    /* 收尾：先删两条规则，再删判定方式 */
     let after = await state();
     for (const itemId of [
       String((loose.data as { itemId?: string })?.itemId ?? ''),
@@ -6739,8 +6113,6 @@ async function main(): Promise<void> {
   });
 
   await test('B60 算子插件：状态如实下发（没装就写"没装"，不是静默）', async () => {
-    /* 插件是可执行的代码，装不上必须被看见 —— 它会表现成"规则没命中"，而界面上一切正常。
-       这里只钉住"状态被如实下发"，装载本身由 `test:plugin` 在真实文件系统上验。 */
     const plugins = (await state()).qcPlugins;
     assert(!!plugins, '要下发算子插件的装载结果（界面据此回答"这台机器上为什么没有那个算子"）');
     assert(typeof plugins?.root === 'string' && plugins.root !== '', '要说清插件目录在哪（这份答案不能只躺在启动日志里）');
@@ -6750,16 +6122,11 @@ async function main(): Promise<void> {
 
   await test('B61 沉默报告：AI 没写的那几段要说得出为什么（不是一句"暂无建议"）', async () => {
     await resetWorkspace();
-    /* 未调用前必须是 `null` —— 不能与"调过、无跳过"同形：
-       否则"没显示"就又同时意味着"没问题"与"没跑过"（这正是本仓库反复修的那个毛病） */
     assertEqual((await state()).aiSilence, null, '还没调过 AI 时应为 null');
 
     const before = await state();
     const texts = before.items.filter((item) => item.kind === 'text');
     assert(texts.length >= 3, `前置：应有至少三个正文段落，实际 ${texts.length}`);
-    /* 把正文全部清空：医生新开一份文书、还没落笔时的样子。
-       这些段落进了请求范围，却被上下文丢掉（空段没有可写的文本）——
-       模型根本不知道有过它们，所以只能由内核说出来。  */
     for (const item of texts) {
       const cleared = await post('/api/edit', { nodeId: item.id, text: '  ' });
       assertEqual(cleared.ok, true, `清空段落应成功：${cleared.code ?? ''} ${cleared.message ?? ''}`);
@@ -6801,12 +6168,6 @@ function sectionTitlesOf(demo: DemoState): Record<string, string> {
   return titles;
 }
 
-/**
- * 配一处即时结构化词表（每个用例自己配一次，不依赖前一条用例留下的状态）。
- *
- * 顺带把策略固定为"按章节词"：结构化的参与与否由策略决定（与落位共用同一个开关位），
- * 不固定的话，用例会在"改动了前一条用例的配置"这件事上互相影响。
-  */
 async function configureStructuring(structureMap: Record<string, DataElementTag>): Promise<void> {
   const saved = await post('/api/placement-config', {
     strategy: 'section-title',
@@ -6817,12 +6178,6 @@ async function configureStructuring(structureMap: Record<string, DataElementTag>
   assertEqual(saved.ok, true, `前置：保存结构化词表应成功：${saved.code ?? ''} ${saved.message ?? ''}`);
 }
 
-/**
- * 从一段正文里取一个必然命中的规则词（前两个字）。
- *
- * 不把演示病历的内容写死在断言里：那样改一次演示数据就要顺着修一批用例，
- * 而"用例挂了却不知道这行该改什么"正是这套自测最该避免的成本。
-  */
 function ruleWordOf(item: DemoItem): string {
   const text = (item.text ?? '').trim();
   assert(text.length >= 2, `用例前提：这一段应有至少两个字的文本，实际：${JSON.stringify(text)}`);
@@ -6875,7 +6230,6 @@ await test('B62 粘贴落位：默认策略不参与，但要说清"为什么没
     `说明要点出策略名（医生据此去管理后台改），实际：${JSON.stringify(placement?.warnings)}`,
   );
 
-  /* 结构断言：不听落位结论自报，直接从正文顺序看那两段到底落在哪 */
   const pastedIds = pasted.data?.textNodeIds ?? [];
   assertEqual(pastedIds.length, 2, '两行应拆成两段');
   const after = await state();
@@ -6893,20 +6247,12 @@ await test('B62 粘贴落位：默认策略不参与，但要说清"为什么没
   assertEqual(afterTitles[pastedIds[0]], anchorTitle, '新段落仍在锚点所在章节（没被挪到别处）');
   assertEqual(afterTitles[pastedIds[1]], anchorTitle, '两段都在锚点那一章');
 
-  /* 界面契约：这一档必须"说得出原因"而不是静默。
-     响应里的落位结论读顶层 `r.placement`（与 `state` 同类：它描述"这次调用是怎么做的"），
-     读成 `r.data.placement` 的话界面会永远拿不到它 —— 而那会表现成"功能没生效"。  */
   assert(/placementNote\(r\.placement\)/.test(script), '粘贴响应里的落位结论要喂给界面说明（读顶层 `r.placement`）');
   assert(/placement\.enabled !== true/.test(script), '"策略不参与"这一档必须说清原因：医生会以为规则坏了');
   assert(/placement\.warnings/.test(script), '那句话取自服务端下发的 warnings，而不是前端自己编一句');
 });
 
 await test('B63 粘贴落位：命中规则词就真的换章节，并回报依据', async () => {
-  /* B62 证明"默认策略不越界"，这条证明"配了规则、命中之后真的动结构"：
-     一段粘进来的文字被搬到另一个章节、追加在那一章末尾，而且说的清凭什么
-     （命中哪个词、落到哪一章）。落位是猜的，"能当场自证"是它唯一能被信任的方式。
-     断言分三层：结论字段（命中词 / 是否移动 / 章节名）→ 正文结构（独立推一遍两段各归哪章）
-     → 界面契约（这三件事要在粘贴后那句话里说全）。  */
   assertEqual((await resetWorkspace()).ok, true, '前置：复位工作区');
 
   const before = await state();
@@ -6915,16 +6261,12 @@ await test('B63 粘贴落位：命中规则词就真的换章节，并回报依�
   assert(!!anchor, '用例前提：正文里应有文本段落');
   const anchorTitle = titles[anchor!.id] ?? '';
   assert(anchorTitle !== '', '用例前提：锚点应处在某个章节里（否则"换章节"无从谈起）');
-  /* 规则表填的是节点 id（落位把它换算成"这个节点所在的章节"），所以目标章节里得有一个真实节点。
-     挑"第一个不在锚点章节里的段落"：这样"命中之后有没有真的换章"一眼能分辨。  */
   const target = before.items.find((item) => item.kind === 'text' && item.id !== anchor!.id && titles[item.id] !== anchorTitle);
   assert(!!target, '用例前提：演示病历里应至少有两个章节的正文');
   const targetTitle = titles[target!.id] ?? '';
   assert(targetTitle !== '', '用例前提：目标段落应处在某个章节里');
   assert(targetTitle !== anchorTitle, '用例前提：目标章节必须与锚点章节不同（否则断言证明不了"挪走了"）');
 
-  /* 规则词取正文里真会出现的词（"病史" → 现病史），而不是编一个不可能出现的词：
-     后者通过的只是"没命中时不动"这条，证明不了命中路径。 */
   const keyword = '病史';
   assertEqual(
     (await post('/api/placement-config', {
@@ -6945,7 +6287,6 @@ await test('B63 粘贴落位：命中规则词就真的换章节，并回报依�
 
   const pasted = await post('/api/paste-text', {
     nodeId: anchor!.id,
-    /* 第一行含规则词 → 应被挪走；第二行不含 → 应留在粘贴的位置 */
     text: '既往有高血压病史2年。\n建议复查血常规。',
   });
   assertEqual(pasted.ok, true, `粘贴应成功：${pasted.code ?? ''} ${pasted.message ?? ''}`);
@@ -6968,7 +6309,6 @@ await test('B63 粘贴落位：命中规则词就真的换章节，并回报依�
   assertEqual(miss?.moved, false, '没命中的那段不该被挪走');
   assertEqual(placement?.warnings.length, 1, '挪了别人粘的内容就要有一句提示（"落位是猜的，请核对"）');
 
-  /* 结构断言：从正文顺序独立推一遍，验证这件事真的发生在文档结构里 */
   const pastedIds = pasted.data?.textNodeIds ?? [];
   assertEqual(pastedIds.length, 2, '两行应拆成两段');
   const after = await state();
@@ -6986,8 +6326,6 @@ await test('B63 粘贴落位：命中规则词就真的换章节，并回报依�
     '没命中的那一段应紧跟在锚点之后',
   );
 
-  /* 界面契约：粘贴后那句话要把"哪几段被挪到了哪一章、凭什么"说全。
-     这是"系统悄悄改了落点"唯一能被当场发现的地方。 */
   assert(/item\.moved === true/.test(script), '"哪几段真的被挪了"要读服务端给的 moved 字段，不从文案里猜');
   assert(
     /item\.sectionTitle/.test(script) && /item\.matched/.test(script) && /命中/.test(script),
@@ -6995,8 +6333,6 @@ await test('B63 粘贴落位：命中规则词就真的换章节，并回报依�
   );
   assert(/落在你粘贴的位置/.test(script), '两边都要有话说：没被挪的那几段也要交代清楚');
 
-  /* 复位：本用例改的是部署配置（不随工作区重置恢复，见 B「重置之后配置仍在」那条），
-     跑完必须放回默认策略，否则后面的运行会带着"按章节词"的规则表跑 */
   assertEqual(
     (await post('/api/placement-config', {
       strategy: 'ordered',
@@ -7009,9 +6345,6 @@ await test('B63 粘贴落位：命中规则词就真的换章节，并回报依�
 });
 
 await test('B64 即时结构化：没配词表时一条都不产，且说得出"词表为空"', async () => {
-  /* "没标"有三种样子，这条钉住最容易被静默掉的一种：策略参与了、但词表没配。
-     它与"没命中"长得一样（都是空列表），处置却完全不同 —— 一个是去管理后台配词表，
-     一个是这段内容确实没有可结构化的东西。 */
   await resetWorkspace();
   assertEqual(
     (await post('/api/placement-config', {
@@ -7049,8 +6382,6 @@ await test('B64 即时结构化：没配词表时一条都不产，且说得出"
 });
 
 await test('B65 即时结构化：提议 ≠ 落笔（未采纳前文档一个字节都不变）', async () => {
-  /* 这条是整条链的信任基础：提议只是"看法"。若提议顺手把标签写进去，
-     "机器猜的标签"就绕过了医生那道确认，而标签会进机读信息、被下游直接消费。 */
   await resetWorkspace();
   const before = await state();
   const target = before.items.find((item) => item.kind === 'text' && item.keyContent !== true && (item.text ?? '').trim().length >= 4);
@@ -7140,7 +6471,6 @@ await test('B67 即时结构化：机器绑的标签必须人再确认（关键�
   const tag: DataElementTag = { system: 'local', code: 'LOCAL.KEY.1', display: '关键数据元' };
   await configureStructuring({ [word]: tag });
 
-  /* 前置：先把全文确认干净，这样后面"签不了"只可能是本次采纳造成的 */
   for (const item of (await state()).items.filter((entry) => entry.kind === 'text' || entry.kind === 'field')) {
     if (item.humanConfirmed === true) continue;
     assertEqual((await post('/api/confirm', { nodeId: item.id })).ok, true, `前置：确认 ${item.id}`);
@@ -7172,7 +6502,6 @@ await test('B67 即时结构化：机器绑的标签必须人再确认（关键�
   const signed = await post('/api/sign', {});
   assertEqual(signed.ok, true, `再确认之后应能签章（这条路不能是死路）：${signed.code ?? ''} ${signed.message ?? ''}`);
 
-  /* 收尾：复位工作区与策略（本用例改了部署参数，不随工作区重置恢复） */
   await resetWorkspace();
   assertEqual(
     (await post('/api/placement-config', { strategy: 'ordered', candidate: { onlyTextNodes: true }, confidenceCeiling: 0.85 })).ok,
@@ -7182,8 +6511,6 @@ await test('B67 即时结构化：机器绑的标签必须人再确认（关键�
 });
 
 await test('B68 即时结构化：逐条采纳（只绑勾选的那一条，其余保持原样）', async () => {
-  /* 界面上的"采纳所选"就是这一条：它不是"一键全绑"。若服务端按"整篇重算"落笔，
-     医生明确没勾的那几条也会被绑上 —— 而勾选恰恰是他表达"这条我不接受"的唯一方式。  */
   await resetWorkspace();
   const before = await state();
   const texts = before.items.filter((item) => item.kind === 'text' && (item.text ?? '').trim().length >= 4);
@@ -7223,10 +6550,6 @@ await test('B68 即时结构化：逐条采纳（只绑勾选的那一条，其�
 });
 
 await test('B70 机器绑的标签必须人确认：不受"我已通读"声明影响，确认该段即放行', async () => {
-  /* 这条钉住"标签是元数据、不是内容"带来的处置差异：
-     AI 写的文字可以靠一句"我已通读并认可"放行（那些内容医生看得见），
-     机器标的数据元不行 —— 它在正文里看不见，却会被下游系统直接消费。
-     所以它跟关键内容同档：永远拦；而解开它的动作是现成的（确认那一段）。  */
   await resetWorkspace();
   const before = await state();
   const target = before.items.find((item) => item.kind === 'text' && item.keyContent !== true && (item.text ?? '').trim().length >= 4);
@@ -7235,7 +6558,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
   const tag: DataElementTag = { system: 'local', code: 'LOCAL.STRICT.1', display: '普通数据元' };
   await configureStructuring({ [word]: tag });
 
-  /* 前置：先把全文确认干净，这样后面"签不了"只可能是本次采纳造成的 */
   for (const item of before.items.filter((entry) => entry.kind === 'text' || entry.kind === 'field')) {
     if (item.humanConfirmed === true) continue;
     assertEqual((await post('/api/confirm', { nodeId: item.id })).ok, true, `前置：确认 ${item.id}`);
@@ -7261,7 +6583,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
     `理由要指向未确认标签，实际 ${blocked.code ?? ''}：${blocked.message ?? ''}`,
   );
 
-  /* 声明也不行：这正是它与"AI 内容"那一档的区别  */
   const stillBlocked = await post('/api/sign', { acknowledgeUnconfirmed: true });
   assertEqual(stillBlocked.ok, false, '一句"我已通读并认可"放不过它 —— 标签不在正文里，医生看不见它');
   assertEqual(stillBlocked.code, 'E_TAG_UNCONFIRMED', '被拒的理由仍要指向未确认标签');
@@ -7275,7 +6596,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
   );
   assertEqual((await post('/api/sign', {})).ok, true, '确认之后应能签章（这条路不能是死路）');
 
-  /* 收尾：复位工作区与策略（本用例改了部署参数，不随工作区重置恢复） */
   await resetWorkspace();
   assertEqual(
     (await post('/api/placement-config', { strategy: 'ordered', candidate: { onlyTextNodes: true }, confidenceCeiling: 0.85 })).ok,
@@ -7338,7 +6658,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
     const aiFailed = ((ai.data as { failed?: Array<{ code: string }> }).failed ?? []);
     assertEqual(aiFailed[0]?.code, 'E_AI_DIRECT_WRITE_FORBIDDEN', 'AI 内容必须被这条入口拒掉（只能走建议通道并由人采纳）');
 
-    /* ⑥ 部分成功：一条被门控拒掉时，其余照常落笔并如实回报（不是全或无） */
     const keyItem = (await state()).items.find((item) => item.kind === 'text' && item.keyContent === true);
     assert(!!keyItem, '用例前提：演示病历里应有标为关键内容的段落');
     const partial = await post('/api/apply-edits', {
@@ -7411,7 +6730,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
     assertEqual(moved.doc.docId, moved.activeDocId, '/api/state 的 doc 必须就是新的活动病历');
     assertEqual(moved.doc.status, 'draft', '切过去的那份应能正常读出来');
 
-    /* ⑤ 删到只剩一份：最后一份不许删 */
     for (let guard = 0; guard < 10; guard += 1) {
       const now = await state();
       const rest = allDocs(now);
@@ -7427,10 +6745,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
     assertEqual(refused.code, 'E_DOC_LAST_ONE', `错误码应为 E_DOC_LAST_ONE，实际 ${refused.code}`);
   });
 
-  /* 部署前缀：被医生工作站反向代理时，本实例不再占据域名的根。
-     这一条跑的是"带前缀的实例"，因为前缀这件事**只有真起一个实例才看得见**：
-     静态检查只能证明"代码里提到了前缀"，证明不了页面里的 `/ui.js` 真的变成了 `/emr/ui.js`，
-     也证明不了落在前缀之外时会被拒 —— 而那正是嵌进工作站之后最先撞上的两件事。 */
   await test('B75 部署前缀：页面 / 静态资源 / 接口都在前缀下，落在前缀之外的请求要明说', async () => {
     const prefixDir = process.env.L0_UI_SELFTEST_PREFIX_STATE_DIR ?? join(ROOT, 'artifacts', 'state-selftest-prefix');
     const prefixRuntimeDir = process.env.L0_UI_SELFTEST_PREFIX_RUNTIME_DIR ?? join(ROOT, 'artifacts', 'runtime-selftest-prefix');
@@ -7465,7 +6779,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
           const res = await fetch(`${prefixBase}${PREFIX}/api/state`);
           if (res.ok) { ready = true; break; }
         } catch {
-          /* 还没起来 */
         }
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
@@ -7486,8 +6799,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
       assertEqual(outside.status, 404, '前缀之外的路径不属于本实例');
       assertEqual((await outside.json() as { code?: string }).code, 'E_OUTSIDE_BASE', '要给出明确错误码');
 
-      /* 跳转也要带前缀：未登录访问后台时，Location 与 next 都不带前缀的话，
-         登录成功后会被送回工作站根上的 /admin */
       const admin = await fetch(`${prefixBase}${PREFIX}/admin`, { redirect: 'manual' });
       assertEqual(admin.status, 302, '未登录访问后台应重定向到登录页');
       const location = String(admin.headers.get('location') ?? '');
@@ -7505,13 +6816,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
   if (signService) signService.close();
   if (asrService) asrService.close();
   if (captureClient) captureClient.kill();
-  /* 收尾把自测状态目录与运行时目录整个清掉（前者含审计日志与锚点，后者含带密封口令的配置文件）：
-     它们只在"这一轮跑的过程中"有意义，留着只会让隐私排查多出几条每次运行都会变的命中，
-     以及一条永远"已失效"的复核记录（实测发现：排查因此变红，而红的原因与代码无关）。
-     清理放在最后（前面所有用例都已经跑完）。
-    清理尽力而为、且失败绝不外抛：它的结果不是这一轮的结论，而报告才是。
-    （实测踩过：另一轮自测还占着状态目录时删不掉，`rmSync` 抛 EPERM，
-    `process.exit(suite.report())` 于是执行不到 —— 屏幕上什么都没有，看起来像"整轮没跑"。）  */
   const rmRecursive = rmSync as unknown as (path: string, options: { recursive: boolean; force: boolean }) => void;
   for (const dir of [stateDir, runtimeDir]) {
     if (!existsSync(dir)) continue;
@@ -7521,10 +6825,6 @@ await test('B70 机器绑的标签必须人确认：不受"我已通读"声明�
       console.warn(`[收尾] 状态目录没清掉（不影响上面的用例结论）：${dir} —— ${(err as Error).message}`);
     }
   }
-  /* B35 生成的审计报告（`doc_imported_*.audit.json/md`）同样要清：
-     报告里带患者标识（合成手机号），而 `artifacts/` 下的审计报告不在 .gitignore 的忽略清单里，
-     测试自己造的东西留在工作区，会让"仓库里到底有没有患者标识"这个问题永远答不清楚。
-     生产使用中由后台按钮生成的报告当然要留下（那是产物），清掉的只是本轮自测造的这一批。 */
   const artifactsDir = join(ROOT, 'artifacts');
   if (existsSync(artifactsDir)) {
     const readdir = (await import('node:fs')).readdirSync as unknown as (path: string) => string[];

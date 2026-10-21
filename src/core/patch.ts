@@ -1,6 +1,3 @@
-// json-patch 子集，与 tools/model-check/lib/model-utils.mjs 语义一致。
-// 路径为 JSON Pointer 风格；数组长度不同时整数组 replace；根路径仅支持 replace。
-
 import type { JsonValue, PatchOp } from '../model/types.ts';
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {

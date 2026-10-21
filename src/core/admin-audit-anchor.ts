@@ -1,7 +1,3 @@
-// 审计链头锚定：把"链头是哪一条"钉在链之外。
-// - 不防：拿得到签名私钥的人。库里的 `config.system.anchorSeed` 若用默认演示种子，
-// 种子是公开的、任何拿到代码的人都能推导出私钥，于是他能重签锚点。
-
 import type { SqliteDatabase } from '../storage/sqlite.ts';
 import { GENESIS_HASH, type ChainedAdminAuditRecord } from './admin-audit-store.ts';
 import { toBase64, fromBase64 } from '../crypto/signature.ts';
@@ -11,7 +7,6 @@ import type { SyncSigner } from '../crypto/provider.ts';
 export const ANCHOR_FORMAT = 'l0-admin-audit-anchor';
 export const ANCHOR_VERSION = 1;
 
-/** 链头：第几条 + 它的摘要 */
 export interface AuditHead {
   seq: number;
   hash: string;
@@ -22,7 +17,6 @@ export interface AuditAnchor extends AuditHead {
   at: string;
   /** 规范化文本的 SM2 签名（base64 的 DER）。未签名时缺省 */
   signature?: string;
-  /** 签名者公钥指纹（`SM3(SPKI)` 完整 64 位，与 recipient-keys / 阅读授权源同一口径） */
   signerFingerprint?: string;
 }
 
@@ -30,7 +24,6 @@ export function anchorText(head: AuditHead, at: string): string {
   return `${ANCHOR_FORMAT}/v${ANCHOR_VERSION}\nseq=${head.seq}\nhash=${head.hash}\nat=${at}`;
 }
 
-/** 链头（空链返回 null：空链不锚，它的意义只有"什么都没有"）  */
 export function headOf(records: ChainedAdminAuditRecord[]): AuditHead | null {
   const last = records[records.length - 1];
   return last ? { seq: last.seq, hash: last.hash } : null;
@@ -47,44 +40,30 @@ export function signAnchor(head: AuditHead, at: string, signer: SyncSigner): Aud
 }
 
 export type AnchorStatus =
-  /** 锚点指向的那一条仍在且未变 */
   | 'match'
-  /** 已检出：链尾被删、那一条被改、或整链被重写（也可能是锚点自己被动过）  */
   | 'mismatch'
-  /** 没有锚点：链内部自洽，但删尾与整链重写无从判断（不是"通过"）  */
   | 'none';
 
 export interface AnchorReport {
   status: AnchorStatus;
-  /** 仅 `mismatch` 时非空的错误码 */
   code: string | null;
   message: string;
   /** 锚点是否带签名 */
   signed: boolean;
-  /** 当前链头（空链为 null） */
   headSeq: number | null;
   headHash: string | null;
   anchorSeq: number | null;
   anchorAt: string | null;
-  /** 锚点之后又追加了多少条（这批尚未被任何锚点覆盖，被删仍检不出）  */
   unanchored: number;
 }
 
 export const ANCHOR_ERRORS = {
-  /** 锚点指向的记录不见了 / 内容变了 —— 这就是"检出篡改" */
   E_AUDIT_ANCHOR_MISMATCH: 'E_AUDIT_ANCHOR_MISMATCH',
   /** 锚点签名验不过（不是持有该密钥的一方签的） */
   E_AUDIT_ANCHOR_SIGNATURE: 'E_AUDIT_ANCHOR_SIGNATURE',
 } as const;
 
 export interface AnchorVerifyOptions {
-  /**
-   * 验签函数。给了才能验带签名的锚点。
-   *
-   * 带签名却没给验签能力时，结果是 `mismatch`（fail-closed）而不是"通过"：
-   * "有签名但我验不了"与"验过了没问题"是两件事，前者不能当作后者
-   * （同 `persistence.ts` 的口径：读不出来绝不当成空数据）。
-    */
   verify?: (text: string, signature: Uint8Array) => boolean;
 }
 
@@ -101,9 +80,6 @@ function report(partial: Partial<AnchorReport> & { status: AnchorStatus; message
   };
 }
 
-/**
- * 比对链与锚点。纯函数：不做任何 IO，锚点由调用方读出来（便于用用例构造各种篡改形态）。
-  */
 export function verifyAnchor(
   records: ChainedAdminAuditRecord[],
   anchor: AuditAnchor | null,
@@ -192,11 +168,9 @@ export function verifyAnchor(
 export interface AnchorLoadReport {
   firstRun: boolean;
   anchors: AuditAnchor[];
-  /** 读到坏行时的说明（不静默跳过：坏行本身就是要报的事）  */
   error: string | null;
 }
 
-/** 锚点表名（界面要显示"锚记在哪"） */
 export const ADMIN_AUDIT_ANCHOR_TABLE = 'admin_audit_anchor';
 
 export class AuditAnchorStore {
@@ -212,7 +186,6 @@ export class AuditAnchorStore {
     return ADMIN_AUDIT_ANCHOR_TABLE;
   }
 
-  /** 全部锚点（追加顺序）。不做验签：验签是 `verifyAnchor` 的事，存储只负责如实读出来  */
   list(): AuditAnchor[] {
     return [...this.anchors];
   }
@@ -221,17 +194,10 @@ export class AuditAnchorStore {
     return this.anchors.length;
   }
 
-  /** 最新一条锚点（比对时用最新的那条：它才覆盖到最靠近现在的记录）  */
   latest(): AuditAnchor | null {
     return this.anchors[this.anchors.length - 1] ?? null;
   }
 
-  /**
-   * 读库。坏行（缺少必要字段）不静默跳过：坏行本身就是要报的事。
-   *
-   * 与审计日志不同，锚点不逐条验链（锚点之间没有链关系，它们各自指向某个链头），
-   * 所以这里只做形状校验；"这条锚点与当前链一致吗"由 `verifyAnchor` 回答。
-    */
   load(): AnchorLoadReport {
     const rows = this.db
       .prepare('select head_seq, head_hash, at, signature, signer_fingerprint from admin_audit_anchor order by head_seq asc, at asc')
@@ -269,10 +235,6 @@ export class AuditAnchorStore {
     return { firstRun: false, anchors: [...parsed], error };
   }
 
-  /**
-   * 追加一条锚点。返回 `true` = 这次真的写进去了；`false` = 这条链头早就锚过
-   * （幂等：重复锚定不产生第二行，也不报错 —— 它不是异常，是同一件事做第二遍）。
-    */
   append(anchor: AuditAnchor): boolean {
     const result = this.db
       .prepare(
@@ -286,5 +248,4 @@ export class AuditAnchorStore {
   }
 }
 
-/** 空链的链头（仅用于说明"空链不锚"，避免调用方手写全零常量） */
 export const EMPTY_HEAD: AuditHead = { seq: 0, hash: GENESIS_HASH };

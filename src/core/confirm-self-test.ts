@@ -1,5 +1,3 @@
-// 确认与签章分级自测（T29）。
-
 import { TestSuite, assert, assertEqual, codeOfAsync } from '../testing/harness.ts';
 import { WriteSession } from './session.ts';
 import type { DocumentModel, DocNode, RevisionEntry } from '../model/types.ts';
@@ -50,7 +48,6 @@ function fixture(): DocumentModel {
         provenance: prov('human', 'DR_WANG'),
       },
       n_p: { id: 'n_p', type: 'paragraph', parentId: 'n_sec', order: 10, rev: 1, provenance: prov('human', 'DR_WANG') },
-      /* 空段落：用来验证"子树里没有可确认内容"时明确拒绝，而不是静默成功 */
       n_empty: { id: 'n_empty', type: 'paragraph', parentId: 'n_sec', order: 20, rev: 1, provenance: prov('human', 'DR_WANG') },
       n_t: {
         id: 'n_t',
@@ -107,12 +104,8 @@ async function main(): Promise<void> {
     assertEqual(nodeOf(session, 'n_f').humanConfirmed, true, '批量范围内的节点应被确认');
     assertEqual(nodeOf(session, 'n_k').humanConfirmed, undefined, '不在范围内的节点不受影响');
 
-    /* 这条是本设计的立身之本：批量把"点 N 次"变成"点 1 次"，
-       但"确认了哪些"必须仍能逐条回答 —— 否则就是用可追溯性换便利性 */
     assertEqual(lastRevision(session).confirmedNodeIds, ['n_t', 'n_f'], '留痕必须记录确认范围');
 
-    /* 重复确认不应推高 rev：嵌套章节会让同一节点落在两个子树里，
-       按章节逐个确认时同一节点会被确认多次（实测：9 个内容节点的门诊病历被确认 10 次） */
     const revBefore = nodeOf(session, 'n_t').rev;
     session.confirmNodes({ nodeIds: ['n_t'] }, HUMAN);
     assertEqual(nodeOf(session, 'n_t').rev, revBefore, '已确认的节点重复确认不应推高 rev');
@@ -133,7 +126,6 @@ async function main(): Promise<void> {
     assertEqual(nodeOf(session, 'n_t').humanConfirmed, true, '子树内的文本节点应被确认');
     assertEqual(nodeOf(session, 'n_k').humanConfirmed, true, '子树内的关键内容节点也应被确认（显式确认）');
     assertEqual(nodeOf(session, 'n_f').humanConfirmed, true, '子树内的字段节点应被确认');
-    /* 若把结构节点也算进范围，导入件将永远确认不完（界面上没有"确认章节标题"的按钮） */
     assertEqual(nodeOf(session, 'n_sec').humanConfirmed, undefined, '结构节点不在确认范围内');
 
     assertEqual(
@@ -161,8 +153,6 @@ async function main(): Promise<void> {
 
     const node = nodeOf(session, 'n_t');
     assertEqual(node.provenance.origin, 'ai', '落笔后来源应为 ai');
-    /* 这条纪律最容易在改代码时被"顺手优化掉"（例如为了减少点击而让采纳自动确认），
-       所以必须有用例守着：采纳只表示"同意用这段文字"，不表示"核对了它的正确性" */
     assertEqual(node.humanConfirmed, false, '采纳后 humanConfirmed 必须仍为 false');
     assertEqual(await codeOfAsync(() => session.sign({}, HUMAN)), 'E_SIGNED_WITH_UNCONFIRMED_AI', '未确认的 AI 内容必须挡住签章');
   });

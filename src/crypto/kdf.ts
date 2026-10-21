@@ -1,6 +1,3 @@
-// 密钥派生：HMAC-SM3、PBKDF2-HMAC-SM3、以及 GB/T 32918.4 的 KDF。
-// - PBKDF2-HMAC-SM3 把口令变成密钥（口令熵低，必须慢化）；
-
 import { createHmac } from 'node:crypto';
 import { sm3, utf8 } from './sm3.ts';
 

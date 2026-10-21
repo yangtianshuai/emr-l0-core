@@ -1,6 +1,3 @@
-// 接收方公钥目录入库自测（`storage/recipient-key-store.ts`）。
-// 拿一把来历不明的钥匙去加密，产出的是一份没有私钥能解开的归档件。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openDbFixture } from '../testing/db-fixture.ts';
 import { addRecipientKey, publicKeyOf, type RecipientKeyStore } from '../core/recipient-keys.ts';
@@ -16,7 +13,6 @@ const suite = new TestSuite('接收方公钥目录入库自测', [
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 const AT = '2026-10-14T09:00:00.000Z';
 
-/** 造一把真公钥（用演示密钥对导出 SPKI，再 base64）——不造假数据：导入路径要真的过曲线校验  */
 function spkiBase64(seed: string): string {
   return Buffer.from(publicKeyToSpki(demoKeyPair(seed).publicKey)).toString('base64');
 }
@@ -55,7 +51,6 @@ async function main(): Promise<void> {
         second.store.keys[0]?.fingerprint,
         '指纹必须完整存储与展示（截断过的指纹核对不了"是不是同一把"）',
       );
-      /* 从库里读回来的条目仍能取出公钥点：说明 SPKI 没有被写坏 */
       const point = publicKeyOf(loaded.keys[0] as (typeof loaded.keys)[number]);
       assertEqual(typeof point.x, 'bigint', '读回来的公钥应能参与点运算（否则加密会产出解不开的密文）');
     } finally {

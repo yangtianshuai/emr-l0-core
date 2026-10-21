@@ -1,5 +1,3 @@
-// 系统策略落库自测（`storage/system-config.ts`）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openConfigFixture, sealedBlobOf, writeCorruptRow } from '../testing/config-fixture.ts';
 import {

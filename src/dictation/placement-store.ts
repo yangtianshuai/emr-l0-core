@@ -1,5 +1,3 @@
-// 落位配置的存储（供界面集中配置，取代"写死在调用方"）。
-
 import { CONFIG_KEY_PREFIX, type ConfigKv } from '../storage/config-kv.ts';
 import type { DataElementTag } from '../model/types.ts';
 import {
@@ -9,11 +7,8 @@ import {
   type DictationPlacementConfig,
 } from './placement.ts';
 
-/** 库里的键名 */
 export const PLACEMENT_CONFIG_KEY = `${CONFIG_KEY_PREFIX}placement`;
-/** 外部落位服务的密钥：单独一行（免得"改个地址"顺手动了密钥那一行）  */
 export const PLACEMENT_API_KEY_KEY = `${CONFIG_KEY_PREFIX}placement.apiKey`;
-/** 旧位置（`<状态目录>/dictation-placement.json`）：只用于一次性导入，不再写  */
 export const PLACEMENT_CONFIG_FILE = 'dictation-placement.json';
 
 interface StoredPlacementConfig {
@@ -22,10 +17,8 @@ interface StoredPlacementConfig {
   candidate: DictationPlacementConfig['candidate'];
   sectionMap?: Record<string, string>;
   termMap?: Array<{ match: string; nodeId: string }>;
-  /** V4：即时结构化的词表（词 → 数据元标签）。与 sectionMap / termMap 共用匹配器，但结论不同 */
   structureMap?: Record<string, DataElementTag>;
   external?: { endpoint?: string; timeoutMs?: number };
-  /** 是否有密钥被加密落盘（不存密钥本身，密钥在 `config.placement.apiKey`）  */
   apiKeyStored: boolean;
   confidenceCeiling: number;
   updatedAt: string;
@@ -38,16 +31,12 @@ export interface LoadedPlacementConfig {
   apiKey?: string;
   /** 这份配置从哪来（`store` = 库里配过；`default` = 从没配过、走本地默认策略） */
   source: 'store' | 'default';
-  /** 密钥是否就位（界面只显示这个） */
   apiKeyPresent: boolean;
   updatedAt?: string;
   updatedBy?: string;
 }
 
 function readStored(kv: ConfigKv): StoredPlacementConfig | null {
-  /* 解不开（口令换过 / 那一行被改过）不静默当没有：那会让"我配的落位没了"
-     表现成"退回了默认策略"，两件事的处置完全不同（一个是数据损坏要排查，一个是没配过）。
-     这里把 `config-kv` 的错误裹回本模块的错误码：调用方依赖的是这里的契约。  */
   const parsed = ((): StoredPlacementConfig | null => {
     try {
       return kv.read<StoredPlacementConfig>(PLACEMENT_CONFIG_KEY);
@@ -60,7 +49,6 @@ function readStored(kv: ConfigKv): StoredPlacementConfig | null {
   return parsed;
 }
 
-/** 取密钥。解不开 → 抛错（`config-kv` 已保证不把"解不开"混成"没有"）  */
 function readStoredKey(kv: ConfigKv): string | undefined {
   const value = ((): string | null => {
     try {
@@ -92,7 +80,6 @@ export function loadPlacementConfig(kv: ConfigKv): LoadedPlacementConfig {
       ...(stored.external ? { external: stored.external } : {}),
       confidenceCeiling: stored.confidenceCeiling,
     });
-    /* 只在"配置说密钥就位"时才去读密钥那一行：避免每次读配置都解一个用不到的信封 */
     const apiKey = stored.apiKeyStored ? readStoredKey(kv) : undefined;
     return {
       config,
@@ -112,33 +99,21 @@ export function loadPlacementConfig(kv: ConfigKv): LoadedPlacementConfig {
 
 export interface SavePlacementConfigResult {
   loaded: LoadedPlacementConfig;
-  /** 密钥发生了什么（只记动作，不记值）  */
   apiKeyAction: 'set' | 'cleared' | 'unchanged';
 }
 
-/**
- * 保存配置并返回生效后的配置。
- *
- * 先校验再落盘：非法配置（上限 ≥0.90、external 缺地址、规则表为空项）一律拒绝，
- * 绝不"存下去再用默认值跑" —— 那种现场极难复现。
- *
- * `apiKey` 三态与模型/采集配置逐字相同：`undefined` 不改 / `null` 清除 / 字符串 设新值。
- * 先写配置、最后动密钥那一行：密钥那一步失败时不会留下"密钥换了、配置还是旧的"这种半截状态。
-  */
 export function savePlacementConfig(
   kv: ConfigKv,
   rawInput: Partial<DictationPlacementConfig> & { apiKey?: string | null },
   by: string,
   options: { at?: string } = {},
 ): SavePlacementConfigResult {
-  /* 把 `apiKey` 摘出去再校验：它不是 `DictationPlacementConfig` 的一部分（凭据不进配置行） */
   const { apiKey, ...configInput } = rawInput;
   const config = validatePlacementConfig(configInput);
   const previous = ((): LoadedPlacementConfig | null => {
     try {
       return loadPlacementConfig(kv);
     } catch {
-      /* 旧配置读坏了不该阻止修复：配置界面正是用来修它的地方 */
       return null;
     }
   })();
@@ -170,7 +145,6 @@ export function savePlacementConfig(
   if (config.structureMap) stored.structureMap = config.structureMap;
   if (config.external) stored.external = config.external;
   kv.write(PLACEMENT_CONFIG_KEY, stored);
-  /* 清除要真删那一行：留着密文而报"已清除"，等于"我清掉了"这句话是假的（同 `saveModelConfig`）  */
   if (apiKeyAction === 'cleared') kv.remove(PLACEMENT_API_KEY_KEY);
 
   return { loaded: loadPlacementConfig(kv), apiKeyAction };
@@ -182,13 +156,10 @@ export function describePlacementConfig(loaded: LoadedPlacementConfig): Record<s
     candidate: loaded.config.candidate,
     sectionMap: loaded.config.sectionMap ?? {},
     termMap: loaded.config.termMap ?? [],
-    /* V4 词表也要回读：界面靠它回答"这次按什么词标的标签"（读不回来 = 配了等于没配） */
     structureMap: loaded.config.structureMap ?? {},
-    /* 只回显地址 / 超时：密钥值不在配置里（它在 `config.placement.apiKey`），所以这里回显是安全的 */
     external: loaded.config.external ?? null,
     confidenceCeiling: loaded.config.confidenceCeiling,
     keyContentThreshold: 0.9,
-    /* 只报"就位没有"：密钥值永不回显 */
     apiKeyPresent: loaded.apiKeyPresent,
     source: loaded.source,
     updatedAt: loaded.updatedAt ?? null,

@@ -1,5 +1,3 @@
-// T02 验收自测：节点索引层。
-
 import { DocumentIndex } from './indexes.ts';
 import { validateDocument, errorsOf } from './validate.ts';
 import { buildLargeSyntheticDoc, buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -35,7 +33,7 @@ function naiveSubtree(nodes: Record<NodeId, DocNode>, id: NodeId): NodeId[] {
   const stack: NodeId[] = [id];
   while (stack.length > 0) {
     const current = stack.pop() as NodeId;
-    if (out.includes(current)) continue; // 环保护
+    if (out.includes(current)) continue;
     out.push(current);
     for (const child of naiveChildren(nodes, current)) stack.push(child);
   }

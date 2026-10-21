@@ -1,5 +1,3 @@
-// 管理审计自测（A1~A10）：入库 + SM3 链式摘要。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openDbFixture } from '../testing/db-fixture.ts';
 import {
@@ -86,7 +84,6 @@ async function main(): Promise<void> {
     });
 
     await test('A4 改一条历史 → 指认断点；断点之后的条目**不展示但仍留在库里**', () => {
-      /* 只改内容、不改 hash —— 这正是"悄悄改掉一条旧记录"的形态 */
       db.prepare('update admin_audit set changes = ? where seq = 2').run(
         JSON.stringify([{ field: 'endpoint', before: 'http://a2', after: 'http://TAMPERED' }]),
       );
@@ -163,9 +160,6 @@ async function main(): Promise<void> {
     });
 
     await test('A8 序号被改并**重算该条自己的 hash** → 报 seqGap（链内其它校验都看不出）', () => {
-      /* `seq` 一直是主键，但主键只保证不重复、不保证连续（删掉中间一条就断号了）。
-         这条钉住"读的时候真的校验了连续性"。
-         注意：它不是新的防篡改能力 —— 完整重写整条链的人照样能把序号写顺，那要靠链头锚点。  */
       db.exec('delete from admin_audit');
       const log = seed();
       log.append(record(1));
@@ -205,10 +199,6 @@ async function main(): Promise<void> {
     });
 
     await test('A9 **两个实例接同一条链**：序号与 prevHash 连续（文件时代这里会混出两条链）', () => {
-      /* 这条是"入库"换来的核心性质。链条头每次都从库里最后一行取，而不是内存副本 ——
-         所以两个实例（例如正在跑的实例与自检实例）交替追加，接上的仍是同一条链。
-         文件时代的现场是：两个进程各有各的内存链，各自往同一个文件追加，
-         于是同一份文件里混着两条互不相容的链（实测累积到 286 条互相污染的锚）。  */
       db.exec('delete from admin_audit');
       const first = seed();
       const second = seed();
@@ -229,15 +219,12 @@ async function main(): Promise<void> {
       const log = seed();
       let message = 'OK';
       try {
-        /* 手工抢一个已经存在的序号：真实场景是"另一个进程同时追加" */
         db.prepare(
           `insert into admin_audit (seq, at, actor, subject, kind, changes, note, prev_hash, hash)
            values (2, '2026-10-12T09:00:00.000Z', 'X', '模板', '变更', '[]', null, 'x', 'y')`,
         ).run();
         log.load();
       } catch (err) {
-        /* 驱动把 SQLite 的错误一律包成 `ERR_SQLITE_ERROR`，具体原因在 message 里，
-           所以判据必须看 message —— 只看 code 会把这条断言写成永远为真的形状。  */
         message = (err as Error).message;
       }
       assert(message !== 'OK', '重复序号必须失败（而不是静默覆盖或追加成第二条链）');

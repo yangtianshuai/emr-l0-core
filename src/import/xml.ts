@@ -1,12 +1,7 @@
-// 极简 XML 解析器（零依赖），只覆盖 OFD 需要的读取子集。
-// 查找一律按本地名匹配（忽略前缀）：ofd:TextCode 与 TextCode 等价。
-
 export interface XmlNode {
-  /** 原始名（保留前缀），例如 ofd:TextCode */
   name: string;
   attrs: Record<string, string>;
   children: XmlNode[];
-  /** 直接文本片段（不含子元素） */
   text: string;
 }
 
@@ -106,7 +101,6 @@ export function parseXml(source: string): XmlNode {
   return root;
 }
 
-// 跳过属性值里的 '>'；不处理 DTD 内部子集（OFD 不会出现）
 function findTagEnd(source: string, from: number): number {
   let quote: string | null = null;
   for (let index = from + 1; index < source.length; index += 1) {
@@ -144,7 +138,6 @@ export function findFirst(node: XmlNode, name: string): XmlNode | undefined {
 export function attrOf(node: XmlNode | undefined, name: string): string | undefined {
   if (!node) return undefined;
   if (node.attrs[name] !== undefined) return node.attrs[name];
-  // 属性可能带前缀（如 xlink:href），按本地名兜底
   const key = Object.keys(node.attrs).find((item) => localName(item) === name);
   return key ? node.attrs[key] : undefined;
 }

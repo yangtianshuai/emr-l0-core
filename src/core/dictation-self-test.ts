@@ -1,5 +1,3 @@
-// 语音转写接入自测（T31）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession, type Actor } from './session.ts';
 import { demoTranscript, type TranscriptSegment } from './dictation.ts';
@@ -87,7 +85,6 @@ async function main(): Promise<void> {
     const { session, ids } = open();
     const targetNodeId = ids.textIds[0] as NodeId;
     const input = demoTranscript('audio-cap', '2026-10-08T10:00:00Z');
-    /* 模拟"ASR 非常肯定"：confidence = 1.0 */
     const segments: TranscriptSegment[] = [{ index: 1, text: '患者无药物过敏史。', startSec: 0, endSec: 2, confidence: 1 }];
 
     const firstRun = session.dictate({ ...input, segments, targetNodeId }, AI);
@@ -99,7 +96,6 @@ async function main(): Promise<void> {
     );
     assertEqual(session.acceptSuggestion({ suggestionId: firstId }, HUMAN).ok, true, '一般内容上（0.85 ≥ 0.75）可采纳');
 
-    /* 关键内容（阈值 0.90）：0.85 不够 —— 口头说的关键信息不能因为"听清了"就落笔 */
     const secondRun = session.dictate({ ...input, segments, targetNodeId, transcriptionId: 'audio-cap-2' }, AI);
     const secondId = String(session.listSuggestions({ groupId: secondRun.groupId })[0]?.id);
     session.updateNodeProps({ nodeId: targetNodeId, patch: { keyContent: true } }, HUMAN);
@@ -121,7 +117,6 @@ async function main(): Promise<void> {
     const input = demoTranscript('audio-order', '2026-10-08T10:00:00Z');
     const result = session.dictate({ ...input, targetNodeId }, AI);
 
-    /* 演示样本刻意含：1 段空文本 + 两段时间戳颠倒（第 4 段实际排在 4.6s） */
     assert(
       result.warnings.some((text) => text.includes('空文本')),
       `应回报丢弃的空段，实际：${result.warnings.join(' | ')}`,

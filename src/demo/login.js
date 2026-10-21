@@ -1,30 +1,11 @@
-/* 管理后台登录页脚本：只做两件事，换一个服务端会话（然后整页去后台），
- * 或者在第一次运行时创建第一个管理员账号。
- *
- * 为什么不留"登录后原地切显隐"：那样地址栏停在 /login 而内容已经变成后台，
- * 刷新一下又回到登录页；整页导航让"地址栏 = 页面内容 = 会话状态"三者始终一致。
- *
- * 为什么两种形态共用这一个脚本：它们不可能同时出现（服务端二选一），
- * 所以"哪一个在页面上"就是模式本身，不需要再传一个模式参数（传了就有对不上的一天）。
- */
-
 const $ = (id) => document.getElementById(id);
-/* 部署前缀（挂在工作站的某个路径下时由服务端注入在 `<html data-l0-base>` 上） */
 const L0_BASE = (document.documentElement && document.documentElement.dataset.l0Base) || '';
 
-/**
- * 登录成功后去哪：`?next=` 是可以被人手改的。
- *
- * 不校验就等于把这个登录页做成开放重定向的跳板，而它长得就像"我们医院的登录页"，
- * 一条 `/login?next=https://evil.example` 的链接足以用来钓口令。
- * 所以只接受站内路径，其余一律回落到 `/admin`（带部署前缀时回落到前缀下的 `/admin`）。
- */
 function safeNext() {
   const raw = new URLSearchParams(location.search).get('next') ?? '';
   return isSafeNext(raw) ? raw : `${L0_BASE}/admin`;
 }
 
-/** 判据独立成函数（故意不写成内联三元：这条逻辑错一次，就是一个钓鱼入口） */
 function isSafeNext(raw) {
   /* 必须以单个 `/` 开头：`//evil.example` 是协议相对 URL，浏览器会当成站外域名 */
   if (!raw.startsWith('/') || raw.startsWith('//')) return false;
@@ -39,15 +20,12 @@ function setStatus(text, danger = false) {
   el.classList.toggle('bad', danger);
 }
 
-/** 口令用完即弃：失败或成功后立刻清空，它不该留在输入框里被人从背后看见 */
 function clearPasswordInputs() {
   for (const id of ['loginPassword', 'bootPassword', 'bootPassword2']) {
     const el = $(id);
     if (el) el.value = '';
   }
 }
-
-/* ------------------------------ 登录 ------------------------------ */
 
 async function submitLogin(event) {
   event.preventDefault();
@@ -77,22 +55,10 @@ async function submitLogin(event) {
     $('loginPassword').focus();
     return;
   }
-  /* 会话在 HttpOnly cookie 里，脚本读不到也不需要读；整页去后台即可 */
   clearPasswordInputs();
   location.href = safeNext();
 }
 
-/* --------------------------- 首次初始化 --------------------------- */
-
-/**
- * 创建第一个管理员。
- *
- * 两处前端也要做的校验（服务端同样会拒，但在点之前说比点完再说强）：
- *   - 两遍口令必须一致：这是唯一一次"设了口令没人能替你核对"的场合，
- *     打错的后果是"记了一辈子"的那个也不是真的；
- *   - 至少 8 位：与服务端 `PASSWORD_MIN_LENGTH` 同一个数，
- *     本地校验只是把一次往返省掉，判据仍在服务端。
- */
 async function submitBootstrap(event) {
   event.preventDefault();
   const username = $('bootUsername').value.trim();
@@ -131,22 +97,15 @@ async function submitBootstrap(event) {
     return;
   }
   clearPasswordInputs();
-  /* 不自动登录：让刚设的那条口令当场被用一次。
-     "我记得住它"是这次初始化里唯一没有别的办法验证的一件事，而自动登录恰好把它跳过去了。
-     带着账号名跳回登录页，并把这件事说清楚。 */
   const next = safeNext();
   location.href = `${L0_BASE}/login?next=${encodeURIComponent(next)}&created=${encodeURIComponent(payload.data ? payload.data.username : username)}`;
 }
-
-/* ------------------------------ 绑定 ------------------------------ */
 
 const loginForm = $('loginForm');
 const bootstrapForm = $('bootstrapForm');
 if (loginForm) loginForm.addEventListener('submit', submitLogin);
 if (bootstrapForm) bootstrapForm.addEventListener('submit', submitBootstrap);
 
-/* 刚初始化完跳回来：把"账号已建好、请用它的口令登录"说在状态行上。
-   不用 alert（那会被当成错误），也不只在 URL 里带个名字了事（那样没人知道该干什么）。 */
 const created = new URLSearchParams(location.search).get('created');
 if (created !== null && loginForm) {
   setStatus(`管理员账号「${created}」已创建（口令已存入数据库）。请用该口令登录一次，确认口令可用。`);

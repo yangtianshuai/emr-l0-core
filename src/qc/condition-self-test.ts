@@ -1,5 +1,3 @@
-// 自定义条件（条件树）自测。
-
 import { TestSuite, assert, assertEqual, assertThrows } from '../testing/harness.ts';
 import type { JsonValue, NodeId } from '../model/types.ts';
 import {
@@ -32,7 +30,6 @@ function ctx(over: Partial<QcContext> = {}): QcContext {
   return { now: '2026-10-16T12:00:00.000Z', ...over };
 }
 
-/** 一棵"合法但结果由各用例决定"的条件树：省掉每个用例都写一遍的样板 */
 function atom(field: string, op: string, value?: unknown): QcConditionNode {
   const node: Record<string, unknown> = { kind: 'atom', field, op };
   if (value !== undefined) node.value = value;
@@ -69,8 +66,6 @@ async function main(): Promise<void> {
       assertEqual(String(QC_CONDITION_FIELDS[field.name].label), String(field.label), `${field.name} 的人话名要与注册表一致`);
       assert(String(field.doc ?? '').trim().length > 0, `${field.name} 要带说明（界面上那一格的小字）`);
       assert(field.scope === 'document' || field.scope === 'node', `${field.name} 要说清归在「适用范围」还是「判定条件」`);
-      /* 每个字段都要有算子可用：一个没有算子的字段在构造器里是个死格 ——
-         人选了它，算子下拉是空的，而界面不会有任何解释  */
       const usable = catalog.operators.filter((item) => item.fields.includes(field.name));
       assert(usable.length > 0, `${field.name} 至少要有一个可用算子（否则构造器里是死格）`);
     }
@@ -82,7 +77,6 @@ async function main(): Promise<void> {
       }
       assert(String(op.doc ?? '').trim().length > 0, `${op.name} 要带说明（拼条件时唯一能读到"它怎么算"的地方）`);
       if (op.value !== null) assert(String(op.value.doc ?? '').trim().length > 0, `${op.name} 的取值那一格要带说明`);
-      /* 界面可见文案不许出现 Markdown 记号：它会被原样显示成一串星号（与谓词清单同一条纪律） */
       for (const text of [op.label, op.doc, op.value?.doc]) {
         assert(!String(text ?? '').includes('**'), `${op.name} 的文案里不得出现 Markdown 记号`);
       }
@@ -120,7 +114,6 @@ async function main(): Promise<void> {
       ['未知 kind', { kind: 'xor', children: [atom('text', 'empty')] }],
       ['未知字段', atom('patientName', 'contains', ['x'])],
       ['未知算子', atom('text', 'matches', ['x'])],
-      /* 「字数少于」用在文书类型码上没有意义：字段与算子的组合也是判定机制的一部分 */
       ['字段×算子不匹配', atom('docType', 'length-less-than', 3)],
       ['缺取值', atom('text', 'contains')],
       ['词表为空', atom('text', 'contains', [])],
@@ -145,7 +138,6 @@ async function main(): Promise<void> {
     for (const [name, raw] of rejected) {
       assertEqual(normalizeCondition(raw), null, `应拒绝：${name}`);
     }
-    /* 反面：同一批取值里合法的那些必须过。否则"拒得多"看起来像严谨，其实是把能用的也拒了  */
     assert(!!normalizeCondition(atom('text', 'contains', ['待补充'])), '合法词表应通过');
     assert(!!normalizeCondition(atom('keyContent', 'is', true)), '布尔取值应通过');
     assert(!!normalizeCondition(atom('text', 'missing-pattern', 'time')), '枚举取值应通过');
@@ -156,10 +148,8 @@ async function main(): Promise<void> {
     const condition = normalizeCondition(atom('text', 'contains', ['待补充'])) as QcConditionNode;
     const hitText = evaluateCondition(view({ type: 'text', text: '现病史：待补充' }), condition, ctx());
     assert('hit' in hitText && hitText.hit, '文本段命中');
-    /* 命中要带上命中片段本身：下游靠它做锚点重定位，拿整段顶上会让"改了一个字"也算还在  */
     assertEqual('quote' in hitText ? hitText.quote : undefined, '待补充', '命中片段要原样给出来（不是整段）');
     assertEqual(evaluateCondition(view({ type: 'text', text: '现病史无殊' }), condition, ctx()), { hit: false }, '文本段不命中');
-    /* 这两条是误报的主要来源：不说清"只判文本段"的话，一份入院记录的每个章节都会被报一次  */
     assertEqual(evaluateCondition(view({ type: 'section', text: '' }), condition, ctx()), { hit: false }, '章节不判正文类条件');
     assertEqual(evaluateCondition(view({ type: 'document', text: '' }), condition, ctx()), { hit: false }, '文书根不判正文类条件');
 
@@ -203,7 +193,6 @@ async function main(): Promise<void> {
     assertEqual(evaluateCondition(known, inSection, ctx()), { hit: false }, '章节码不在清单里');
     assertEqual(evaluateCondition(known, notInSection, ctx()), { hit: true }, '章节码不在清单里：not-in 命中');
 
-    /* 文书类型码来自上下文，不是节点 —— 走的是同一条取值路径 */
     const inDocType = normalizeCondition(atom('docType', 'in', ['WST500.1'])) as QcConditionNode;
     assertEqual(evaluateCondition(view(), inDocType, ctx({ docTypeCode: 'WST500.1' })), { hit: true }, '文书类型码命中');
     assertEqual(evaluateCondition(view(), inDocType, ctx()), { hit: false }, '没有文书类型码 → 不命中');
@@ -241,7 +230,6 @@ async function main(): Promise<void> {
     const noRecorded = evaluateCondition(view({ type: 'document' }), condition, ctx(base));
     assert('uncertain' in noRecorded && noRecorded.uncertain.includes('记录时间'), '没有记录时间要说出来');
 
-    /* 逐段落判会把同一件事报很多遍（实测踩过：7 个章节 → 8 条一模一样的提示） */
     assertEqual(
       evaluateCondition(view({ type: 'text', text: 'x', recordedAt: '2026-10-16T20:00:00.000Z' }), condition, ctx(base)),
       { hit: false },
@@ -252,7 +240,6 @@ async function main(): Promise<void> {
   await test('C8 组合：假优先短路、not 取反、判不了如实上传', () => {
     const hit = atom('text', 'contains', ['待补充']);
     const miss = atom('text', 'contains', ['绝不可能出现的词']);
-    /* 这一条永远判不了（缺入院时刻），用来验证"它不会污染别的分支的结论" */
     const uncertain = atom('recordedAt', 'older-than-hours', 8);
 
     const allWithMiss = normalizeCondition({ kind: 'all', children: [miss, uncertain] }) as QcConditionNode;
@@ -262,7 +249,6 @@ async function main(): Promise<void> {
       '「且」里有一个明确不成立，整条就不成立 —— 不该因为另一分支缺数据而降级成"判不了"',
     );
 
-    /* 「或」里"成立"优先于"判不了"：拿一个在文书根上必然成立的原子来验这件事 */
     const hitOnDocument = atom('nodeType', 'in', ['document']);
     const anyWithHit = normalizeCondition({ kind: 'any', children: [hitOnDocument, uncertain] }) as QcConditionNode;
     assertEqual(
@@ -296,11 +282,8 @@ async function main(): Promise<void> {
     const hit = rule.check(view({ type: 'text', text: '现病史：待补充' }), ctx());
     if (!hit || 'uncertain' in hit) throw new Error('应命中而不是"判不了"');
     assert(String(hit.detail).includes('规则 R-COND-1：'), '规则号由引擎注入（包不得自带）');
-    /* 依据要写成看得出命中了什么的一句话：算子实现了 `explain` 就用那句（它带着命中的词），
-       没有才退回"整棵树的人话回读"  */
     assert(String(hit.detail).includes('本段正文包含「待补充」'), '依据里要写清命中处（含命中的那一段话）');
     assert(String(hit.suggestion).trim() !== '', '建议动作不能是空的');
-    /* 命中片段要一路传到医生端：锚点重定位依赖它 */
     assertEqual(String(hit.quote ?? ''), '待补充', '命中片段要随判定结果带出来');
   });
 
@@ -333,14 +316,8 @@ async function main(): Promise<void> {
         `${name}：装载期应报参数不合法`,
       );
     }
-    /* 反面：合法的那一份必须过 —— 否则"拒得严"会变成"根本存不下去" */
     validateRulePack(pack(atom('text', 'empty')));
   });
-
-  /* ========================= E 带参数的判定方式（T1） =========================
-     这一层回答的唯一问题：实参到底生不生效。
-     "参数配了但没生效"是这套质控最想避免的一类错（它表现得像"质控跑了、没问题"），
-     所以正面用例必须证明"同一棵树、两组实参、结论不同"。  */
 
   const paramCondition = {
     itemType: 'condition',
@@ -388,7 +365,6 @@ async function main(): Promise<void> {
         `${name}：装载期应报实参不合法`,
       );
     }
-    /* 反面：合法实参必须过 —— 否则"拒得严"会变成"根本存不下去" */
     validateRulePack(refPack(paramCondition, { conditionId: 'C-CUSTOM-1', args: { minLength: 5 } }));
   });
 
@@ -410,8 +386,6 @@ async function main(): Promise<void> {
       '声明了参数却没用上：界面上会多一个"填了也不生效"的格，必须拒',
     );
 
-    /* 占位符放到 `field` / `op` 位置上，连树都不合法（`$x` 不是字段名）——
-       这是它被拦在最外层的证据：替换字段名等于替换"读什么"  */
     assertThrows(
       () => validateRulePack(refPack({ ...paramCondition, when: { kind: 'atom', field: '$f', op: 'empty' } }, { conditionId: 'C-CUSTOM-1' })),
       (err) => (err as { code?: string }).code === 'E_RULE_CONDITION_INVALID',
@@ -420,8 +394,6 @@ async function main(): Promise<void> {
   });
 
   await test('C14 代入之后仍走同一段校验：实参形态与它落的那一格不匹配就拒', () => {
-    /* 参数声明成"单行文本"，却落进要求词表的格：代入后那棵树必然不合法。
-       这一条证明的是"代入之后还在判"，而不是"只判了参数本身的类型" */
     const misshaped = {
       itemType: 'condition',
       itemId: 'C-CUSTOM-2',
@@ -483,7 +455,6 @@ async function main(): Promise<void> {
       { hit: false },
       '该类文书一份都没有时本档不报（由「应有而缺」负责，两条都报会得到重复提示）',
     );
-    /* 右端取出院时刻：下面这一份的"最长间隔"只可能出现在尾段  */
     const closeDocs = [
       { docId: 'd1', docTypeCode: 'WST500.3', createdAt: base },
       { docId: 'd2', docTypeCode: 'WST500.3', createdAt: at(1) },
@@ -574,7 +545,6 @@ async function main(): Promise<void> {
       { hit: false },
       '只判文本段：章节与文书根的正文是空的',
     );
-    /* "必填为空"的组合写法：带任意标签 + 正文为空（原来缺的正是"带任意标签"那一格） */
     const taggedEmpty = normalizeCondition({
       kind: 'all',
       children: [atom('nodeType', 'in', ['text']), atom('tags', 'has-tag'), atom('text', 'empty')],

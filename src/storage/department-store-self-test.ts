@@ -1,5 +1,3 @@
-// 科室字典自测（D1~D5）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openConfigFixture, writeCorruptRow } from '../testing/config-fixture.ts';
 import {
@@ -54,8 +52,6 @@ async function main(): Promise<void> {
       const described = describeDepartments(reloaded);
       assertEqual(described.enabledCount, 2, '启用数供界面直接显示');
 
-      /* 坏行：口令换过 / 有人改过那一行。必须抛错，不能当作"没配过" ——
-         当成没配过会让所有"限科室"的判定静默失效（全院通用），而没人知道。  */
       writeCorruptRow(fixture, DEPARTMENT_CONFIG_KEY);
       assertEqual(codeOf(() => loadDepartments(fixture.kv)), 'E_DEPT_INVALID', '解不开必须报，不许静默降级');
     } finally {
@@ -91,7 +87,6 @@ async function main(): Promise<void> {
       );
       assertEqual(duplicate, 'E_DEPT_INVALID', '编码重复要报：重复时"限哪个科"就没有确定答案');
 
-      /* 空清单是合法输入（= 清空），不是错误：清空之后 source 回到 empty */
       const cleared = saveDepartments(fixture.kv, [], 'admin');
       assertEqual(cleared.source, 'store', '清空是一次**写入**（不是"没配过"）：谁清的要留在记录里');
       assertEqual(cleared.items.length, 0, '清空之后没有任何科室');
@@ -149,7 +144,6 @@ async function main(): Promise<void> {
       assertEqual(departmentsSeeded(fixture.kv), false, '没播过');
       markDepartmentsSeeded(fixture.kv);
       assertEqual(departmentsSeeded(fixture.kv), true, '播过就记下来（"我们把科室清了"与"还没建过科室"必须分得开）');
-      /* 标记与内容互不影响：清空科室之后标记仍在，于是重启不会再播种 */
       saveDepartments(fixture.kv, [], 'admin');
       assertEqual(loadDepartments(fixture.kv).items.length, 0, '清空就是清空');
       assertEqual(departmentsSeeded(fixture.kv), true, '标记还在（重启不会把科室加回来）');

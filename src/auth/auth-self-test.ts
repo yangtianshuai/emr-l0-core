@@ -1,5 +1,3 @@
-// 身份 / 权限 / 会话 / 限流 自测（A~C 共 24 条）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
   ACTION_LABELS,
@@ -54,14 +52,10 @@ async function main(): Promise<void> {
     const denied = authorize(principal('admin'), unknown);
     assertEqual(denied.ok, false, '连管理员也不能做未授权的动作');
     if (!denied.ok) assert(denied.message.includes('fail-closed'), `应说明是 fail-closed，实际：${denied.message}`);
-    /* 这一条同时验证了"表是 Record<Action, Role[]> 而不是 Partial"的意图：
-       漏项不会变成"人人可做"。 */
     assertEqual(rolesFor(unknown).length, 0, '未授权动作的角色集合应为空');
   });
 
   await test('A4 界面口径与放行口径一致：`can()` 说能做的，`authorize()` 必须真放行（反向亦然）', () => {
-    /* 界面按钮的禁用依据如果与放行判断是两套逻辑，必然出现
-       "界面允许点、点了被拒"（或更糟：界面禁用但接口放行）。这里把它变成一条断言。 */
     for (const action of ALL_ACTIONS) {
       for (const role of ALL_ROLES) {
         assertEqual(
@@ -124,8 +118,6 @@ async function main(): Promise<void> {
 
   await test('B4 到点即失效，且**与"没登录"分开报**（否则医生刚登录就被说成没登录）', () => {
     let clock = 1_000_000;
-    /* 用 `sliding: false`：本用例要验的是"寿命到点就失效"这条硬规则，
-       而滑动续期会把到期时刻往后推（那是 B5 的主题）—— 混在一起测不出任何一条。 */
     const store = new SessionStore({ ttlMs: 60_000, sliding: false, now: () => clock });
     const { id } = store.issue({ actorId: 'A', kind: 'human', role: 'clinician', tenant: 'default' });
     clock += 59_999;
@@ -138,7 +130,6 @@ async function main(): Promise<void> {
     } else {
       assert(false, '应报"已过期"而不是"需要登录"');
     }
-    /* 第二次请求仍要报"已过期"：过期记录不在这里删（删了就被说成"没登录"） */
     const again = store.resolve(id);
     assertEqual(again.ok, false, '仍然不可用');
     if (!again.ok) assertEqual(again.code, AUTH_ERRORS.E_SESSION_EXPIRED, '第二次仍应报"已过期"');
@@ -152,7 +143,6 @@ async function main(): Promise<void> {
       clock += 30_000;
       assertEqual(sliding.resolve(id).ok, true, `第 ${i + 1} 次续期前应有效`);
     }
-    /* 一共走了 90 秒 > 60 秒寿命：若没有滑动续期，这里早就失效了 */
     clock += 30_000;
     assertEqual(sliding.resolve(id).ok, true, '滑动模式下持续活跃的会话应一直可用');
 
@@ -266,12 +256,10 @@ async function main(): Promise<void> {
     let clock = 0;
     const limiter = new SlidingWindowLimiter({ now: () => clock });
     limiter.hit('k', LOGIN_RULE);
-    /* 打满并持续尝试 50 秒（每 5 秒一次）——若被拒也记录，恢复时刻会被推到 50+60 秒 */
     for (let i = 0; i < 10; i += 1) {
       clock += 5_000;
       limiter.hit('k', LOGIN_RULE);
     }
-    /* 第一次命中在 t=0，窗口 60s：到 t=60_000 必恢复 */
     clock = 60_000;
     assertEqual(limiter.hit('k', LOGIN_RULE).ok, true, '恢复时刻应只由第一次命中决定（被拒不延长封禁）');
   });

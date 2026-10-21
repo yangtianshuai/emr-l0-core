@@ -1,5 +1,3 @@
-// 真实数据批量扫描：把一个目录里的外来样本逐个跑一遍导入，出人类可读的报告。
-
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describeAnyImport, importAnyDocument, type AnyImported } from './import-any.ts';
@@ -19,7 +17,6 @@ interface ScanRow {
 
 const SKIP_EXT = new Set(['.md', '.json', '.png', '.log']);
 
-/** 手写扩展名提取：本项目对 node:path 的自有类型声明未覆盖 extname，避免为此扩大共享声明面 */
 function extOf(name: string): string {
   const index = name.lastIndexOf('.');
   return index <= 0 ? '' : name.slice(index).toLowerCase();
@@ -108,8 +105,6 @@ function main(): void {
 
   const succeeded = rows.filter((row) => row.ok);
   console.log(`扫描目录：${dir}`);
-  /* 注意口径：导入件按纪律一律需要人工核对，所以"带警告"不是异常状态，
-     而是"待核对清单"。这里不把它算作"不正常"，否则报告会天天显示"全部异常"。  */
   console.log(
     `样本 ${rows.length} 份 | 导入成功 ${succeeded.length}（其中 ${withWarnings.length} 份带警告 = 待核对清单） | 导入失败 ${failed.length}\n`,
   );

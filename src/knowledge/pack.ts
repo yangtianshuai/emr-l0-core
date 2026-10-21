@@ -1,40 +1,21 @@
-// 知识资产包 · 通用层（模板包 / 规则包 / 术语包共用）。
-
 import { hashValue } from '../model/hash.ts';
 import type { JsonValue } from '../model/types.ts';
 
-/**
- * 包的三类。刻意只有三类：模板（怎么写）、规则（怎么判）、术语（怎么叫）。
- * 加第四类之前必须先回答"它的产出归属哪一层" —— 否则这一层会退化成"什么都能往里塞"。
-  */
 export type PackKind = 'template' | 'rule' | 'term';
 
 export const PACK_KINDS: readonly PackKind[] = ['template', 'rule', 'term'];
 
-/** 包内条目的公共字段（各类别自己再加字段） */
 export interface PackItemBase {
   itemId: string;
-  /**
-   * 包内开关。它是运行时策略，不属于包内容：
-   * 改它不改变 `contentFingerprint()`（"载的是哪一版"），只改变 `effectiveFingerprint()`
-   * （"实际生效的是什么"）。两者分开报，才能回答"是包换了还是只是关了条规则"。
-    */
   enabled?: boolean;
 }
 
-/**
- * 包清单。全部字段都是可直接随文件交付的元数据，没有任何可执行内容。
-  */
 export interface PackManifest {
-  /** 全局唯一标识（如 `qc.form.builtin`）。它就是这份内容的名字：同 ID 即同一个包  */
   packId: string;
   kind: PackKind;
-  /** 人读名称（界面展示用） */
   name: string;
   engineApi: string;
-  /** 交付方（专科包要能独立交付，也要能追责） */
   vendor?: string;
-  /** 专科 / 场景标签（如 `respiratory`），用于回答"这台机器该载哪些包" */
   scope?: string;
   createdAt?: string;
   description?: string;
@@ -114,12 +95,6 @@ function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-/**
- * 校验并归一化一个包。
- *
- * 归一化的含义：只保留清单允许的字段，`enabled` 一律补成布尔（缺省 `true`）。
- * 于是运行时的包结构是确定的，上层不必到处写 `enabled !== false`。
-  */
 export function validatePack(input: unknown, supported: SupportedEngineApis): Pack {
   const source = asPlainObject(input);
   if (!source) {
@@ -182,10 +157,6 @@ export function validatePack(input: unknown, supported: SupportedEngineApis): Pa
       throw new KnowledgePackError('E_PACK_FIELD_INVALID', `包「${packId}」条目「${itemId}」的 enabled 必须是布尔，实际 ${typeof enabledValue}`);
     }
 
-    /* 通用层不认识类别专有字段（如规则包的 predicate），但必须原样保留：
-       它们随后由上层校验并编译。这里只补 `enabled` 的缺省值。
-       （`as unknown as` 是因为条目在本层只有 `itemId/enabled` 两个已知字段，
-       而实际形状更宽 —— 类型上收窄不等于运行时截断字段。）  */
     items.push({ ...item, enabled: enabledValue === undefined ? true : enabledValue } as unknown as PackItemBase);
   }
 
@@ -240,7 +211,6 @@ export interface PackSummary {
   itemCount: number;
   enabledItemCount: number;
   items: PackItemSummary[];
-  /** 装载时间：回答"这份内容是什么时候进来的"，与配置指纹同类用途 */
   loadedAt: string;
 }
 
@@ -261,12 +231,6 @@ function summarize(pack: Pack, loadedAt: string): PackSummary {
   };
 }
 
-/**
- * 包注册表：装载 / 卸载 / 开关 / 冲突判定 / 指纹。
- *
- * 一次装载是原子的：要么整包进入注册表，要么一个字都不进。
- * 不做"部分装载"——半个包在界面上看起来同样是"装好了"。
-  */
 export class PackRegistry {
   private readonly packs = new Map<string, { pack: Pack; loadedAt: string }>();
 
@@ -276,22 +240,6 @@ export class PackRegistry {
     this.supported = supported;
   }
 
-  /**
-   * 装载一个包（`input` 是外部数据，必须先校验）。
-   *
-   * 两类冲突都在这里判定：
-   *   - 包级：同 `packId` 已在册 → `E_PACK_DUPLICATE`（除非显式 `replace`）。
-   *     不允许"悄悄覆盖"：覆盖会让人以为"装的还是原来那份内容"，而实际判定已经换了。
-   *     报错里会说明两份内容是否逐字节相同 —— 这决定了"我重复灌了同一个包"
-   *     与"我改内容却没声明 replace"该往哪个方向查。
-   *   - 条目级：同类别下 `itemId` 已被别的包占用 → `E_PACK_ITEM_CONFLICT`。
-   *     两条规则同名时，"哪一条赢"只能靠顺序 —— 而顺序是最不该决定判定结果的东西。
-   *
-   * `validate` 是类别专有校验的钩子（通用层不认识 `predicate` 这类字段）：
-   * 规则包在这里把自己的描述符过一遍，于是"参数写错"在装包那一刻就报错，
-   * 而不是等医生点了"跑质控"才发现少了一条。它先于冲突判定执行 ——
-   * 包自身的缺陷比环境冲突更该被先报出来。
-    */
   load(input: unknown, options: { replace?: boolean; validate?: (pack: Pack) => void } = {}): PackSummary {
     const pack = validatePack(input, this.supported);
     options.validate?.(pack);
@@ -344,7 +292,6 @@ export class PackRegistry {
       .sort((left, right) => left.packId.localeCompare(right.packId));
   }
 
-  /** 打开/关闭包内某一条目。开关是运行时策略，不写回包、不改变内容指纹  */
   setItemEnabled(packId: string, itemId: string, enabled: boolean): PackSummary {
     const entry = this.packs.get(packId);
     if (!entry) {
@@ -358,7 +305,6 @@ export class PackRegistry {
     return summarize(entry.pack, entry.loadedAt);
   }
 
-  /** 某类别下启用中的条目（保持包内顺序；跨包按 packId 排序）  */
   activeItemsOf(kind: PackKind): Array<{ packId: string; item: PackItemBase }> {
     const result: Array<{ packId: string; item: PackItemBase }> = [];
     for (const [packId, entry] of [...this.packs.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
@@ -370,20 +316,11 @@ export class PackRegistry {
     return result;
   }
 
-  /**
-   * 内容指纹：回答"现在跑的是哪一份内容"。只由包内容决定，与条目开关无关。
-   *
-   * 必须覆盖完整内容（每条规则的谓词与参数都在内）。早先这一层只取 `itemId`，
-   * 于是"改了规则参数"指纹不变 —— 那时还能拿版本号兜底；版本号删掉之后，
-   * 指纹是唯一能回答"判定标准变没变"的东西，一个不随内容变的指纹会把
-   * "改了没生效"与"生效了但没人知道"混成同一件事。
-    */
   contentFingerprint(): string {
     const payload = this.sortedPacks().map(([, entry]) => packContentProjection(entry.pack)) as unknown as JsonValue;
     return hashValue(payload);
   }
 
-  /** 生效指纹：回答"实际在跑的是什么"。在内容之上再纳入被停用的条目  */
   effectiveFingerprint(): string {
     const payload = this.sortedPacks().map(([, entry]) => ({
       content: packContentProjection(entry.pack),

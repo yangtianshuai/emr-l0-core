@@ -1,6 +1,3 @@
-// T18d 验收自测：接收方公钥目录。
-// 落盘 JSON 里不得出现任何私钥相关键。
-
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -72,10 +69,6 @@ async function main(): Promise<void> {
     assertEqual((parseRecipientPublicKey('QUJD') as { code?: string }).code, 'E_KEY_SPKI_INVALID', '长度不足应报 SPKI 结构问题');
   });
 
-  /**
-   * 本套件最要紧的一条：不在曲线上的点必须被拒。
-   * 放进去的后果不是报错，而是"加密成功、谁也解不开"——静默失败中最坏的一种。
-   */
   await test('A4/A5 非法公钥必须被拒：不在曲线上的点要单独报码（否则加密成功却没人解得开）', () => {
     const der = new Uint8Array(Buffer.from(spkiOf(pairA.publicKey), 'base64'));
     const tampered = new Uint8Array(der);
@@ -95,7 +88,7 @@ async function main(): Promise<void> {
   await test('A6 不是 SM2 SPKI 结构 → E_KEY_SPKI_INVALID（不猜、不兜底）', () => {
     const der = new Uint8Array(Buffer.from(spkiOf(pairA.publicKey), 'base64'));
     const wrongMarker = new Uint8Array(der);
-    wrongMarker[wrongMarker.length - 65] = 0x02; // 压缩点标记
+    wrongMarker[wrongMarker.length - 65] = 0x02;
     const result = parseRecipientPublicKey(Buffer.from(wrongMarker).toString('base64'));
     assertEqual(result.ok, false, '压缩点标记不应被接受（本实现只接受未压缩点）');
   });
@@ -137,7 +130,7 @@ async function main(): Promise<void> {
   await test('B3 条目被篡改（公钥与指纹对不上）→ 取公钥时必须抛错，不得拿来历不明的钥匙去加密', () => {
     const added = addRecipientKey(EMPTY_KEY_STORE, { label: '张医生', text: spkiOf(pairA.publicKey), now: NOW });
     if (!added.ok) throw new Error('前置失败');
-    const forged = { ...added.key, spkiBase64: spkiOf(pairB.publicKey) }; // 指纹是 A 的，公钥换成了 B
+    const forged = { ...added.key, spkiBase64: spkiOf(pairB.publicKey) };
     expectError(() => publicKeyOf(forged), '已被篡改');
   });
 
@@ -171,7 +164,6 @@ async function main(): Promise<void> {
     saveRecipientKeys(storePath, EMPTY_KEY_STORE);
     const brokenPath = `${storePath}.broken.json`;
     saveRecipientKeys(brokenPath, EMPTY_KEY_STORE);
-    /* 写成不合法结构：静默返回空目录会让"我导入的接收方不见了"无从排查 */
     writeFileSync(brokenPath, '{"version":2,"keys":[]}\n', 'utf8');
     expectError(() => loadRecipientKeys(brokenPath), '结构不符');
     rmSync(storePath, { force: true });

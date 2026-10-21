@@ -1,5 +1,3 @@
-// 就诊时间轴自测（TL1~TL8）。
-
 import { fileURLToPath } from 'node:url';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { createEmptyPackRegistry } from '../knowledge/default-registry.ts';
@@ -15,7 +13,6 @@ const TIME_PACK = readSamplePack(ROOT, SAMPLE_PACK_FILES.timeRules) as QcRulePac
 const registry = createEmptyPackRegistry();
 registry.load(TIME_PACK, { validate: (pack) => validateRulePack(pack as QcRulePack) });
 
-/** 跨文书规则（来自样例时限包：R-TIME-03 间隔 / R-TIME-04 应有而缺） */
 const RULES: VisitTimelineRuleRef[] = crossDocRulesOf(registry);
 
 const suite = new TestSuite('就诊时间轴自测', [
@@ -105,7 +102,6 @@ function ruleOf(ruleId: string): VisitTimelineRuleRef {
   return found as VisitTimelineRuleRef;
 }
 
-/** 直接问谓词本身（时间轴之外的那一处判定）——TL2 用它来比对两处是否说同一句话 */
 function verdictOf(ref: VisitTimelineRuleRef, visitDocs: VisitTimelineDocInput[], extra: Partial<QcContext> = {}) {
   const view: QcNodeView = { nodeId: 'n_root' as NodeId, type: 'document', text: '', tags: [], keyContent: false };
   const ctx: QcContext = {
@@ -186,7 +182,6 @@ async function main(): Promise<void> {
     assertEqual(Math.round((gap?.segment?.hours ?? 0) * 10) / 10, 30, '段上要写出实际小时数');
     assertEqual(gap?.segment?.exceeds, true, '超过时限的那一段必须被标出来');
 
-    /* 反过来：每段都在时限内时，轴上不能出现"超限段"，也不该有缺口 */
     const quiet = timelineOf(
       [visitDoc('prog1', PROGRESS, ADMITTED), visitDoc('prog2', PROGRESS, hoursAfter(ADMITTED, 6))],
       { now: hoursAfter(ADMITTED, 10) },
@@ -270,7 +265,6 @@ async function main(): Promise<void> {
     assertEqual(change?.writtenIn, [{ docId: 'd_prog', how: 'element' }], '要说明是"记了数据元"而不是"提到了名字"');
     assert(timeline.trend.progressDocIds.includes('d_prog'), '参与对照的后续文书要列出来');
 
-    /* 只写了文字、没填字段：也算写进去了（医生用文字交代了这次变化，系统不该说"没写"） */
     const byText = timelineOf([
       visitDoc('d_adm', ADMISSION, ADMITTED, {
         doc: docWith('d_adm', '入院时白细胞升高。', [

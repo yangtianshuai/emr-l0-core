@@ -1,54 +1,10 @@
-/**
- * 浏览器端采集实现（C3b④）：**真实麦克风源**，以及它所需的那一份「段规则」。
- *
- * ## 为什么会有这个文件（本项目唯一一处刻意的第二份实现）
- *
- * 仓库没有打包步骤（`node` 直接跑 TS），而医生端 `ui.js` 是经典脚本 ——
- * 浏览器**拿不到 `src/dictation/*.ts` 里的任何代码**（`docs/L2-语音采集设计.md` 第九之二节）。
- * 于是"浏览器里接真实麦克风"这件事，必然要在浏览器侧再落一遍三样东西：
- * 分片规则（S1~S4）、WAV 组装、探测与失败语义。
- *
- * 「两份实现迟早分叉」不能靠自觉 —— 分叉的表现是**演示里切得对、真机上切得不对**，
- * 而那类 bug 只在现场、只在某一段录音上出现。所以 `test:capture` 的 AU34 把本文件
- * **真的 import 进 Node**，与 `capture.ts` 逐帧对拍：分片逐字段、WAV 逐字节、失败语义逐句。
- * 规则改了一边忘了另一边，那条用例立刻红。
- *
- * ## 谁加载它、怎么加载
- *
- * `ui.js`（经典脚本）用**动态 `import()`** 拉取（经典脚本里合法），
- * 由 `demo-server.ts` 以 `/capture-web.js` 托管（no-store，与 ui.js 同）。
- * 本文件**不 import 任何别的东西**，因此浏览器与 Node 两边都能直接加载。
- *
- * ## 诚实边界（写在这里，也要写进界面）
- *
- * - 它只在**安全上下文**（HTTPS / localhost）下能拿到麦克风；`http://10.x` 下浏览器
- *   根本不弹权限框，且没有任何前端办法绕过（第六节）；
- * - 人声判定用的是**能量阈值**（帧 RMS），不是真正的 VAD：安静诊室里够用，
- *   嘈杂环境下它会把噪声当人声（表现为"段切得很碎"）。换真 VAD 是另一个决定，不在这里假装做了；
- * - 采样用 `ScriptProcessorNode`（已废弃但仍在 Chromium 里可用）。它省掉了 `AudioWorklet`
- *   那一个**必须单独托管的工作线程文件**；换掉它是 K10（桌面形态）时的事；
- * - 浏览器采样率由设备决定（常见 48000），**必须重采样到 16 kHz**：不重采样就会得到
- *   "音调变尖、识别全错"的音频，而它听起来"有声音"，很容易被判成"识别不准"（第三节）。
- */
-
-/* ============================== 音频规格 ============================== */
-
-/**
- * 与 `src/dictation/capture-transport.ts` 的 `CAPTURE_AUDIO` 必须一致（AU34 逐字节守着）。
- * 16 kHz / 单声道 / 16-bit：ASR 侧的契约，不是随便挑的。
- */
 export const CAPTURE_WEB_AUDIO = { sampleRate: 16000, channels: 1, bitsPerSample: 16 };
 
-/** 采集源标识：留痕与界面要能回答"这段音频从哪来"（`sample` 是脚本音频，不是麦克风） */
 export const CAPTURE_WEB_SOURCE_ID = 'browser-mic';
 
 /** 帧长（秒）：与演示源的默认一致，静音判停的粒度就是它 */
 export const CAPTURE_WEB_DEFAULT_FRAME_SEC = 0.5;
 
-/**
- * 人声阈值（帧 RMS）。取 -40 dBFS 左右：宁可把安静的话当人声（多切一段，代价是段变多），
- * 也不要把小声的话当静音 —— 后者的表现是"我说的话一句都没进去"，而医生不知道为什么。
- */
 export const CAPTURE_WEB_VAD_RMS = 0.01;
 
 export class CaptureWebError extends Error {
@@ -59,8 +15,6 @@ export class CaptureWebError extends Error {
     this.howTo = howTo || '';
   }
 }
-
-/* ============================== WAV 组装（同 capture.ts） ============================== */
 
 function writeAscii(target, offset, text) {
   for (let i = 0; i < text.length; i += 1) target[offset + i] = text.charCodeAt(i);
@@ -83,7 +37,7 @@ export function buildWavHeaderWeb(dataBytes) {
   writeAscii(header, 8, 'WAVE');
   writeAscii(header, 12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); /* 1 = PCM */
+  view.setUint16(20, 1, true);
   view.setUint16(22, CAPTURE_WEB_AUDIO.channels, true);
   view.setUint32(24, CAPTURE_WEB_AUDIO.sampleRate, true);
   view.setUint32(28, CAPTURE_WEB_AUDIO.sampleRate * blockAlign, true);
@@ -111,14 +65,6 @@ export function encodeCaptureWavWeb(pcm) {
   return out;
 }
 
-/* ============================== 探测与失败语义（第六节） ============================== */
-
-/**
- * 只读探测：**不申请权限、不打开设备**。
- *
- * 判定顺序同 `capture.ts`：先判安全上下文。`http://10.x` 下浏览器连权限框都不弹，
- * 把它排在后面，现场会显示成"未获得麦克风权限"，而医生去站点设置里点半天也没用。
- */
 export function probeMicEnvironmentWeb(env, sourceId = CAPTURE_WEB_SOURCE_ID) {
   if (!env.isSecureContext) {
     return {
@@ -150,7 +96,6 @@ export function probeMicEnvironmentWeb(env, sourceId = CAPTURE_WEB_SOURCE_ID) {
   return { ok: true, sourceId };
 }
 
-/** 读宿主事实（探测的输入由宿主提供，便于自测注入） */
 export function readBrowserEnv() {
   const hasAudioContext = typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined';
   return {
@@ -160,10 +105,6 @@ export function readBrowserEnv() {
   };
 }
 
-/**
- * 采集失败 → "现场表现 + 怎么办"。三类（权限 / 无设备 / 被占用）的处置完全不同，
- * 混成一句"录音失败"等于让人自己去搜。
- */
 export function describeSourceFailureWeb(err) {
   const name = String((err && err.name) || '');
   const detail = String((err && err.message) || err || '');
@@ -195,20 +136,8 @@ export function describeSourceFailureWeb(err) {
   };
 }
 
-/* ============================== 帧 → 段（与 capture.ts 同一套规则） ============================== */
-
-/** 浮点比较容差：段边界由帧边界推出，理论上严格相等（与 capture.ts 同一个值） */
 const TIMELINE_EPS = 1e-9;
 
-/**
- * 分片器（流式）。四条语义（第四节，逐条不可让步）：
- *   - S1 时间区间以录音开始为 0 点累计，暂停恢复不重置起点；
- *   - S2 相邻分片首尾相接、不重叠不留缝（`end_i === start_{i+1}`）；
- *   - S3 段号从 1 起、与时间同序，这里不做重排；
- *   - S4 短于 `minSeconds` 的片按误触丢弃，但**必须计数**。
- *
- * 分片边界取"定稿时刻"而不是"最后一个有人声的帧"：否则留下的静音不属于任何一段，正好违反 S2。
- */
 export function createChunkPlannerWeb(config) {
   let droppedShort = 0;
   let nextIndex = 1;
@@ -255,7 +184,7 @@ export function createChunkPlannerWeb(config) {
       }
       if (event.kind === 'pause') {
         finalize(event.atSec, 'pause', out);
-        carry = null; /* 暂停期没有音频：下一个分片从恢复后的第一帧开始 */
+        carry = null;
         previousEnd = event.atSec;
         return out;
       }
@@ -268,13 +197,12 @@ export function createChunkPlannerWeb(config) {
       if (start === null) {
         if (!event.voiced) {
           previousEnd = event.endSec;
-          return out; /* 开头那段静音不属于任何分片 */
+          return out;
         }
         start = carry === null ? event.startSec : carry;
       }
       silenceSec = event.voiced ? 0 : silenceSec + (event.endSec - event.startSec);
 
-      /* 超长优先于静音：连续口述不能把一段无限拖大 */
       if (event.endSec - start >= config.maxSeconds) {
         finalize(event.endSec, 'maxSeconds', out);
       } else if (!event.voiced && silenceSec * 1000 >= config.silenceMs) {
@@ -286,12 +214,6 @@ export function createChunkPlannerWeb(config) {
   };
 }
 
-/**
- * 帧流 → 段（含该段的 WAV）。
- *
- * 与 `capture.ts` 同规则、逐字节同结果（AU34）。"每段上传的音频只含该段区间内的帧"这条
- * 必须守住：多带一帧就是把上一段的话又送了一次。
- */
 export function createChunkAssemblerWeb(config) {
   const planner = createChunkPlannerWeb(config);
   const frames = [];
@@ -327,9 +249,6 @@ export function createChunkAssemblerWeb(config) {
   };
 }
 
-/* ============================== PCM 处理（重采样 / 定帧 / VAD） ============================== */
-
-/** 帧的响度（RMS）：人声判定的输入，也是"这段有没有声音"的唯一依据 */
 export function rmsOf(samples) {
   if (samples.length === 0) return 0;
   let sum = 0;
@@ -348,12 +267,6 @@ export function pcm16FromFloat32(samples) {
   return out;
 }
 
-/**
- * 线性插值重采样（**流式**：`state` 跨回调继续，由调用方持有）。
- *
- * 为什么不用 `OfflineAudioContext` 一把梭：它是"喂完再出结果"，而分片要的是**边说边出帧**
- * （静音判停是主路径）。线性插值对 16 kHz 的语音识别足够，代价是高频有轻微损失。
- */
 export function resampleLinear(input, inputRate, targetRate, state) {
   if (inputRate === targetRate) return input.slice();
   const step = inputRate / targetRate;
@@ -374,12 +287,6 @@ export function resampleLinear(input, inputRate, targetRate, state) {
   return Float32Array.from(out);
 }
 
-/**
- * 定长帧切分：把连续 PCM 切成 `frameSec` 长度的帧，并给出每帧的时间区间。
- *
- * 时间区间由**已产出样本数**算出（不是 wall clock）：它天然满足 S1/S2，
- * 而 wall clock 会因为回调抖动算出重叠或缝隙，那两样都会让 S2 失守。
- */
 export function createFrameChunker(options = {}) {
   const sampleRate = options.sampleRate === undefined ? CAPTURE_WEB_AUDIO.sampleRate : options.sampleRate;
   const frameSec = options.frameSec === undefined ? CAPTURE_WEB_DEFAULT_FRAME_SEC : options.frameSec;
@@ -396,11 +303,9 @@ export function createFrameChunker(options = {}) {
   };
 
   return {
-    /** 已录时长（秒，含尚未凑成一帧的部分）—— 界面计时用它 */
     get elapsedSec() {
       return (producedSamples + pending.length) / sampleRate;
     },
-    /** 送入一段 16 kHz PCM；返回本次凑满的帧（0 个或多个） */
     push(chunk) {
       const merged = new Float32Array(pending.length + chunk.length);
       merged.set(pending, 0);
@@ -414,10 +319,6 @@ export function createFrameChunker(options = {}) {
       pending = merged.slice(offset);
       return frames;
     },
-    /**
-     * 收尾：把不足一帧的尾巴**也发出去**（低于一帧就不发等于丢掉最后一句话，
-     * 而"少一句"是这条链上最糟的失败）。
-     */
     flush() {
       if (pending.length === 0) return [];
       const tail = pending;
@@ -427,28 +328,14 @@ export function createFrameChunker(options = {}) {
   };
 }
 
-/* ============================== 真实麦克风采集源 ============================== */
-
 function stopTracks(stream) {
   if (stream === null) return;
   try {
     for (const track of stream.getTracks()) track.stop();
   } catch {
-    /* 停止本身不该失败：拆设备时的异常只会掩盖"停止失败"这件不该发生的事 */
   }
 }
 
-/**
- * 浏览器麦克风采集源：`getUserMedia` → Web Audio → 16 kHz 单声道 PCM 帧。
- *
- * 它是 `CaptureSource` 接口在浏览器里的那个实现（`src/dictation/capture-source.ts` 的槽位）：
- * `probe()` 只读、`start()` 只能由人调用、`stop()` 立刻兑现。**下面的编排一行不改**，
- * 与演示源（脚本音频）、本地客户端（Node 侧）走的是同一条下游：
- * 帧 → 分片 → 上传同源路由 → ASR → 建议。
- *
- * 宿主能力全部可注入（`env` / `getUserMedia` / `audioContextCtor`）：不自测就只能等一台真机，
- * 而"等真机"这件事的结果通常是这段代码再也没被验证过。
- */
 export function createBrowserMicSource(options = {}) {
   const env = options.env === undefined ? readBrowserEnv() : options.env;
   const frameSec = options.frameSec === undefined ? CAPTURE_WEB_DEFAULT_FRAME_SEC : options.frameSec;
@@ -460,14 +347,12 @@ export function createBrowserMicSource(options = {}) {
   const AudioCtor = options.audioContextCtor === undefined
     ? (typeof AudioContext !== 'undefined' ? AudioContext : (typeof webkitAudioContext !== 'undefined' ? webkitAudioContext : null))
     : options.audioContextCtor;
-  /** 设备真的打开了（权限框已过）：界面据此把"正在请求权限"换成"正在采集" */
   const onAcquired = options.onAcquired === undefined ? () => {} : options.onAcquired;
 
   let stream = null;
   let ctx = null;
   let srcNode = null;
   let procNode = null;
-  /** 定帧器与出帧回调要活到 `stop()`：收尾时得把不足一帧的尾巴交出去 */
   let chunkerRef = null;
   let onFrameRef = null;
   let running = false;
@@ -512,7 +397,7 @@ export function createBrowserMicSource(options = {}) {
       srcNode = ctx.createMediaStreamSource(stream);
       procNode = typeof ctx.createScriptProcessor === 'function' ? ctx.createScriptProcessor(4096, 1, 1) : null;
       if (procNode === null) {
-        try { await ctx.close(); } catch { /* 关不掉也不影响这次判断 */ }
+        try { await ctx.close(); } catch { }
         ctx = null;
         stopTracks(stream);
         stream = null;
@@ -536,7 +421,6 @@ export function createBrowserMicSource(options = {}) {
       procNode.connect(sink);
       sink.connect(ctx.destination);
 
-      /* 设备被拔掉 / 被别处停用：采集自然结束（而不是留在"正在采集"上不动） */
       const track = stream.getAudioTracks()[0];
       if (track) track.onended = () => { void source.stop(); };
 
@@ -550,11 +434,8 @@ export function createBrowserMicSource(options = {}) {
         }
       });
     },
-    /** 停止。**停止本身不该失败**：它被按停时抛错，只会让人以为出了别的问题 */
     async stop() {
       stopped = true;
-      /* 收尾先于拆设备：把不足一帧的尾巴交出去（低于一帧就不发等于丢掉最后一句话，
-         而"少一句"是这条链上最糟的失败）。它也让"按停不丢最后一句"可被断言。 */
       if (chunkerRef !== null && onFrameRef !== null) {
         const chunker = chunkerRef;
         const emit = onFrameRef;
@@ -563,14 +444,14 @@ export function createBrowserMicSource(options = {}) {
         for (const frame of chunker.flush()) emit(frame);
       }
       if (procNode !== null) {
-        try { procNode.onaudioprocess = null; } catch { /* 见上 */ }
-        try { procNode.disconnect(); } catch { /* 见上 */ }
+        try { procNode.onaudioprocess = null; } catch { }
+        try { procNode.disconnect(); } catch { }
       }
       if (srcNode !== null) {
-        try { srcNode.disconnect(); } catch { /* 见上 */ }
+        try { srcNode.disconnect(); } catch { }
       }
       if (ctx !== null) {
-        try { await ctx.close(); } catch { /* 见上 */ }
+        try { await ctx.close(); } catch { }
       }
       stopTracks(stream);
       stream = null;

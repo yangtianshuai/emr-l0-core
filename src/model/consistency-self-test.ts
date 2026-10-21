@@ -59,7 +59,6 @@ async function main(): Promise<void> {
   });
 
   await test('C4 **会自然变化的项一律不报**：血压/体温/检验值/评分', () => {
-    /* 这是本工具最容易死的地方：把正常波动报成矛盾，医生会立刻不再相信任何提示 */
     const issues = checkConsistency([
       {
         docId: 'doc-A',
@@ -95,8 +94,6 @@ async function main(): Promise<void> {
   });
 
   await test('C6 **不做语义推断**：不同编码之间的矛盾（"无高血压" vs 诊断"高血压"）不报', () => {
-    /* 这条是有意的空白，不是漏做：文本蕴含需要模型，其误报率在没有评测集时无法声称。
-       一条明显误报会让医生此后忽略所有提示 —— 那比不做更糟。  */
     const issues = checkConsistency([
       { docId: 'doc-A', block: block([{ tag: tagOf('PAST-HISTORY', '既往史'), value: '否认高血压病史' }]) },
       { docId: 'doc-B', block: block([{ tag: tagOf('DIAGNOSIS', '诊断'), value: '高血压 2 级' }]) },

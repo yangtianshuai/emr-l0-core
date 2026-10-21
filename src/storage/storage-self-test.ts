@@ -1,6 +1,3 @@
-// 数据库存储自测（D1~D11）。
-// 3) 读不出来 ≠ 没有：口令错、摘要不符、只有结构没有正文，三种都必须显式报错，
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,7 +28,6 @@ const suite = new TestSuite('数据库存储自测', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/**  本环境 node:fs 类型声明缺 rmSync 的 recursive 选项（运行时支持）  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
 let dbSeq = 0;
@@ -51,11 +47,6 @@ function openStore(file: string): { store: WorkStore; applied: string[]; fresh: 
 
 const fixture = (): DocumentModel => buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1 }).doc;
 
-/**
- * 给文档续几条留痕（`rev` 必须连续 —— 留痕账按 rev 成链）。
- *
- * 合成文档的初始留痕是 1 条，验"追加"需要至少三条才知道"只多了新的那几条"。
- */
 function grow(doc: DocumentModel, count: number): DocumentModel {
   const revisions = [...doc.revisions] as RevisionEntry[];
   for (let index = 0; index < count; index += 1) {
@@ -71,19 +62,9 @@ function grow(doc: DocumentModel, count: number): DocumentModel {
   return { ...doc, revisions };
 }
 
-/**
- * 把一份合成文书包成"工作区结构 + 该文书挂在一个住院就诊下"。
- *
- * `PatientRef` 的 `nameMasked` / `gender` 是可选的（匿名数据里可以没有），
- * 而库里的列是 not null —— 于是这里有兜底值。这不是"编数据"，是"库里必须有值"这条
- * 约束的落点；真要区分"没有"与"空串"，该加的是 `null` 语义，那是另一件事。
-  */
 function structureOf(
   doc: DocumentModel,
   docs: StoredDoc[] = [{ docId: doc.docId, title: '入院记录' }],
-  /* 就诊 id 必须与文书自带的一致：外键会拦住"正文挂到一个不存在的就诊上"，
-     而这不是麻烦 —— 实测踩到：夹具里编了一个 V1、文书写的是 V_SYN，
-     结果正文写入被外键拒绝。那次拒绝是对的（它守住的是"孤儿正文"）。  */
   visitId = doc.encounter?.visitId ?? 'V1',
 ): WorkspaceStructure {
   return {
@@ -99,7 +80,6 @@ function structureOf(
 }
 
 async function main(): Promise<void> {
-  /* 开头清一次（容忍失败：残留的旧库文件不会与本次的 `case-N.db` 撞名） */
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch {
@@ -110,8 +90,6 @@ async function main(): Promise<void> {
     const file = freshDbFile();
     const first = open(file);
     assert(first.fresh, '新文件应被认成首次建库');
-    /* 按迁移清单推导而不是写死：下一次加迁移时这条不必改，
-       而"改测试来适配"正是最容易改出漏洞的地方（同 pack-store 自测的处置）。  */
     assertEqual(first.applied, MIGRATIONS.map((migration) => migration.id), '应把清单里的迁移全部执行一遍');
     assertEqual(
       Number(first.db.prepare('select value from storage_meta where key = ?').get('schema_version')?.value),
@@ -151,8 +129,6 @@ async function main(): Promise<void> {
     let code = '';
     try {
       openDatabase(file, {
-        /* 目标版本取当前版本 + 1（而不是写死某个数字）：写死的话，每加一条迁移
-           这里就会先撞上"库里的版本比目标还新"，测的就不再是"迁移失败回滚"了（实测踩到）。  */
         schemaVersion: STORAGE_SCHEMA_VERSION + 1,
         at: '2026-10-12T00:00:00.000Z',
         migrations: [
@@ -206,7 +182,6 @@ async function main(): Promise<void> {
     store.putSealed('reading-grants', { grants: [{ note: '授权给心内科会诊' }] });
     store.close();
 
-    /* 连同 WAL 一起看：只查主库文件会漏掉"已经在 WAL 里但还没 checkpoint"的那部分 */
     const haystack = [file, `${file}-wal`, `${file}-shm`]
       .filter((path) => existsSync(path))
       /* 用 latin1 读：逐字节保留（做子串搜索用二进制/单字节编码才对，UTF-8 解码会把密文读乱） */
@@ -215,7 +190,6 @@ async function main(): Promise<void> {
     for (const needle of ['胸痛', '主诉', '心内科会诊', '入院记录']) {
       assert(!haystack.includes(needle), `库文件里不该出现明文「${needle}」（含 WAL）`);
     }
-    /* 反过来：结构化元数据是明文可查的（这正是"列能查、内容加密"的落点）  */
     assert(haystack.includes(doc.docId), '文书 id 应能直接查到（否则"按患者/就诊查"就无从谈起）');
   });
 
@@ -340,9 +314,6 @@ async function main(): Promise<void> {
     store.saveDocument(doc);
     store.saveSidecars(doc.docId, { suggestions: { items: [] }, annotations: { items: [] } });
 
-    /* 只改摘要列（密文不动）：这是"两列被分别改动过"的最小形态。
-       防篡改本身靠信封的 MAC，这一步查的是"这两列还配不配得上" —— 不查的话，
-       一行被改过的记录会以"能解开、但版本对不上"的形式安静地活着。 */
     opened.db
       .prepare('update sidecars set payload_digest = ? where doc_id = ?')
       .run('0'.repeat(64), doc.docId);
@@ -354,11 +325,6 @@ async function main(): Promise<void> {
   });
 
   await test('D13 从 v1 库迁到 v2：**已有数据不受影响**，且包表就位（迁移必须在有数据的库上验）', () => {
-    /* 这条守的是"迁移"这件事本身：新加的迁移在已经有文书的库上跑，
-       不能动到任何既有行。只在空库上验迁移等于没验 —— 真实环境里升级时库里一定有数据
-       （演示实例自己的库就是一路升上来的）。
-        断言里不写死迁移 id：以后每加一条迁移都要改测试，而"改测试来适配"
-       正是最容易改出漏洞的地方（这条在 D1/D3 上已经吃过一次亏）。  */
     const file = freshDbFile();
     const v1 = openDatabase(file, {
       schemaVersion: 1,
@@ -368,13 +334,7 @@ async function main(): Promise<void> {
     const before = new WorkStore(v1.db, PASS, { iterations: ITER });
     const doc = fixture();
     before.saveStructure(structureOf(doc));
-    /*
-     * 正文直接落 SQL（模拟**旧版本**写下的那些行），不走 `saveDocument`：
-     * v1 的 `document_revisions` 没有 0008 加的那三列，而当前代码只认最新结构 ——
-     * 结构差异由迁移负责，不靠代码两头兼容（两头兼容的必然结局是"留痕悄悄没写进账"）。
-     */
     const sealed = sealFor(DOCUMENT_FORMAT, doc, PASS, { iterations: ITER });
-    /* `saveStructure` 已经建了这一行（占位正文），这里把真正文盖上（旧版本走的也是同一句 update） */
     v1.db
       .prepare(
         'update documents set status = ?, updated_at = ?, rev = ?, payload_format = ?, payload_digest = ?, payload_sealed = ?, stored_at = ? where doc_id = ?',
@@ -390,7 +350,6 @@ async function main(): Promise<void> {
         doc.docId,
       );
     before.saveSidecars(doc.docId, { suggestions: { items: [{ id: 'sg-1' }] }, annotations: { items: [] } });
-    /* 旧版本写下的留痕：只有六列，没有链 —— 升级时真实存在的就是这个形态 */
     for (const revision of doc.revisions) {
       v1.db
         .prepare('insert into document_revisions (doc_id, rev, at, actor_id, op, target_id) values (?, ?, ?, ?, ?, ?)')
@@ -412,12 +371,8 @@ async function main(): Promise<void> {
     );
 
     const after = new WorkStore(v2.db, PASS, { iterations: ITER });
-    /* 正文、旁挂、tokenhash 一条都不能少 */
     assertEqual(after.countDocuments(), statsBefore.documents, '文书条数不能变');
     assertEqual(after.stats().sidecars, statsBefore.sidecars, '旁挂数据条数不能变');
-    /* 唯一被清零的是留痕账：旧账没有链，"留着它"等于留一本看起来像账的东西 ——
-       它能被读出来，却答不出"中间的条有没有被抽走过"。这是 0008 的既定代价，
-       必须在这里当场被看见，不能悄悄发生。 */
     assertEqual(statsBefore.revisions, doc.revisions.length, '前置：旧版本写下的留痕是有的');
     assertEqual(after.stats().revisions, 0, '没有链的旧留痕账按设计丢弃（留痕的权威来源是文书载荷，不是这张表）');
 
@@ -425,7 +380,6 @@ async function main(): Promise<void> {
     assert(loaded.ok && loaded.found, `迁移之后文书仍要能读出来：${loaded.ok ? '' : loaded.message}`);
     assertEqual(JSON.stringify(loaded.ok && loaded.found ? loaded.doc : null), JSON.stringify(doc), '内容也要逐字节相同');
 
-    /* 清零不是终点：下次保存时账会按链**重建**成文书里现在的样子 */
     after.saveDocument(doc);
     const chain = after.revisionChainReport(doc.docId);
     assertEqual(chain.problem, null, `重建出来的账要一路验到尾：${JSON.stringify(chain.problem)}`);
@@ -448,8 +402,6 @@ async function main(): Promise<void> {
     assertEqual(first.loaded, doc.revisions.length, '验过的条数应等于留痕条数');
     assert(!!first.head, '链头要能给出（这是这份文书的账"说到哪一句"）');
 
-    /* 第二次保存：追加，而不是重写 —— 已经在账上的那几行一行都不许动。
-       这一段正是本次改动落点：以前是"整批删掉重写"，删一条留痕看不出任何破绽。 */
     const before = store.stats().revisions;
     const rowsBefore = opened.db
       .prepare('select rev, prev_hash, hash from document_revisions where doc_id = ? order by rev asc')
@@ -470,7 +422,6 @@ async function main(): Promise<void> {
     assertEqual(second.problem, null, `追加之后链仍要全绿：${JSON.stringify(second.problem)}`);
     assert(second.head !== first.head, '多了两条，链头就该往前走');
 
-    /* 账读出来要与文书里的留痕是同一批内容（"账 = 文书留痕"这条等式的日常体检） */
     const ledger = store.documentRevisionLedger(doc.docId);
     assertEqual(ledger.entries.length, grown.revisions.length, '读出来的条数要对');
     assertEqual(
@@ -479,7 +430,6 @@ async function main(): Promise<void> {
       '逐条内容要与文书里的留痕一致',
     );
 
-    /* 改一条：验链要在那一条上停住，并且不许把后面的当好数据 */
     opened.db
       .prepare('update document_revisions set payload = ? where doc_id = ? and rev = ?')
       .run(canonicalRevision({ ...(grown.revisions[1] as RevisionEntry), op: 'delete' }), doc.docId, 2);
@@ -490,7 +440,6 @@ async function main(): Promise<void> {
     assertEqual(tampered.discarded, grown.revisions.length - 1, '断点之后的如实报为"未验证"，而不是丢掉');
     assertEqual(tampered.head, null, '账有断点时不再声称链头');
 
-    /* 篡改之后还来保存：不许覆盖、不许修补 —— 抛错让调用方知道账已经坏了 */
     let code2 = 'OK';
     try {
       store.saveDocument(grown);
@@ -502,7 +451,6 @@ async function main(): Promise<void> {
   });
 
   await test('D15 留痕账：抽掉中间一条 / 留痕被丢弃，都要说得出是哪一类', () => {
-    /* 删掉中间一条（revGap） */
     const file = freshDbFile();
     const opened = open(file);
     const store = new WorkStore(opened.db, PASS, { iterations: ITER });
@@ -514,7 +462,6 @@ async function main(): Promise<void> {
     assertEqual(gapped.problem?.kind, 'revGap', `抽掉中间一条要报序号不连续：${JSON.stringify(gapped.problem)}`);
     assertEqual(gapped.loaded, 1, '断点之前的那条仍然可用');
 
-    /* 留痕被丢弃（文书里的留痕比账上少）：不是"还没保存"，是账被撕过 */
     let code2 = 'OK';
     try {
       store.saveDocument({ ...doc, revisions: doc.revisions.slice(0, 2) });
@@ -526,10 +473,6 @@ async function main(): Promise<void> {
   });
 
   const code = suite.report();
-  /* 收尾：清掉测试库（含 WAL/SHM）。
-     清理不影响结论 —— 本环境的 `rmSync` 被"安全删除"垫片接管，对含 SQLite WAL 的目录
-     偶发失败（实测：抛在最后一行，把一次全绿的运行变成退出码非零）。
-     目录本就在 `.gitignore` 里，且下一轮开头还会再清一次，所以失败只如实说一声。  */
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch (err) {

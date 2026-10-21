@@ -1,13 +1,9 @@
-// 合成文档生成器（测试夹具）。
-
 import { SCHEMA_VERSION, type DocNode, type DocumentModel, type JsonValue, type NodeId, type ProvenanceOrigin } from '../model/types.ts';
 
 export interface SyntheticOptions {
   sections?: number;
   paragraphsPerSection?: number;
-  /** 每个段落是否附带字段节点 */
   fieldsPerParagraph?: number;
-  /** 是否加入表格（会显著增加节点数） */
   withTables?: boolean;
 }
 
@@ -161,15 +157,12 @@ export function buildSyntheticDoc(options: SyntheticOptions = {}): SyntheticDoc 
     createdBy: 'DR_SYN',
     rootId: 'n_root',
     nodes,
-    /* 初始留痕必须带 patch：变更类 op 一律要求非空 patch（否则"留痕可回放"这条不成立）。
-       这里记录根节点的创建。 */
     revisions: [{ rev: 1, at: AT, actorId: 'DR_SYN', op: 'create', targetId: 'n_root', patch: [{ op: 'add', path: '/nodes/n_root', value: nodes.n_root as unknown as JsonValue }] }],
   };
 
   return { doc, ids };
 }
 
-/** 生成约 3200 节点的"100 页"级文档（与工具链 S6 的规模对齐） */
 export function buildLargeSyntheticDoc(): SyntheticDoc {
   return buildSyntheticDoc({ sections: 100, paragraphsPerSection: 9, fieldsPerParagraph: 1, withTables: true });
 }

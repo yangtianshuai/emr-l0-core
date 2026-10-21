@@ -1,5 +1,3 @@
-// 外部真实样例回归：HL7 C-CDA 官方 IG 的入院诊断章节。
-
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +20,6 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text);
 
-/** 把外部片段包进最小文档骨架（保留片段原文，不改写任何标签） */
 function wrap(sectionXml: string): Uint8Array {
   return enc(
     [

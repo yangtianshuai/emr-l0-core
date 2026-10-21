@@ -1,5 +1,3 @@
-// 文书类型自测（T1~T5）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openConfigFixture, writeCorruptRow } from '../testing/config-fixture.ts';
 import {
@@ -60,8 +58,6 @@ async function main(): Promise<void> {
         '体系白名单随视图下发：界面的下拉与后端校验取同一处，不各写一份',
       );
 
-      /* 坏行：口令换过 / 有人改过那一行。必须抛错，不能当作"没配过" ——
-         当成没配过会让所有按类型定位的质控规则静默不判，而没人知道。  */
       writeCorruptRow(fixture, DOC_TYPE_CONFIG_KEY);
       assertEqual(codeOf(() => loadDocTypes(fixture.kv)), 'E_DOC_TYPE_INVALID', '解不开必须报，不许静默降级');
     } finally {
@@ -102,9 +98,6 @@ async function main(): Promise<void> {
         '同一体系内编码重复要报：重复时"这条规则盯的是哪一类文书"就没有确定答案',
       );
 
-      /* 本字典与科室字典的关键差别：判重键是 `system/code`。
-         国标 `WST500/A01` 与院内 `local/A01` 是两个东西，共存是合法配置 ——
-         照抄科室那条"编码唯一"会把它误判成重复，而那正是最需要支持的场景。  */
       const both = saveDocTypes(
         fixture.kv,
         [{ system: 'WST500', code: 'A01', display: '国标甲' }, { system: 'local', code: 'A01', display: '院内甲' }],
@@ -114,7 +107,6 @@ async function main(): Promise<void> {
       assertEqual(docTypeKeyOf(both.items[0]!), 'WST500/A01', '判重键的写法只有一处（`docTypeKeyOf`）');
       assertEqual(docTypeKeyOf(both.items[1]!), 'local/A01', '另一个键虽然编码相同，但体系不同');
 
-      /* 空清单是合法输入（= 清空），不是错误：清空之后 source 回到 store 的空清单 */
       const cleared = saveDocTypes(fixture.kv, [], 'admin');
       assertEqual(cleared.source, 'store', '清空是一次**写入**（不是"没配过"）：谁清的要留在记录里');
       assertEqual(cleared.items.length, 0, '清空之后没有任何类型');
@@ -137,7 +129,6 @@ async function main(): Promise<void> {
       assertEqual(isDocTypeSelectable(loaded, 'WST500', 'WST500.4'), false, '停用的类型不能再被新建的文书选中');
       assertEqual(isDocTypeSelectable(loaded, 'WST500', 'WST500.9'), false, '不存在的编码当然也选不到');
       assertEqual(isDocTypeSelectable(loaded, 'WST500', 'WST500.1'), true, '启用中的照旧可选');
-      /* 体系也要一起比：编码对但体系不对，是另一个东西 */
       assertEqual(isDocTypeSelectable(loaded, 'local', 'WST500.1'), false, '体系不匹配不算选得到');
       assertEqual(
         docTypeDisplayOf(loaded, 'WST500', 'WST500.4'),
@@ -176,7 +167,6 @@ async function main(): Promise<void> {
       assertEqual(docTypesSeeded(fixture.kv), false, '没播过');
       markDocTypesSeeded(fixture.kv);
       assertEqual(docTypesSeeded(fixture.kv), true, '播过就记下来（"我们把类型清了"与"还没建过类型"必须分得开）');
-      /* 标记与内容互不影响：清空类型之后标记仍在，于是重启不会再播种 */
       saveDocTypes(fixture.kv, [], 'admin');
       assertEqual(loadDocTypes(fixture.kv).items.length, 0, '清空就是清空');
       assertEqual(docTypesSeeded(fixture.kv), true, '标记还在（重启不会把类型加回来）');

@@ -1,29 +1,4 @@
 #!/usr/bin/env node
-/**
- * OFD / OFD-H round-trip 验收探针（L0 阶段使用，零 npm 依赖）
- *
- * 用途：在三天内证伪/证实"能不能做出结构化友好的 OFD-H"。
- *   C1 结构完整性      —— OFD.xml / Doc_n/Document.xml / Pages/Page_n/Content.xml
- *   C2 文本真实性      —— 文本是否为真实文本对象（而非路径化图形）★ 关键
- *   C3 机读信息探测    —— 启发式探测自定义命名空间/机读块（标准正文未公开，仅作探针）
- *   C4 签名与覆盖范围  —— 签名存在性 + 被签文件清单（结构化数据是否在签名范围内）
- *   C5 round-trip 完整率 —— 给定机读数据清单，按 code/value 回抽比对
- *
- * 用法：
- *   node ofd-roundtrip-check.mjs <file.ofd>
- *   node ofd-roundtrip-check.mjs <file.ofd> --expect machine-readable.json
- *   node ofd-roundtrip-check.mjs <file.ofd> --expect data.json --json report.json --require-signature
- *   node ofd-roundtrip-check.mjs <file.ofd> --keep      # 保留解包目录便于人工核查
- *
- * --expect 文件格式（二选一）：
- *   [{"code":"WS445.01.001","valueText":"白细胞 9.8"}, ...]
- *   或 {"elements":[{"tag":{"code":"WS445.01.001"},"valueText":"白细胞 9.8","nodeId":"n_12"}, ...]}
- *
- * 退出码：0 = 全部关键检查通过；1 = 存在关键检查失败；2 = 参数/解包错误
- *
- * 重要声明：本脚本不做"是否符合 GB/T 48666—2026"的判定。标准正文尚未公开，
- * C3 为启发式探测，结论仅用于技术选型探针，不得写入对外材料。
- */
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -53,8 +28,6 @@ const HELP = `OFD/OFD-H round-trip 验收探针
   -h, --help                 显示帮助
 `;
 
-/* ----------------------------- 参数解析 ----------------------------- */
-
 function parseArgs(argv) {
   const out = { file: null, expect: null, report: null, keep: false, requireSignature: false, minText: 20, help: false };
   const rest = [];
@@ -71,8 +44,6 @@ function parseArgs(argv) {
   out.file = rest[0] || null;
   return out;
 }
-
-/* ------------------------------- 解包 ------------------------------- */
 
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { stdio: 'ignore', windowsHide: true });
@@ -142,26 +113,9 @@ function readJsonSafe(file) {
   }
 }
 
-/* ------------------------------ 检测器 ------------------------------ */
-
-/**
- * 装饰层（页眉/页脚/页码）的 Layer ID 前缀 —— 这是**跨实现的契约**，
- * 必须与 src/export/ofd.ts 的 `FURNITURE_LAYER_PREFIX` 保持一致。
- *
- * 为什么独立探针也要遵守它：本工具的 C2 统计"正文文本字符数"，而导入器
- * （src/import/ofd-import.ts）也会剥离装饰层。若两边口径不同，交叉验证就从
- * "两个实现互相印证"退化成"两种口径互相打架"—— 那比不验证更误导。
- */
 const FURNITURE_PREFIX = 'layer-furniture';
 
-/**
- * 把装饰层从 XML 文本里分出来（正则实现，与本工具"零依赖独立复算"的定位一致）。
- *
- * 边界说明：按"非嵌套 Layer"处理 —— 嵌套 Layer 是极罕见的畸形结构，
- * 届时统计会偏保守（宁可少剥离，也不误删正文）。
- */
 function splitFurnitureLayers(xmlText) {
-  /* 注意：正则里不能出现裸的 `/`（会被当成除号），故用 [/] 字符组 */
   const reLayer = /<(?:[\w.-]+:)?Layer\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:[\w.-]+:)?Layer>)/g;
   let count = 0;
   let text = '';
@@ -233,11 +187,6 @@ function detectSignatures(files, xmlTexts) {
   return { signatureFiles, signedRefs: [...signedRefs] };
 }
 
-/**
- * 从 Signatures.xml 里取出"FileRef + Digest"清单。
- * 只认**带 Digest 属性**的 Reference：否则会把签名文件里其它用途的 FileRef 也当签名引用，
- * 导致"被签文件数"虚高、甚至把不存在的路径算成缺失。
- */
 function parseSignatureReferences(text) {
   const out = [];
   const re = /<(?:[\w.-]+:)?Reference\b([^>]*)\/?>/g;
@@ -263,8 +212,6 @@ function hasSm3() {
 function sm3Hex(bytes) {
   return createHash('sm3').update(bytes).digest('hex');
 }
-
-/* ------------------------------- 主流程 ------------------------------ */
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -300,7 +247,6 @@ function main() {
     xmlish = files.map((p) => ({ abs: p, rel: relOf(p), text: readTextSafe(p) }));
     const xmlTexts = xmlish.filter((f) => f.text.length > 0);
 
-    /* -- C1 结构完整性 -- */
     const hasOfdEntry = xmlTexts.some((f) => /(^|\/)OFD\.xml$/i.test(f.rel));
     const hasDocument = xmlTexts.some((f) => /Document\.xml$/i.test(f.rel));
     const contentFiles = xmlTexts.filter((f) => /Content\.xml$/i.test(f.rel));
@@ -315,20 +261,13 @@ function main() {
       structureOk ? undefined : '请确认文件确为 OFD（本工具按 ZIP 容器解包）',
     );
 
-    /* -- C2 文本真实性（关键） --
-       口径：**正文文本**，不含装饰层（页眉/页脚/页码）。
-       页眉页码同样是真实文本对象，但它们不是病历内容：算进来会让字符数、
-       数据元回抽、round-trip 全部虚高 —— 验收数字好看，实际是把页码当正文。 */
     const joined = xmlTexts.map((f) => f.text).join('\n');
     const furniture = splitFurnitureLayers(joined);
     const countChars = (s) => s.replace(/<[^>]+>/g, '').replace(/\s+/g, '').length;
     const textCodes = furniture.body.match(RE_TEXTCODE) || [];
-    /* countChars 返回数字：必须求和，不能 join（写成 join('').length 会得到"数字串的长度"，
-       一个更隐蔽的错值 —— 它看起来像个合理的小数字，不会报错） */
     const textChars = textCodes.reduce((sum, s) => sum + countChars(s), 0);
     stats.textCodeCount = textCodes.length;
     stats.textChars = textChars;
-    /* 装饰层单独统计：供与导入器的 decorationsStripped 交叉核对 */
     stats.furnitureLayers = furniture.count;
     stats.furnitureChars = countChars(furniture.text);
     stats.pathObjectCount = (joined.match(RE_PATHOBJ) || []).length;
@@ -349,7 +288,6 @@ function main() {
           : `文本字符低于下限 ${args.minText}，请人工确认是否内容为图像/路径`,
     );
 
-    /* -- C3 机读信息探测（启发式，非判决） -- */
     machine = detectMachineReadable(xmlTexts);
     const machineFound = machine.customPrefixes.length > 0 || machine.keywordHits.length > 0;
     add(
@@ -387,7 +325,6 @@ function main() {
           : '定版前应补齐签名，且签名必须覆盖正文与机读信息',
     );
 
-    /* -- C5 round-trip 完整率 -- */
     if (args.expect) {
       if (!existsSync(args.expect)) throw new Error(`--expect 文件不存在：${args.expect}`);
       const raw = readJsonSafe(args.expect);
@@ -416,11 +353,6 @@ function main() {
       );
     }
 
-    /* -- C6 签名真实性：用本工具自己的 SM3（OpenSSL）**独立复算**被签文件摘要 --
-       这是"第三方可验证"的落点：不调用签名方的任何代码，只按 Signatures.xml 里写的
-       FileRef + Digest 复算，再用同一份公钥信息判断签名是否覆盖了它声称覆盖的内容。
-       注意本工具**不做 SM2 验签**（Node 未暴露 SM2 签名算法，见 src/crypto/ecdsa-sm3.ts 说明），
-       因此结论只到"摘要一致性"这一层，措辞必须如实。 */
     const signatureText = xmlTexts.find((f) => /Signatures?\.xml$/i.test(f.rel));
     const references = signatureText ? parseSignatureReferences(signatureText.text) : [];
     if (references.length === 0) {

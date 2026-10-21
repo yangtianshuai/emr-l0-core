@@ -1,5 +1,3 @@
-// AI 上下文包（getContextForAI）+ 续写切片自测。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { AiContextError, buildAiContext, type AiContextPackage } from './ai-context.ts';
 import { WriteSession } from './session.ts';
@@ -92,7 +90,6 @@ function withoutTimestamp(pkg: AiContextPackage): string {
 }
 
 async function main(): Promise<void> {
-  /* ==================== A 范围与 fail-closed ==================== */
 
   await test('A1 不传范围必须被拒：无范围取数等于把整份病历交给模型', () => {
     const doc = fixtureDoc();
@@ -150,8 +147,6 @@ async function main(): Promise<void> {
 
   await test('C2 预算裁剪：超预算如实计数，与回执口径一致', () => {
     const doc = fixtureDoc();
-    /* 必须在同一组参数下比较预算差异 —— 否则比的是"范围不同"，不是"预算不同"
-       （初版就是这么写错的：小预算用 before/after=5，大预算用 1，结果"预算大反而条目少"）  */
     const scope = { nodeIds: ['n_t'], contextBefore: 5, contextAfter: 5, actor: AI };
     const small = buildAiContext(doc, { ...scope, tokenBudget: 12 });
     assert(small.stats.droppedByBudget > 0, `小预算应丢弃条目，实际 ${small.stats.droppedByBudget}`);
@@ -169,8 +164,6 @@ async function main(): Promise<void> {
 
   await test('C3 上下文角色：目标/上文/下文按文档顺序标注', () => {
     const doc = fixtureDoc();
-    /* 取 2 个上文：紧邻的 paragraph 自身没有文本（内容在子节点里）会被跳过，
-       更前面的 section 才带文本 —— 这是"按节点类型取文本"的真实行为，用例贴着它写 */
     const pkg = buildAiContext(doc, { nodeIds: ['n_t'], contextBefore: 2, contextAfter: 2, actor: AI });
     const roles = pkg.items.map((item) => `${item.role}:${item.nodeId}`);
     assert(roles.includes('target:n_t'), `应含目标条目，实际 ${roles.join(', ')}`);
@@ -190,8 +183,6 @@ async function main(): Promise<void> {
 
   await test('C5 没进上下文的目标要留名字：空段与超预算是两种不同的沉默', () => {
     const doc = fixtureDoc();
-    /* 把关键内容段清空：它就成了"请求点了名、却没有可写文本"的目标。
-       模型永远不会知道有过这一段（它根本没进包），所以只能由上下文回执说出来。 */
     (doc.nodes.n_kt as unknown as { runs: unknown[] }).runs = [];
     const pkg = buildAiContext(doc, { nodeIds: ['n_t', 'n_kt'], contextBefore: 0, contextAfter: 0, actor: AI });
     assertEqual(pkg.items.some((item) => item.nodeId === 'n_kt'), false, '空段确实没进上下文');
@@ -212,14 +203,10 @@ async function main(): Promise<void> {
 
   await test('C6 只有 target 才进丢弃名单：背景被裁掉不构成沉默', () => {
     const doc = fixtureDoc();
-    /* 请求只要字段节点，紧邻的关键内容段只是背景；给一个刚好把它挤掉的预算。
-       背景被裁掉是正常的（它本来就不需要产出），报出来只会变成噪音  */
     const pkg = buildAiContext(doc, { nodeIds: ['n_f'], contextBefore: 1, contextAfter: 0, actor: AI, tokenBudget: 6 });
     assert(pkg.audit.droppedByBudget > 0, `前置：应确有背景条目被挤掉，实际 ${pkg.audit.droppedByBudget}`);
     assertEqual(pkg.audit.droppedTargets.length, 0, '被裁掉的是背景节点，不该进沉默名单');
   });
-
-  /* ==================== D 续写全链路（本切片的目的） ==================== */
 
   await test('D1 续写闭环：上下文 → AI 出建议 → AI 不得自采 → 人工采纳 → 来源链与指标', () => {
     const session = WriteSession.open(fixtureDoc());
@@ -232,8 +219,6 @@ async function main(): Promise<void> {
       { nodeId: 'n_t', text: '患者3天前出现咳嗽，伴发热，最高体温38.5℃。', confidence: 0.82, modelId: 'demo-model' },
       AI,
     );
-    /* 只断言"拿到了 id"：前缀是存储层的实现细节，写死前缀会在改命名时产生假失败；
-       id 是否有效由后面的"能据此采纳"来证明，那才是真正要保证的性质。 */
     assert(suggestion.suggestionId.trim() !== '', `应返回建议 id，实际 ${JSON.stringify(suggestion.suggestionId)}`);
     const nodeBefore = session.getNode('n_t') as unknown as { runs: Array<{ text: string }> };
     assertEqual(nodeBefore.runs[0]?.text, '患者3天前出现咳嗽。', '建议态不得落笔');
@@ -255,7 +240,6 @@ async function main(): Promise<void> {
     assertEqual(node.provenance.modelId, 'demo-model', '来源链应记录模型标识');
     assertEqual(node.humanConfirmed, false, '采纳 ≠ 确认责任，仍待人工确认');
 
-    /* ⑤ 指标：采纳 1 条、未改稿（修改率是质量信号，采纳率只是量） */
     const metrics = session.getMetrics();
     assertEqual(metrics.adoptionRate, 1, '应有 1 条被采纳');
     assertEqual(metrics.editRate, 0, '未人工改稿，修改率应为 0');
@@ -273,7 +257,6 @@ async function main(): Promise<void> {
       '关键内容阈值 0.90，0.82 不得落笔',
     );
 
-    /* 同样的 0.82 落在一般内容节点上则允许 —— 证明档位由目标节点决定 */
     const normal = session.suggestText(
       { nodeId: 'n_t', text: '补充：夜间咳嗽加重。', confidence: 0.82, modelId: 'demo-model' },
       AI,

@@ -1,7 +1,3 @@
-// 服务端文件配置自测（`core/server-config.ts`）。
-// SC1 文件不在 → 写出模板（并说明请填 stateKey），口令退回内置演示值且来源如实报出；
-// SC2 文件在 → 口令 / 盐 / 环境标识 / 装机凭据都按文件来；
-
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -24,11 +20,9 @@ const suite = new TestSuite('服务端文件配置自测', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/* 本环境的 node:fs 声明不完整（缺 mkdtempSync 的完整声明，运行时存在）：局部断言（同其它自测） */
 const fsx = (await import('node:fs')) as unknown as { mkdtempSync: (prefix: string) => string };
 const TEMP = process.env.TEMP ?? process.env.TMP ?? '.';
 const ROOT = fsx.mkdtempSync(join(TEMP, 'l0-server-config-'));
-/* 本环境的声明里 `rmSync` 只带 force / recursive 的一部分：局部断言（同各套件的处置） */
 const rmRecursive = rmSync as unknown as (path: string, options: { recursive?: boolean; force?: boolean }) => void;
 const cleanup = (): void => {
   rmRecursive(ROOT, { recursive: true, force: true });
@@ -42,8 +36,6 @@ async function main(): Promise<void> {
     assert(existsSync(file), '模板必须真的被写下（否则下次启动又要生成一遍，且没人知道该填哪儿）');
     const text = readFileSync(file, 'utf8');
     assert(text.includes('stateKey'), '模板里必须有 stateKey 这一格（它是这把钥匙本身）');
-    /* 模板里不能写死演示口令的值：写了之后"来源"只能报 file，
-       而启动日志里那句"口令用的是内置演示值"就永远不会出现（实测踩到）  */
     assertEqual(text.includes(DEMO_STATE_KEY), false, '模板里不得写出口令值（否则来源会被误报成"来自文件"）');
     assertEqual(stateKeyOf(loaded).source, 'demo', '模板里口令留空 → 来源必须报 demo（现场只能从这里看见）');
     assertEqual(stateKeyOf(loaded).key, DEMO_STATE_KEY, '口令应与内置演示值逐字一致（换掉它，已入库的密文就解不开了）');
@@ -83,10 +75,6 @@ async function main(): Promise<void> {
     assertEqual(bootstrap.configured, true, '给了 token 即为"已配置"');
     assertEqual(importsOf(loaded).qcRulesFile, 'D:/legacy/qc-rules.json', '一次性搬运来源应取文件里的值');
 
-    /* 值就等于内置演示口令时，来源仍必须报 demo（哪怕它是写在文件里的）。
-       判据是"实际生效的口令是不是演示值"，不是"它写在哪儿" ——
-       否则日志里那句" 口令用的是内置演示值"会在最关键的一种现场消失
-       （有人把模板里的演示值原样留在了文件里，却以为文件在就等于配好了）。  */
     const demoFile = join(ROOT, 'demo-value', 'server-config.json');
     mkdirSync(dirname(demoFile), { recursive: true });
     writeFileSync(demoFile, `${JSON.stringify({ stateKey: DEMO_STATE_KEY })}\n`, 'utf8');
@@ -96,7 +84,7 @@ async function main(): Promise<void> {
   await test('SC3 文件在但读不出来 → **抛错**（绝不静默退回演示口令）', () => {
     const bad = join(ROOT, 'bad', 'server-config.json');
     mkdirSync(dirname(bad), { recursive: true });
-    writeFileSync(bad, '{ "stateKey": "x", }\n', 'utf8'); /* JSON 里多一个逗号：最常见的"手改坏" */
+    writeFileSync(bad, '{ "stateKey": "x", }\n', 'utf8');
     assert(
       (() => {
         try {
@@ -142,13 +130,11 @@ async function main(): Promise<void> {
 
   await test('SC4 已有文件时**不覆盖**（两个进程同时启动，只该有一个写成模板）', async () => {
     const file = join(ROOT, 'race', 'server-config.json');
-    /* 先让一个"进程"写下模板 */
     const first = loadServerConfig(file);
     assertEqual(first.source, 'generated', '前置：第一次应生成模板');
     /* 再让"另一个进程"来读：它必须读到已有的那一份，而不是把模板再写一遍 */
     const second = loadServerConfig(file);
     assertEqual(second.source, 'file', '文件已在时应直接读它（不再生成）');
-    /* 手改一份"运维填好的"，再读一次：值必须是我们填的 */
     writeFileSync(file, `${JSON.stringify({ stateKey: 'ops-filled' })}\n`, 'utf8');
     assertEqual(stateKeyOf(loadServerConfig(file)).key, 'ops-filled', '读到的必须是人填的那一份');
     assertEqual(serverConfigPath(ROOT).endsWith('server-config.json'), true, '路径助手应指向固定文件名（不支持改路径）');

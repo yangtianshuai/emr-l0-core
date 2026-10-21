@@ -1,36 +1,11 @@
 #!/usr/bin/env node
-/**
- * S5 · L0 文档模型校验器（schema-validate，零 npm 依赖）
- *
- * 两块能力：
- *   A. 结构校验：按 schema/l0-document-model.schema.json 校验字段合法性
- *      （支持子集：$ref / allOf / oneOf / if-then / type / required / enum / const /
- *        pattern / format:date-time / minLength / minimum / maximum / minItems /
- *        minProperties / items / properties / additionalProperties）
- *      oneOf 采用"恰好匹配 1 个分支"判定，配合 type 常量做判别式校验。
- *   B. 语义校验：11 条硬规则（ValidationCode），这些是 JSON Schema 表达不了的
- *      —— AI 来源完整性、置信度门控、关键内容与标签确认、机读信息陈旧、留痕连续性等。
- *
- * 用法：
- *   node schema-validate.mjs <doc.json|目录> [更多文件...] [--json report.json] [--verbose]
- *   --thr 0.75        一般内容 AI 置信度阈值（默认 0.75）
- *   --thr-key 0.90    关键内容 AI 置信度阈值（默认 0.90）
- *   --skip-schema     只跑语义规则
- *
- * 退出码：0 = 无 error；1 = 存在 error；2 = 参数/读取错误
- *
- * 注意：本校验器是"自家模型的合法性门槛"，不判定是否符合 GB/T 48666—2026。
- * 若用于 CI，建议同时用 ajv（draft 2020-12）复核一遍，本脚本会自动列出未强制校验的关键字。
- */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { hashNodes } from './lib/model-utils.mjs';
 
 const SCHEMA_PATH = resolve(process.cwd(), 'schema/l0-document-model.schema.json');
-const KNOWN_SCHEMA_VERSIONS = new Set(['1.0.0']); // 与 schema/l0-document-model.ts 的 MIGRATION_NOTES 保持同步
-
-/* ------------------------------ CLI ------------------------------ */
+const KNOWN_SCHEMA_VERSIONS = new Set(['1.0.0']);
 
 function parseArgs(argv) {
   const out = { inputs: [], report: null, verbose: false, thr: 0.75, thrKey: 0.9, skipSchema: false, help: false };
@@ -59,8 +34,6 @@ const HELP = `L0 文档模型校验器（S5）
   --skip-schema     只跑语义规则
   -h, --help        显示帮助
 `;
-
-/* --------------------- JSON Schema 子集校验器 --------------------- */
 
 function resolveRef(root, ref) {
   if (typeof ref !== 'string' || !ref.startsWith('#/')) throw new Error(`仅支持本地 $ref，收到：${ref}`);
@@ -176,14 +149,11 @@ function validateAgainst(value, schema, ctx, path) {
   }
 }
 
-/** 静默校验（用于 if / oneOf 判定），返回错误数组 */
 function silentErrors(value, schema, root) {
   const ctx = { root, schemaErrors: [], unsupported: new Set() };
   validateAgainst(value, schema, ctx, '$');
   return ctx.schemaErrors;
 }
-
-/* --------------------------- 语义规则 --------------------------- */
 
 const SEVERITY = { E_MACHINE_READABLE_STALE: 'error' };
 
@@ -195,7 +165,6 @@ function validateSemantics(doc, opts) {
   const nodes = doc && typeof doc.nodes === 'object' && doc.nodes !== null ? doc.nodes : {};
   const existing = new Set(Object.keys(nodes));
 
-  /* E_NODE_ID_DUP */
   const seen = new Set();
   for (const [key, node] of Object.entries(nodes)) {
     if (!node || typeof node !== 'object') continue;
@@ -204,7 +173,6 @@ function validateSemantics(doc, opts) {
     if (node.id) seen.add(node.id);
   }
 
-  /* E_PARENT_MISSING */
   for (const node of Object.values(nodes)) {
     if (!node || typeof node !== 'object') continue;
     if (node.parentId !== null && node.parentId !== undefined && !existing.has(node.parentId)) {
@@ -229,7 +197,6 @@ function validateSemantics(doc, opts) {
   }
   for (const id of existing) if (!reachable.has(id)) push('E_ORPHAN_NODE', `节点不可从 rootId 到达（孤儿或循环引用）：${id}`, id);
 
-  /* AI 来源与门控 */
   const inFinalState = doc.status === 'signed' || doc.status === 'archived';
   for (const node of Object.values(nodes)) {
     if (!node || !node.provenance) continue;
@@ -246,8 +213,6 @@ function validateSemantics(doc, opts) {
     if (inFinalState && node.keyContent === true && node.humanConfirmed !== true) {
       push('E_KEY_CONTENT_UNCONFIRMED', `关键内容节点在 ${doc.status} 状态仍未人工确认`, node.id);
     }
-    /* 机器绑的标签：与关键内容同档。它不是内容而是元数据，会进机读信息被下游直接消费，
-       而医生看正文时看不见它 —— 所以"没确认"这件事必须由门控说出口 */
     if (inFinalState && Array.isArray(node.unconfirmedTags) && node.unconfirmedTags.length > 0) {
       push('E_TAG_UNCONFIRMED', `机器绑定的数据元标签未经人工确认即进入 ${doc.status} 状态（${node.unconfirmedTags.length} 条）`, node.id);
     }
@@ -256,7 +221,6 @@ function validateSemantics(doc, opts) {
     }
   }
 
-  /* 机读信息陈旧 */
   const mr = doc.machineReadable;
   if (mr && typeof mr === 'object') {
     if (mr.modelSchemaVersion !== doc.schemaVersion) {
@@ -280,22 +244,18 @@ function validateSemantics(doc, opts) {
     }
   }
 
-  /* 留痕连续性 */
   if (Array.isArray(doc.revisions)) {
     doc.revisions.forEach((r, i) => {
       if (!r || r.rev !== i + 1) push('E_REVISION_GAP', `留痕 rev 不连续：第 ${i + 1} 条 rev=${r ? r.rev : '缺失'}（应为 ${i + 1}）`);
     });
   }
 
-  /* schemaVersion 登记 */
   if (doc.schemaVersion && !KNOWN_SCHEMA_VERSIONS.has(doc.schemaVersion)) {
     push('E_SCHEMA_VERSION_UNKNOWN', `未登记的 schemaVersion：${doc.schemaVersion}（缺少迁移函数）`);
   }
 
   return issues;
 }
-
-/* ----------------------------- 主流程 ----------------------------- */
 
 function collectJsonFiles(input) {
   const st = statSync(input);

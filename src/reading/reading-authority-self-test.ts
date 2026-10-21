@@ -1,5 +1,3 @@
-// 受控阅读授权平台配置与信任判定自测。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession } from '../core/session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -22,8 +20,6 @@ import {
 import { READING_AUTHORITY_KEY, loadReadingAuthority, saveReadingAuthority } from './reading-authority-store.ts';
 import { openConfigFixture, writeCorruptRow } from '../testing/config-fixture.ts';
 
-/* 本环境的 node:fs / node:os 类型声明不完整（缺 mkdtempSync / tmpdir / rmSync 的 recursive），
-   局部断言（同 src/demo/demo-server.ts 的做法） */
 const fsx = (await import('node:fs')) as unknown as {
   mkdtempSync: (prefix: string) => string;
   rmSync: (path: string, options?: { recursive?: boolean; force?: boolean }) => void;
@@ -37,7 +33,6 @@ const suite = new TestSuite('受控阅读授权平台自测', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/** 一把扮演"院内授权平台"的钥匙（测试自建；产品代码里不存在任何签发钥匙） */
 const PLATFORM_SEED = 'dept-authz-platform-2026';
 const PLATFORM_KEY = demoKeyPair(PLATFORM_SEED);
 const PLATFORM_FINGERPRINT = publicKeyFingerprint(PLATFORM_KEY.publicKey);
@@ -131,8 +126,6 @@ async function main(): Promise<void> {
     assertEqual(config.endpoint, 'https://authz.hospital.local/api/reading', '地址应保留');
     assertEqual(isAuthorityConfigured(config), false, '只配地址**不算**已配置（信任根才是关键）');
   });
-
-  /* ========================= B 信任判定（本套件最要紧的一组） ========================= */
 
   await test('B1 未配置信任根：拒绝**任何**凭据（fail-closed，先于一切判定）', async () => {
     const credential = await issueReadingGrant(grantFor(doc), PLATFORM_SIGNER);

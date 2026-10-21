@@ -1,12 +1,8 @@
-// 接收方公钥目录入库：原先是一个明文 JSON 文件（`<状态目录>/recipient-keys.json`）。
-// 而它是唯一记着收件方公钥的地方（私钥从不进本系统）；
-
 import { EMPTY_KEY_STORE, type RecipientKey, type RecipientKeyStore } from '../core/recipient-keys.ts';
 import { inTransaction, type SqliteDatabase } from './sqlite.ts';
 
 export const RECIPIENT_KEY_TABLE = 'recipient_keys';
 
-/** 库里一行 → 目录条目；形状不对抛错（不静默丢一行：那会让"我导入的接收方不见了"无从排查）  */
 function rowToKey(row: Record<string, unknown>): RecipientKey {
   const keyId = row.key_id;
   const label = row.label;
@@ -40,7 +36,6 @@ function rowToKey(row: Record<string, unknown>): RecipientKey {
   return key;
 }
 
-/** 读全量目录。空表 = 首次使用（正常状态），不是错误  */
 export function loadRecipientKeyStore(db: SqliteDatabase): RecipientKeyStore {
   const rows = db
     .prepare(
@@ -52,7 +47,6 @@ export function loadRecipientKeyStore(db: SqliteDatabase): RecipientKeyStore {
   return { version: 1, keys: rows.map(rowToKey) };
 }
 
-/** 整体写入目录（事务内先清后插：目录的顺序就是界面上的顺序，`sort` 存下来） */
 export function saveRecipientKeyStore(db: SqliteDatabase, store: RecipientKeyStore): void {
   inTransaction(db, () => {
     db.prepare(`delete from ${RECIPIENT_KEY_TABLE}`).run();

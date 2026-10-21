@@ -24,7 +24,6 @@ const AI = { id: 'ai-pipeline', kind: 'ai' };
 interface HttpResult {
   status: number;
   body: Record<string, unknown>;
-  /** 响应头：身份模式（x-l0-auth-mode / x-l0-actor-verified）等诊断信息在这里 */
   headers: Record<string, string>;
 }
 
@@ -104,7 +103,6 @@ async function createDoc(docId?: string): Promise<string> {
   return String(res.body.docId);
 }
 
-/** 读回文档（状态机用例要盯的是 `status` 这个字段） */
 async function docOf(docId: string): Promise<{ status: string }> {
   const res = await call('GET', `/documents/${docId}`);
   return res.body.doc as { status: string };
@@ -128,11 +126,8 @@ async function startServer(): Promise<void> {
   throw new Error('契约服务端启动超时（15s）');
 }
 
-/* ---------------- verified 模式实例（身份收口用例专用） ---------------- */
-
 const VERIFIED_PORT = 8803;
 const VERIFIED_BASE = `http://127.0.0.1:${VERIFIED_PORT}`;
-/* 凭证只出现在测试与启动参数里；服务端内部只保留 SM3 指纹 */
 const HUMAN_TOKEN = 'tok-human-wang';
 const AI_TOKEN = 'tok-ai-pipeline';
 
@@ -169,8 +164,6 @@ async function startVerifiedServer(): Promise<{ kill(): void }> {
 
 async function main(): Promise<void> {
   await startServer();
-
-  /* ===================== A 协议层契约（直打 HTTP） ===================== */
 
   await test('A1 建文档：201 + 返回 docId；初始状态被归一化为新草稿并带新鲜机读块', async () => {
     const docId = await createDoc();
@@ -287,8 +280,6 @@ async function main(): Promise<void> {
     assertEqual(noNodes.body.code, 'E_BAD_DOC', '错误码应为 E_BAD_DOC');
   });
 
-  /* ================= B 端到端：同一套 26 条契约打本服务 ================= */
-
   await test('A9 审签状态机（K12）：送审 → 退回 → 改 → 通过 → 归档，每一步都在留痕里', async () => {
     const docId = await createDoc();
     const cmd = (op: string, params: Record<string, unknown> = {}, actor = HUMAN) =>
@@ -302,12 +293,10 @@ async function main(): Promise<void> {
     assertEqual(submitted.status, 200, `提交审核应成功：${JSON.stringify(submitted.body)}`);
     assertEqual((await docOf(docId)).status, 'reviewing', '提交后应为审核中');
 
-    /* 审核中改内容 → 409（状态冲突，不是 400） */
     const frozen = await cmd('insertText', { nodeId: 'n_t', text: 'X' });
     assertEqual(frozen.status, 409, '审核中改内容应 409');
     assertEqual(frozen.body.code, 'E_REVIEWING_IMMUTABLE', '错误码应指向"审核中不可改"');
 
-    /* 退回不给理由 → 422；给了理由 → 回到草稿 */
     const noNote = await cmd('review', { decision: 'reject' });
     assertEqual(noNote.status, 422, '退回不给理由应 422');
     assertEqual(noNote.body.code, 'E_REVIEW_NOTE_REQUIRED', '错误码应指向"理由必填"');
@@ -327,7 +316,6 @@ async function main(): Promise<void> {
     assertEqual(archived.status, 200, `归档应成功：${JSON.stringify(archived.body)}`);
     assertEqual((await docOf(docId)).status, 'archived', '归档后应为终态');
 
-    /* 留痕要把这条链还原出来 —— 状态和 HTTP 状态码都对了，留痕对不上照样不算数 */
     const audit = await call('GET', `/documents/${docId}/audit`);
     const items = audit.body.items as Array<{ op: string; review?: { decision: string; note?: string } }>;
     const flow = items.filter((item) => ['submit', 'review', 'archive'].includes(item.op));
@@ -345,7 +333,6 @@ async function main(): Promise<void> {
     assertEqual(after.status, 409, '作废后不得再改');
     assertEqual(after.body.code, 'E_DOC_VOID', '错误码应指向"已作废"');
 
-    /* 已签章的文书要先解锁再作废：状态机不提供"绕过一次已生效签章"的通道 */
     const signedDoc = await createDoc();
     await call('POST', `/documents/${signedDoc}/commands`, { body: { op: 'confirmNodes', params: { nodeIds: ['n_t', 'n_f'] } }, actor: HUMAN });
     await call('POST', `/documents/${signedDoc}/commands`, { body: { op: 'sign', params: {} }, actor: HUMAN });
@@ -365,7 +352,6 @@ async function main(): Promise<void> {
     const docId = await createDoc();
     const cmd = (op: string, params: Record<string, unknown> = {}) => call('POST', `/documents/${docId}/commands`, { body: { op, params }, actor: HUMAN });
 
-    /* 留痕：1 = 建文档（fixture 自带），2/3 = 两次插入 */
     await cmd('insertText', { nodeId: 'n_t', text: 'A' });
     await cmd('insertText', { nodeId: 'n_t', text: 'B' });
     const before = await docOf(docId);
@@ -384,14 +370,12 @@ async function main(): Promise<void> {
     assertEqual(JSON.stringify(last?.revertedTo?.revertedRevs ?? []), JSON.stringify([2, 3]), '被跨过的 rev 要记全');
     assertEqual(items.length, 4, '被回滚的那两条留痕仍在账上（历史只能追加）');
 
-    /* 目标不合法：422，且语义明确 */
     for (const rev of [0, 99]) {
       const bad = await cmd('revertTo', { rev });
       assertEqual(bad.status, 422, `rev=${rev} 应被拒`);
       assertEqual(bad.body.code, 'E_REVERT_TARGET', '错误码应指向"目标不是已有版本"');
     }
 
-    /* 区间里有别人写的内容：403（不许做，不是做不了） */
     const shared = await createDoc();
     const write = (actor: { id: string; kind: string }, text: string) =>
       call('POST', `/documents/${shared}/commands`, { body: { op: 'insertText', params: { nodeId: 'n_t', text } }, actor });
@@ -427,11 +411,6 @@ async function main(): Promise<void> {
     assertEqual(httpSummary[2], memorySummary[2], 'HTTP 实现的失败数应与内存实现一致');
   });
 
-  /* ================= D 身份收口（AI 门控的前置条件） =================
-     这一组回答一个问题：门控建立在"调用方自报身份"之上时，它还算门控吗？
-     结论是不算。因此下面的用例既固定"漏洞确实存在"（D2），
-     也固定"收口之后漏洞确实被封住"（D3）。 */
-
   await test('D1 身份未验证必须显式可见：/health 与每次响应头都标注降级', async () => {
     const docId = await createDoc();
     const health = await call('GET', '/health');
@@ -448,7 +427,7 @@ async function main(): Promise<void> {
   await test('D2 对照组：trusted 模式下 AI 自称 human 能直接写病历（这就是要修的问题）', async () => {
     const docId = await createDoc();
     const res = await call('POST', `/documents/${docId}/commands`, {
-      actor: { id: 'ai-pipeline', kind: 'human' }, // ← 自称 human
+      actor: { id: 'ai-pipeline', kind: 'human' },
       body: { op: 'insertText', params: { nodeId: 'n_t', text: 'AI 冒充医生写入' } },
     });
     assertEqual(res.status, 200, 'trusted 模式下这条写入会成功 —— 门控被协议层绕过（这正是必须收口的原因）');
@@ -480,7 +459,7 @@ async function main(): Promise<void> {
       const spoof = await call('POST', `/documents/${docId}/commands`, {
         base: VERIFIED_BASE,
         headers: { authorization: `Bearer ${AI_TOKEN}` },
-        actor: { id: 'DR_WANG', kind: 'human' }, // ← 冒充
+        actor: { id: 'DR_WANG', kind: 'human' },
         body: { op: 'insertText', params: { nodeId: 'n_t', text: 'AI 冒充医生写入' } },
       });
       assertEqual(spoof.status, 403, `身份来自凭证（ai），请求头自称 human 必须无效，实际 ${spoof.status}`);
@@ -494,7 +473,6 @@ async function main(): Promise<void> {
       assertEqual(attempt.actualKind, 'ai', '记录应含凭证真实的 kind');
       assert(!JSON.stringify(attempt).includes(AI_TOKEN), '记录里绝不能出现凭证本身');
 
-      /* ⑥ 同一凭证的合法使用不受影响 */
       const read = await call('GET', `/documents/${docId}`, {
         base: VERIFIED_BASE,
         headers: { authorization: `Bearer ${HUMAN_TOKEN}` },
@@ -529,7 +507,6 @@ async function main(): Promise<void> {
     assertEqual(patient?.nameMasked, '张**', '患者姓名应为掩码');
     assert(!JSON.stringify(withPatient.body).includes('P9001'), '即使显式要求也不得出现 patientId');
 
-    /* ⑤ 目标不存在 → 404（资源问题，而非调用方参数错误） */
     const missing = await call('GET', `/documents/${docId}/ai-context?nodeId=n_not_exist`, { actor: AI });
     assertEqual(missing.status, 404, `目标不存在应 404，实际 ${missing.status}`);
     assertEqual(missing.body.code, 'E_AI_CONTEXT_EMPTY', '错误码应为 E_AI_CONTEXT_EMPTY');

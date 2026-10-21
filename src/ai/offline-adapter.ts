@@ -1,5 +1,3 @@
-// 离线适配器：不做任何外部调用，用确定性模板产出建议。
-
 import type { AiContextItem } from '../core/ai-context.ts';
 import type {
   AiAdapter,
@@ -19,16 +17,9 @@ const MARK: Record<AiSuggestionMode, string> = {
   polish: '（离线模板润色）',
 };
 
-/**
- * 按节点文本生成一条模板建议。
- *
- * 刻意保持确定性（同输入同输出）：这样自测可以断言具体文本，
- * 而"建议通道"的行为一旦被改坏会直接暴露，而不是被随机内容掩盖。
-  */
 function draftFor(item: AiContextItem, mode: AiSuggestionMode): string {
   const base = item.text.trim();
   if (mode === 'polish') {
-    /* 润色：只做可验证的规范化（多余空白 + 结尾标点），不编造内容 */
     const normalized = base.replace(/\s+/g, ' ').replace(/([。；，,;])\1+/g, '$1');
     return normalized === '' ? '（本段为空，无可润色内容）' : normalized;
   }
@@ -56,7 +47,15 @@ export function createOfflineAdapter(config: AiModelConfig): AiAdapter {
           });
           continue;
         }
-        items.push({ nodeId: item.nodeId, text: draftFor(item, request.mode), confidence: OFFLINE_CONFIDENCE });
+        const focus = request.selection && request.selection.nodeId === item.nodeId ? request.selection.text : null;
+        const text = focus === null
+          ? draftFor(item, request.mode)
+          : focus.replace(/\s+/g, ' ').replace(/([。；，,;])\1+/g, '$1').trim();
+        if (text === '') {
+          skipped.push({ nodeId: item.nodeId, code: 'insufficient-context', reason: '选区里没有可润色的文字' });
+          continue;
+        }
+        items.push({ nodeId: item.nodeId, text, confidence: OFFLINE_CONFIDENCE });
       }
       const inputChars = request.context.items.reduce((sum, item) => sum + item.text.length, 0);
       const response: AiSuggestResponse = {

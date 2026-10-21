@@ -1,6 +1,3 @@
-// T18 验收自测：国密算法（SM3 / SM2）与密码学后端。
-// D 密钥与后端契约：演示密钥确定性、私钥越界拒绝、后端元数据完整、环境能力如实上报
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { fromHex, sm3, sm3Hex, toHex, utf8 } from './sm3.ts';
 import {
@@ -51,7 +48,6 @@ const openssl = opensslSm3Available() && opensslSm2CurveAvailable();
 /** 覆盖填充边界：SM3/SHA 系填充对 55/56/63/64 这些长度最敏感（差一字节就全错） */
 const BOUNDARY_SIZES = [0, 1, 2, 31, 32, 33, 55, 56, 57, 63, 64, 65, 119, 120, 127, 128, 1000];
 
-/** GB/T 32918.5 示例向量的输入（私钥、随机数、消息） */
 const VECTOR_D = BigInt('0x3945208F7B2144B13F36E38AC6D39F95889393692860B51A42FB81EF4DF7C5B8');
 const VECTOR_K = BigInt('0x59276E27D506861A16680F3AD9C02DCCEF3CC1FA3CDBE4CE6D54B80DEAC1BC21');
 const VECTOR_MESSAGE = utf8('message digest');
@@ -121,7 +117,6 @@ async function main(): Promise<void> {
     assertEqual(signature.r, VECTOR_R, 'r 必须等于 GB/T 32918.5 示例输出');
     assertEqual(signature.s, VECTOR_S, 's 必须等于 GB/T 32918.5 示例输出');
     assertEqual(sm2Verify(VECTOR_MESSAGE, publicKey, signature), true, '示例签名必须自验通过');
-    /* r = (e + x₁) mod n：r 对上意味着 e 与点运算都对上，故 Z 值计算也正确 */
     assert(sm2Digest(VECTOR_MESSAGE, publicKey) > 0n, 'Z 值摘要应可计算');
     assertEqual(sm2Verify(VECTOR_MESSAGE, publicKey, { r: VECTOR_R, s: VECTOR_S }), true, '直接代入示例 r/s 也应验签通过');
   });
@@ -298,7 +293,6 @@ async function main(): Promise<void> {
     assertEqual(signer.provider, 'software', '软件后端应如实标注 provider');
     assertEqual(signer.publicKeyDer.length, 91, '签名者必须能给出公钥 DER 供第三方验签');
     assertEqual(ecdsaSigner(pair.privateKey).algorithm, ECDSA_CROSS_ALGORITHM, '交叉验证桥必须标明自己是 ECDSA-SM3');
-    /* 放宽为 string 再比较：TS 会把两个字面量类型的比较判为"恒真/无重叠"，那是编译期闲话，不是运行时保证 */
     const crossAlgorithm: string = ECDSA_CROSS_ALGORITHM;
     assert(crossAlgorithm !== SIGNATURE_ALGORITHM, '交叉验证算法标识绝不能与产品算法相同（否则等于谎报）');
     if (openssl) {

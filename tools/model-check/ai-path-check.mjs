@@ -1,25 +1,4 @@
 #!/usr/bin/env node
-/**
- * S4 · AI 路径与门控 契约测试（ai-path-check，零 npm 依赖）
- *
- * 覆盖 DoD 8：把 API 清单第五节的门控规则变成可执行契约。
- * 关键点：所有"被拒"用例必须从 API 层发起 —— 前端拦截不算通过。
- *
- * 三种运行模式：
- *  1) 内存参考实现（默认）：lib/doc-store.mjs，26 条用例应全部通过；
- *  2) HTTP 直连真实后端：--adapter lib/http-store-adapter.mjs --base-url http://host:port
- *     —— 同一套用例，不区分同步/异步实现（所有调用统一 await）；
- *  3) 鉴别力自证：--noncompliant，跑"故意不合规实现"，用例集必须精确识别出 14 个违规点。
- *
- * 用法：
- *   node ai-path-check.mjs
- *   node ai-path-check.mjs --adapter .\tools\model-check\lib\http-store-adapter.mjs --base-url http://127.0.0.1:8790
- *   node ai-path-check.mjs --noncompliant
- *   node ai-path-check.mjs --emit .\samples\s4-signed-doc.json
- *   node ai-path-check.mjs --json report.json -v
- *
- * 退出码：0 = 契约满足（或 --noncompliant 下精确命中设计违规集）；1 = 契约被违反；2 = 参数/加载错误
- */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -36,7 +15,6 @@ const VALID_PLAN = {
   signature: { algorithm: 'SM2' },
 };
 
-/** --noncompliant 下应当被识别出的用例（设计违规点） */
 const EXPECTED_NONCOMPLIANT_FAILURES = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A11', 'A13', 'A14', 'A15', 'A17', 'A18', 'A23'];
 
 function baseDoc() {
@@ -91,8 +69,6 @@ function baseDoc() {
   };
 }
 
-/* ------------------------------ 断言工具 ------------------------------ */
-
 async function expectCode(label, fn, code) {
   let result;
   try {
@@ -112,9 +88,6 @@ function ok(label, cond, detail) {
   if (!cond) throw new Error(`${label}${detail ? `：${detail}` : ''}`);
 }
 
-/* -------------------------------- 用例 -------------------------------- */
-/* 所有 store 调用统一 await：这样同一套用例既能跑同步内存实现，也能直连异步 HTTP 后端 */
-
 const CASES = [
   /* G1：AI 不得直接调用写接口 */
   { id: 'A1', group: 'G1 AI 直接写', name: 'AI 调 insertText 被拒', run: async (s) => expectCode('insertText by ai', () => s.insertText({ nodeId: 'n_t', text: 'X' }, AI), ERR.E_AI_DIRECT_WRITE_FORBIDDEN) },
@@ -123,7 +96,6 @@ const CASES = [
   { id: 'A4', group: 'G1 AI 直接写', name: 'AI 调 setFieldValue 被拒', run: async (s) => expectCode('setFieldValue by ai', () => s.setFieldValue({ nodeId: 'n_f2', value: 39 }, AI), ERR.E_AI_DIRECT_WRITE_FORBIDDEN) },
   { id: 'A5', group: 'G1 AI 直接写', name: 'AI 调 createNode 被拒', run: async (s) => expectCode('createNode by ai', () => s.createNode({ parentId: 'n_p', type: 'text', props: { runs: [{ text: 'x' }] } }, AI), ERR.E_AI_DIRECT_WRITE_FORBIDDEN) },
 
-  /* G2：置信度门控 */
   {
     id: 'A6',
     group: 'G2 置信度门控',
@@ -163,7 +135,6 @@ const CASES = [
     },
   },
 
-  /* G3：建议态不落笔 */
   {
     id: 'A9',
     group: 'G3 建议态',
@@ -187,7 +158,6 @@ const CASES = [
     },
   },
 
-  /* G4：人工确认 */
   {
     id: 'A11',
     group: 'G4 人工确认',
@@ -258,7 +228,6 @@ const CASES = [
     },
   },
 
-  /* G6：并发与幂等 */
   { id: 'A17', group: 'G6 并发幂等', name: 'expectedRev 过期返回冲突', run: async (s) => expectCode('stale rev', () => s.updateNodeProps({ nodeId: 'n_t', patch: { semantic: 'x' } }, HUMAN, { expectedRev: 0 }), ERR.E_REV_CONFLICT) },
   {
     id: 'A18',
@@ -277,7 +246,6 @@ const CASES = [
     },
   },
 
-  /* G7：审计与统计 */
   {
     id: 'A19',
     group: 'G7 审计统计',
@@ -327,7 +295,6 @@ const CASES = [
     },
   },
 
-  /* G8：机读与导出 */
   {
     id: 'A22',
     group: 'G8 机读导出',
@@ -362,7 +329,6 @@ const CASES = [
     },
   },
 
-  /* 数据安全（与 AI 门控同级，始终强制） */
   {
     id: 'A25',
     group: 'G9 数据安全',
@@ -375,8 +341,6 @@ const CASES = [
   },
   { id: 'A26', group: 'G9 数据安全', name: '关键内容节点禁止删除', run: async (s) => expectCode('delete keyContent node', () => s.deleteNode({ nodeId: 'n_f' }, HUMAN), ERR.E_KEY_CONTENT_PROTECTED) },
 ];
-
-/* ------------------------------- 运行 ------------------------------- */
 
 const HELP = `S4 · AI 路径与门控契约测试
 
@@ -407,10 +371,6 @@ function parseArgs(argv) {
   return out;
 }
 
-/**
- * 规范定版流程（用于 --emit）：走完"AI 建议 → 人工采纳并改稿 → 人工确认 → 数据更新 → 机读重算 → 签章"
- * 产出的文档可交给 S5（结构+语义校验）与 S2（序列化保真）做交叉验证，形成工具链闭环。
- */
 async function canonicalSignedDoc(store) {
   const { suggestionId } = await store.suggestText(
     {

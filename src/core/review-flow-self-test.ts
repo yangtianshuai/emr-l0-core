@@ -1,14 +1,3 @@
-// 审签状态机自测（R1~R11）。
-//
-// 这条链以前是这样的：`draft ↔ signed` 一跳 —— "提交审核 / 审核退回 / 作废 / 归档"
-// 四个动作在类型里声明了，却没有迁移代码。结果是"AI 建议→医生确认→正式病历"这条链
-// 在状态层面是断的：文档要么没签，要么已经签了，中间没有"正在被审"这一态。
-//
-// 用例里钉死的是三件事：
-//   1. 状态迁移本身要留痕（谁、何时、什么结论、什么理由）；
-//   2. 审核中内容必须冻结 —— 否则"审核人看的"与"最终签的"不是同一份；
-//   3. 终态（作废/归档）必须有出路说明，而不是"反正改不了"。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WRITE_ERRORS, WriteSession, type Actor } from './session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -29,7 +18,6 @@ function open(): { session: WriteSession; textId: NodeId } {
   return { session: WriteSession.open(doc), textId: ids.textIds[0] as NodeId };
 }
 
-/** 逐条确认全部内容节点（签章的三道门要求这个） */
 function confirmAll(session: WriteSession): void {
   const ids = Object.values(session.document.nodes)
     .filter((node) => node.type === 'text' || node.type === 'field')
@@ -126,7 +114,6 @@ async function main(): Promise<void> {
       '理由要进留痕：事后问"为什么被退回"，答案只能在这里',
     );
 
-    /* 退回的意义就是能改 —— 改完还能再送审 */
     session.insertText({ nodeId: textId, text: '；持续三天' }, AUTHOR);
     confirmAll(session);
     session.submitForReview({}, AUTHOR);
@@ -161,12 +148,10 @@ async function main(): Promise<void> {
     assertEqual(session.auditLog().at(-1)?.voided?.reason, '患者未到诊，误开', '作废理由要进留痕');
     assertEqual(session.auditLog().at(-1)?.op, 'void', '作废自己是一条留痕');
 
-    /* 终态：什么都做不了，且提示要说清出路 */
     assertEqual(codeOf(() => session.insertText({ nodeId: textId, text: 'X' }, AUTHOR)), WRITE_ERRORS.E_DOC_VOID, '作废后不得再改');
     assertEqual(codeOf(() => session.submitForReview({}, AUTHOR)), WRITE_ERRORS.E_DOC_VOID, '作废后不得送审');
     assertEqual(codeOf(() => session.unlock({ reason: '再开一次' }, AUTHOR)), WRITE_ERRORS.E_DOC_VOID, '作废后不得解锁');
 
-    /* 审核中的文书也能作废（送审了才发现开错） */
     const second = open().session;
     second.submitForReview({}, AUTHOR);
     second.voidDoc({ reason: '开错患者' }, AUTHOR);
@@ -229,7 +214,6 @@ async function main(): Promise<void> {
     session.submitForReview({ note: '初稿' }, AUTHOR);
     await session.review({ decision: 'reject', note: '主诉缺持续时间' }, REVIEWER);
     session.insertText({ nodeId: textId, text: '；持续三天' }, AUTHOR);
-    /* 改过的内容是新的未确认内容：不逐条确认就送审，审核通过这一关会被门控拦下 */
     confirmAll(session);
     session.submitForReview({ note: '已补' }, AUTHOR);
     await session.review({ decision: 'approve' }, REVIEWER);
@@ -259,13 +243,11 @@ async function main(): Promise<void> {
   await test('R11 未确认的 AI 内容：送审放行，审核通过这一关才拦下', async () => {
     const { doc, ids } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1, withTables: false });
     const aiId = ids.textIds[0] as NodeId;
-    /* 造一条"AI 写的、还没人逐条确认"的内容 —— 门控唯一认的那一类 */
     const node = doc.nodes[aiId] as Extract<DocNode, { type: 'text' }>;
     node.provenance = { origin: 'ai', modelId: 'local/qwen-med:7b', confidence: 0.9, at: doc.updatedAt };
     node.humanConfirmed = false;
     const session = WriteSession.open(doc);
 
-    /* 送审不是放行，它只是"交给下一个人看"：门控不在这一关 */
     session.submitForReview({}, AUTHOR);
     assertEqual(session.document.status, 'reviewing', '有未确认内容也允许送审');
 
@@ -278,7 +260,6 @@ async function main(): Promise<void> {
     assertEqual(code, WRITE_ERRORS.E_SIGNED_WITH_UNCONFIRMED_AI, '未逐条确认的 AI 内容不得被审核通过');
     assertEqual(session.document.status, 'reviewing', '被拦下后仍停在审核中（不是悄悄退回草稿）');
 
-    /* 审核人通读认可后可以显式声明放行 —— 但"放过了哪一条"必须一并留下 */
     await session.review({ decision: 'approve', acknowledgeUnconfirmed: true }, REVIEWER);
     assertEqual(session.document.status, 'signed', '声明放行后可审核通过');
     const entry = session.auditLog().at(-1);

@@ -1,5 +1,3 @@
-// 时限类质控自测（T1~T10）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { fileURLToPath } from 'node:url';
 import type { DocNode, NodeId } from '../model/types.ts';
@@ -46,7 +44,6 @@ const sectionNode = (sectionCode: string, recordedAt: string): QcNodeView => ({
   sectionCode,
 });
 
-/** 编译样例时限包里的规则（走的是与医院自备包完全相同的路径）  */
 const rules = TIME_PACK.items.map((item) => compileRuleDescriptor(TIME_PACK.packId, item));
 
 function ruleOf(id: string) {
@@ -55,7 +52,6 @@ function ruleOf(id: string) {
   return rule as (typeof rules)[number];
 }
 
-/** 三态收敛：`{hit}` / `{uncertain}` / `null` —— 用例要能分别断言这三种 */
 type Outcome = { kind: 'hit'; detail: string } | { kind: 'uncertain'; reason: string } | { kind: 'none' };
 
 function outcomeOf(id: string, view: QcNodeView, context: QcContext = ctx()): Outcome {
@@ -74,7 +70,6 @@ function codeOf(fn: () => unknown): string {
   }
 }
 
-/** 加小时（毫秒级运算，避免手算时间字符串算错） */
 const plusHours = (base: string, hours: number): string => new Date(Date.parse(base) + hours * 3_600_000).toISOString();
 
 async function main(): Promise<void> {
@@ -100,8 +95,6 @@ async function main(): Promise<void> {
     const outcome = outcomeOf('R-TIME-02', documentNode(plusHours(ADMITTED, 30)), ctx({ admittedAt: undefined }));
     assertEqual(outcome.kind, 'uncertain', '没有基线就不能判定');
     assert(outcome.kind === 'uncertain' && outcome.reason.includes('admittedAt'), `原因要说清缺的是哪一个字段，实际：${outcome.kind === 'uncertain' ? outcome.reason : ''}`);
-    /* 上面那条断言已经排除了 `none` —— 这正是本族规则最容易出错的地方：
-       把"判不了"当成"没命中"，界面上就成了"查过了、没事"。 */
   });
 
   await test('T4 外部导入件 → 未判定（系统内写入时刻不代表它的临床记录时间）', () => {
@@ -122,16 +115,11 @@ async function main(): Promise<void> {
   });
 
   await test('T6 目标定位：文书类型 / 就诊类型 / 章节码三个条件各自生效', () => {
-    /* 同一份"超时"的文书，换个文书类型就不该由这条规则来判 */
     assertEqual(outcomeOf('R-TIME-02', documentNode(plusHours(ADMITTED, 30)), ctx({ docTypeCode: 'WST500.1' })).kind, 'none', '病程记录的规则不应去判入院记录');
     assertEqual(outcomeOf('R-TIME-02', documentNode(plusHours(ADMITTED, 30)), ctx({ visitType: 'outpatient' })).kind, 'none', '门诊文书不适用住院时限');
-    /* 仅段落/文本节点不判：时限是文书级要求，逐段落判会把同一件事重复报很多遍 */
     const textView: QcNodeView = { nodeId: 'n_x' as NodeId, type: 'text', text: '患者诉咳嗽。', tags: [], keyContent: false, recordedAt: plusHours(ADMITTED, 30), origin: 'human' };
     assertEqual(outcomeOf('R-TIME-02', textView).kind, 'none', '文本节点不判时限');
 
-    /* 一条时限要求只报一次：文书级规则（未给 sectionCode）不该逐章节判 ——
-       实测踩到：一份有 7 个章节的入院记录因此得到 8 条一模一样的提示。
-       下面用一个"文档根 + 三个章节"的文档把它钉住。  */
     const docWithSections = {
       n_root: node('n_root', 'document', plusHours(ADMITTED, 30)),
       n_s1: section('n_s1', 'chiefComplaint', plusHours(ADMITTED, 30)),
@@ -145,7 +133,6 @@ async function main(): Promise<void> {
       '文书级时限规则对一份文书只报一次（不逐章节重复）',
     );
 
-    /* 章节级规则：只在 sectionCode 对得上时判定 */
     const bySection = compileRuleDescriptor(
       'qc.demo.section',
       {
@@ -180,12 +167,9 @@ async function main(): Promise<void> {
 
   await test('T8 引擎侧：未判定单独成栏，**不混进命中**，且两者可以同时存在', () => {
     const nodes = {
-      /* 本地书写、超时 → 命中 */
       n_root: node('n_root', 'document', plusHours(ADMITTED, 30)),
-      /* 外部导入、同样超时 → 未判定（系统内写入时刻代表不了它的记录时间）  */
       n_imp: node('n_imp', 'document', plusHours(ADMITTED, 30), 'imported'),
     };
-    /* 传两族的规则：引擎不知道有哪些包，包是通过规则集进来的  */
     const scan = runFormRules(nodes, ctx(), [...FORM_RULES, ...rules]);
 
     assert(scan.hits.some((hit) => hit.ruleId === 'R-TIME-02'), `超时的病程记录应命中，实际命中：${JSON.stringify(scan.hits.map((h) => h.ruleId))}`);
@@ -194,8 +178,6 @@ async function main(): Promise<void> {
       scan.unevaluated.some((item) => item.reason.includes('导入')),
       `未判定的原因要说得具体，实际：${JSON.stringify(scan.unevaluated.map((item) => item.reason))}`,
     );
-    /* 关键：未判定不进 hits —— 混进去会让"没法判"看起来像"查出问题了"，
-       反过来若静默丢弃，又会让"没判"看起来像"没问题"。两头都不行，所以单独一栏。  */
     assert(
       scan.hits.every((hit) => !hit.detail.includes('无法计算')),
       '未判定的条目不得出现在命中里',
@@ -205,8 +187,6 @@ async function main(): Promise<void> {
   });
 
   await test('T9 门诊文书：形式类照常判，时限类如实"未判定"（这就是演示工作区的实际形态）', () => {
-    /* 门诊病历没有"入院时间"，于是时限规则对它一律未判定 —— 这不是缺陷，是事实。
-       用例把它钉住：界面必须显示"另有 M 条未判定"，而不是让医生以为"都查过了"。 */
     const outpatientCtx: QcContext = { now: NOW, docTypeCode: 'WST500.2', visitType: 'outpatient' };
     const nodes = {
       n_root: node('n_root', 'document', '2026-10-08T01:00:00Z'),
@@ -215,10 +195,6 @@ async function main(): Promise<void> {
     const scan = runFormRules(nodes, outpatientCtx, [...FORM_RULES, ...rules]);
 
     assert(scan.hits.some((hit) => hit.ruleId === 'R-FORM-01'), '形式类规则应照常命中（它不需要入院时间）');
-    /* 门诊文书上两条时限规则不适用（它们定位的是入院记录 / 病程记录）——
-       这既不是"命中"也不是"未判定"，而是"这条规则压根不管这类文书"。
-       三态必须分清楚：把"不适用"报成"未判定"会让未判定列表里堆满无关条目，
-       而那个列表一旦变成噪声，医生就不会再看它了。  */
     assertEqual(
       scan.unevaluated.filter((item) => item.ruleId.startsWith('R-TIME-')).length,
       0,
@@ -250,7 +226,6 @@ async function main(): Promise<void> {
   process.exit(suite.report());
 }
 
-/** 只构造引擎会读的字段（同 `qc-self-test.ts` 的处置：用断言绕过其余必填项） */
 function node(id: string, type: string, recordedAt: string, origin = 'human'): DocNode {
   return { id, type, parentId: null, order: 0, rev: 1, provenance: { origin, at: recordedAt } } as unknown as DocNode;
 }

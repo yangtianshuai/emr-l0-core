@@ -1,5 +1,3 @@
-// 知识资产包 · 通用层自测（P1~P8）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
   PackRegistry,
@@ -102,8 +100,6 @@ async function main(): Promise<void> {
     try {
       store.load(rawPack({ name: '演示规则包（换一份内容）' }));
     } catch (err) {
-      /* 新模型里没有版本可比，要说清的是"同一个 packId 只对应一份内容"，
-         并且把出路写出来（显式 replace）—— 让人知道下一步能做什么。  */
       assert(
         String((err as Error).message).includes('两份内容不同') && String((err as Error).message).includes('replace'),
         `冲突提示要说清"两份内容不同"并给出出路，实际：${(err as Error).message}`,
@@ -129,7 +125,6 @@ async function main(): Promise<void> {
       '两条同名条目"谁生效"只能靠装载顺序 —— 而顺序不该决定判定结果',
     );
 
-    /* 不同类别之间不该误伤：模板包与规则包各有各的 X-1 是正常的 */
     const other = new PackRegistry({ rule: ['qc-rule/1'], template: ['doc-template/1'], term: [] });
     other.load(rawPack());
     other.load(rawPack({ packId: 'tpl.demo', kind: 'template', engineApi: 'doc-template/1', items: [{ itemId: 'X-1' }] }));
@@ -167,7 +162,6 @@ async function main(): Promise<void> {
     first.load(rawPack({ packId: 'qc.demo.b', items: [{ itemId: 'Y-1' }] }));
 
     const second = registry();
-    /* 装载顺序相反、且包内元数据键序被打乱 */
     second.load({
       items: [{ itemId: 'Y-1' }],
       engineApi: 'qc-rule/1',
@@ -189,11 +183,9 @@ async function main(): Promise<void> {
     const loaded = store.get('qc.demo.a') as Pack;
     assertEqual(loaded.items[0]?.enabled, true, 'enabled 缺省应补成 true（运行时的包结构要确定）');
 
-    /* 装载方事后改传入的对象，不得影响已装载的包 —— 否则"载的是哪一版"失去意义 */
     source.items[0]!.itemId = '被改掉了';
     assertEqual(store.get('qc.demo.a')?.items[0]?.itemId, 'X-1', '装载后应持有副本，不受外部对象影响');
 
-    /* 结构级证明"包是数据不是代码"：包里若含函数，JSON 往返会丢掉它，两者就不再相等  */
     const stored = store.get('qc.demo.a') as Pack;
     assertEqual(JSON.parse(JSON.stringify(stored)), stored, '包必须能被 JSON 无损往返（函数/类实例都会在这里暴露）');
     assertEqual(PACK_NOT_IN_DOCUMENT, true, '包不是文档内容，不进签名覆盖范围');

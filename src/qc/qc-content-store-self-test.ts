@@ -1,5 +1,3 @@
-// 内涵质控配置落库自测（`qc/qc-content-store.ts`）。
-
 import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -120,7 +118,6 @@ async function main(): Promise<void> {
       assertEqual(reloaded.rules.length, 1, '重新读回来的可用条数一致');
       assertEqual(reloaded.rulesRejected.length, 2, '重新读也要报同一批丢弃（口径只有一处）');
 
-      /* 清单本体不是数组 → 拒绝保存（存下去等于让"规则清单"变成一句假话） */
       assertEqual(
         codeOf(() => saveQcContentConfig(fixture.kv, { engine: { kind: 'none' }, rules: { ruleId: 'x' } as never }, 'ADMIN')),
         'E_QC_CONFIG_INVALID',
@@ -164,14 +161,12 @@ async function main(): Promise<void> {
       assertEqual(again.ran, false, '记了账就不再碰旧文件');
       assertEqual(again.imported, 0, '第二次不该再导入');
 
-      /* 这条才是记账的意义：管理员清空了规则，旧文件不许把它导回来（清除是安全动作）  */
       const cleared = saveQcContentConfig(fixture.kv, { engine: { kind: 'none' }, rules: [] }, 'ADMIN', { at: AT });
       assertEqual(cleared.loaded.rules.length, 0, '前置：规则已清空');
       const after = importQcRulesOnce({ workStore: fixture.workStore, kv: fixture.kv, file, at: AT });
       assertEqual(after.ran, false, '清空之后再启动，旧文件仍不该被读');
       assertEqual(loadQcContentConfig(fixture.kv).rules.length, 0, '规则必须保持空（被导回来就是"我清掉的东西自己长回来了"）');
 
-      /* 没有旧文件时不记账：部署时把旧文件放进来的场景仍然该被搬一次 */
       const fresh = openConfigFixture({ prefix: 'l0-qc-content-' });
       try {
         const missing = importQcRulesOnce({ workStore: fresh.workStore, kv: fresh.kv, file: join(ROOT, 'not-there.json'), at: AT });

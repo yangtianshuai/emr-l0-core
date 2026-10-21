@@ -1,32 +1,20 @@
-// 预问诊接入凭据（机对机）。
-// scrypt 的代价是为"人记的口令"设计的：短、可猜、值得拖慢穷举。机对机密钥是随机串，
-
 import nodeCrypto from 'node:crypto';
 import { CONFIG_KEY_PREFIX, type ConfigKv } from '../storage/config-kv.ts';
 
 export const PREVISIT_ACCESS_KEY = `${CONFIG_KEY_PREFIX}previsit`;
 
-/** 请求头名称（外部系统按这个带密钥） */
 export const PREVISIT_KEY_HEADER = 'x-previsit-key';
 
 const HASH_SCHEME = 'sha256';
 const SALT_BYTES = 16;
 
-/**
- * 密钥长度下限。
- *
- * 24 个字符是"至少能装下 128 位随机数的 base64"的量级；短的、像人名的、像 `his123456`
- * 的字符串在这个位置上是常态，而它一旦被猜中，就等于任何人都能往任意患者名下写预问诊。
- */
 export const MIN_KEY_LENGTH = 24;
 /** 上限只为挡住"误粘贴一整篇文档"，不是安全边界 */
 export const MAX_KEY_LENGTH = 512;
 
 export interface PrevisitAccessRecord {
   version: 1;
-  /** 是否要求带密钥 */
   enabled: boolean;
-  /** `sha256$<salt-b64>$<hash-b64>`；`null` = 没有密钥 */
   keyHash: string | null;
   updatedAt: string;
   updatedBy: string;
@@ -34,13 +22,10 @@ export interface PrevisitAccessRecord {
 
 export interface PrevisitAccessView {
   enabled: boolean;
-  /** 密钥是否就位（界面只报这个，不回显值）  */
   keyPresent: boolean;
-  /** 真正生效 = 已启用且密钥就位 */
   effective: boolean;
   updatedAt: string | null;
   updatedBy: string | null;
-  /** 给界面的一句实话：现在到底是什么状态、谁会写不进来 */
   note: string;
 }
 
@@ -50,12 +35,6 @@ export function hashAccessKey(key: string): string {
   return `${HASH_SCHEME}$${salt.toString('base64')}$${digest.toString('base64')}`;
 }
 
-/**
- * 比对密钥。
- *
- * 用 `timingSafeEqual`：按字节提前返回的写法会泄漏"前几位对了"，
- * 而这里唯一的秘密就是一串随机字符，慢慢试出来是有意义的攻击。
- */
 export function verifyAccessKey(key: string, encoded: string): boolean {
   const parts = String(encoded ?? '').split('$');
   if (parts.length !== 3 || parts[0] !== HASH_SCHEME) return false;
@@ -68,7 +47,6 @@ export function verifyAccessKey(key: string, encoded: string): boolean {
 
 export type KeyValidation = { ok: true; key: string } | { ok: false; code: string; message: string };
 
-/** 校验一个准备保存的密钥：不合格就明说哪里不合格，不做"帮你改一改" */
 export function validateAccessKey(raw: unknown): KeyValidation {
   const key = typeof raw === 'string' ? raw : '';
   if (key.length < MIN_KEY_LENGTH) {
@@ -91,20 +69,12 @@ export function loadAccess(kv: ConfigKv): PrevisitAccessRecord | null {
   return kv.read<PrevisitAccessRecord>(PREVISIT_ACCESS_KEY);
 }
 
-/**
- * 给界面的视图。
- *
- * `authMode` 只影响"从没配过"这一种状态的措辞：演示模式下它放行，必须说出来 ——
- * 界面上一句"未配置"，很容易被读成"已经安全了"。
- */
 export function describeAccess(record: PrevisitAccessRecord | null, authMode: string): PrevisitAccessView {
   const keyPresent = typeof record?.keyHash === 'string' && record.keyHash !== '';
   const enabled = record?.enabled === true;
   const effective = enabled && keyPresent;
   let note: string;
   if (record === null) {
-    /* 演示模式不给提示语：界面上那一格留给"配置本身是什么状态"，徽标已写明"未校验"。
-       严格模式仍然要说一句 —— 那里不是提醒，是"现在写不进来、先配密钥"。 */
     note = authMode === 'strict'
       ? '未配置：严格模式下写入一律被拒（先在这里设置密钥，或显式关闭校验）'
       : '';
@@ -128,9 +98,7 @@ export function describeAccess(record: PrevisitAccessRecord | null, authMode: st
 export type KeyAction = 'set' | 'cleared' | 'unchanged';
 
 export interface AccessPatch {
-  /** 不给 = 不改 */
   enabled?: boolean;
-  /** 三态：不给 = 不改 / `null` = 清除 / 字符串 = 设新值 */
   key?: string | null;
 }
 
@@ -139,12 +107,6 @@ export interface SaveAccessResult {
   keyAction: KeyAction;
 }
 
-/**
- * 保存配置。
- *
- * 密钥三态与采集配置同一套（不传 / null / 字符串）：按钮就在旁边，语义含糊一次的代价是
- * "想清除却把上次那个密钥又存了一遍"，而界面上看起来是成功的。
- */
 export function saveAccess(
   kv: ConfigKv,
   patch: AccessPatch,
@@ -184,12 +146,6 @@ export type AccessMode = 'key' | 'off' | 'unconfigured-demo';
 
 export type AccessCheck = { ok: true; mode: AccessMode } | { ok: false; code: string; message: string };
 
-/**
- * 判定一次写入能不能进来。
- *
- * `allowUnconfigured` 对应演示模式：只对"从没配过"放行，对"已启用但没密钥"仍然拒绝 ——
- * 后者是配置错误，不是"还没上锁"。
-  */
 export function checkAccess(input: {
   record: PrevisitAccessRecord | null;
   presentedKey: string;

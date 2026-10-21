@@ -1,5 +1,3 @@
-// 预问诊接入凭据自测（A1~A6）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import type { ConfigKv } from '../storage/config-kv.ts';
 import {
@@ -21,9 +19,8 @@ const suite = new TestSuite('预问诊接入凭据自测', [
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
 const NOW = '2026-10-17T03:00:00.000Z';
-const KEY = 'Zx7Qp2Lm9Rt4Vb8Nc3Hf6Jd1Kw5Ys0Ag'; // 32 个字符：够长、无空白
+const KEY = 'Zx7Qp2Lm9Rt4Vb8Nc3Hf6Jd1Kw5Ys0Ag';
 
-/** 内存版配置层：`read` 与真实实现一样，没有就是 null  */
 function memoryKv(): ConfigKv & { dump(): Record<string, unknown> } {
   const store = new Map<string, unknown>();
   return {
@@ -122,7 +119,6 @@ async function main(): Promise<void> {
   });
 
   await test('A6 准入判定：未配置看模式、关闭放行、启用后缺头/错钥都拒', () => {
-    /* 从没配过：演示放行（并标注），严格拒绝 */
     assertEqual(checkAccess({ record: null, presentedKey: '', allowUnconfigured: true }).ok, true, '演示模式放行');
     assertEqual(
       (checkAccess({ record: null, presentedKey: '', allowUnconfigured: true }) as { mode: string }).mode,
@@ -131,11 +127,9 @@ async function main(): Promise<void> {
     );
     assertEqual(checkAccess({ record: null, presentedKey: '', allowUnconfigured: false }).ok, false, '严格模式拒绝');
 
-    /* 显式关闭校验 */
     const off: PrevisitAccessRecord = { version: 1, enabled: false, keyHash: hashAccessKey(KEY), updatedAt: NOW, updatedBy: 'a' };
     assertEqual(checkAccess({ record: off, presentedKey: '', allowUnconfigured: false }).ok, true, '关闭校验时严格模式也放行（这是管理员的选择）');
 
-    /* 启用 + 有密钥 */
     const on: PrevisitAccessRecord = { version: 1, enabled: true, keyHash: hashAccessKey(KEY), updatedAt: NOW, updatedBy: 'a' };
     assertEqual(checkAccess({ record: on, presentedKey: KEY, allowUnconfigured: false }).ok, true, '对得上就放行');
     const missing = checkAccess({ record: on, presentedKey: '', allowUnconfigured: true });
@@ -145,7 +139,6 @@ async function main(): Promise<void> {
     assertEqual(wrong.ok, false, '错钥必须拒');
     assertEqual((wrong as { code: string }).code, 'E_PREVISIT_AUTH_BAD_KEY', '要说"不对"');
 
-    /* 启用 + 没密钥：这是配置不完整，不是"没上锁" */
     const broken: PrevisitAccessRecord = { version: 1, enabled: true, keyHash: null, updatedAt: NOW, updatedBy: 'a' };
     const brokenCheck = checkAccess({ record: broken, presentedKey: '', allowUnconfigured: true });
     assertEqual(brokenCheck.ok, false, '启用但没密钥：演示模式也不放行');

@@ -97,14 +97,6 @@
       "reviewedAt": "2026-10-10"
     },
     {
-      "fingerprint": "2e27c11d9b34b3ad",
-      "rule": "带标签的身份信息",
-      "where": "src/security/phi-scan-self-test.ts",
-      "note": "自测文件头部注释里的**说明措辞**（'身份证号：…' 这类文字），不是数据",
-      "reviewedBy": "assistant（回源核对，待 owner 复核）",
-      "reviewedAt": "2026-10-10"
-    },
-    {
       "fingerprint": "da12495818533e5d",
       "rule": "带标签的身份信息",
       "where": "src/security/phi-scan-self-test.ts",

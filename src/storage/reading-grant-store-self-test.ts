@@ -1,6 +1,3 @@
-// 授权登记入库自测（`storage/reading-grant-store.ts` 与 `reading-grants-import.ts`）。
-// RG4 按 `doc_id` / `revoked` 筛选走列，不需要口令（列表与统计不该付派生的代价）；
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { FIXTURE_ITERATIONS, openConfigFixture, type ConfigFixture } from '../testing/config-fixture.ts';
 import { saveSealedPayload } from '../core/store.ts';
@@ -26,7 +23,6 @@ const suite = new TestSuite('授权登记入库自测', [
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 const AT = '2026-10-14T00:00:00.000Z';
 
-/** 另开一个连接：断言"库里那一行长什么样"，不听内存里那份索引自报 */
 function connect(fixture: ConfigFixture): SqliteDatabase {
   return openDatabase(fixture.dbFile, { schemaVersion: STORAGE_SCHEMA_VERSION, migrations: MIGRATIONS, at: AT }).db;
 }
@@ -150,7 +146,6 @@ async function main(): Promise<void> {
     const db = connect(fixture);
     try {
       saveReadingGrant(db, fixture.passphrase, recordOf('g1', 'd1'), { iterations: FIXTURE_ITERATIONS, at: AT });
-      /* 只弄坏载荷那一行（模拟"口令换过 / 有人改过它"） */
       db.prepare('update reading_grants set payload_sealed = ? where grant_id = ?').run('这不是一个信封', 'g1');
 
       const one = loadReadingGrant(db, fixture.passphrase, 'g1');
@@ -227,7 +222,6 @@ async function main(): Promise<void> {
         assertEqual(countReadingGrants(otherDb).total, 1, '库里那条不该被动');
         assertEqual(other.workStore.ledgerHas(READING_GRANTS_LEDGER_ID), true, '这种情况要记账（否则每次启动都要判一次）');
 
-        /* ⑤ 旧文件读不出来 → 报问题且不记账（修好之后还能再试）  */
         const broken = `${other.dir}/broken.json`;
         saveSealedPayload(broken, { version: 1, grants: [] }, 'wrong-passphrase', { iterations: FIXTURE_ITERATIONS, at: AT });
         const fresh = openConfigFixture({ prefix: 'l0-reading-grants-import-' });
@@ -237,10 +231,9 @@ async function main(): Promise<void> {
           assert(failed.problem !== null, '读不出来必须如实报出来');
           assertEqual(fresh.workStore.ledgerHas(READING_GRANTS_LEDGER_ID), false, '**读不出来不许记账**：记了就再也不会重试');
 
-          /* ⑥ 个别条目形状不对 → 报出来，好的照常导入 */
           const mixed = writeLegacyFile(fresh, [
             { credential: { grant: { grantId: 'g1', docId: 'd1' } }, readCount: 0, revoked: false, reads: [] },
-            { credential: { grant: { grantId: 'g2' } } } /* 缺 docId */,
+            { credential: { grant: { grantId: 'g2' } } },
             { nothing: true },
           ], 'mixed.json');
           const partial = importReadingGrantsOnce({ workStore: fresh.workStore, db: freshDb, passphrase: fresh.passphrase, file: mixed, options: { iterations: FIXTURE_ITERATIONS, at: AT } });

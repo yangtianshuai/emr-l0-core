@@ -1,9 +1,6 @@
-// 采集层的入站面：从一次 `POST /api/dictation/capture/segment` 里取出那一段音频。
-
 import { CAPTURE_AUDIO_FIELD, CaptureError } from './capture.ts';
 
 export interface UploadedAudio {
-  /** 客户端给的文件名（用于留痕/排障，不参与任何判定） */
   filename: string;
   bytes: Uint8Array;
 }
@@ -32,7 +29,6 @@ function ascii(bytes: Uint8Array): string {
   return new TextDecoder('latin1').decode(bytes);
 }
 
-/** 取 `Content-Type` 里的 boundary（带或不带引号都认；缺了就直接拒） */
 function boundaryOf(contentType: string | undefined): string {
   const raw = contentType ?? '';
   if (!/^multipart\/form-data\b/i.test(raw.trim())) {
@@ -54,10 +50,8 @@ interface RawPart {
   body: Uint8Array;
 }
 
-/** 按 `--boundary` 切出各分段（不判字段名，留给调用方判） */
 function splitParts(body: Uint8Array, boundary: string): RawPart[] {
   const delimiter = new TextEncoder().encode(`--${boundary}`);
-  /** 正文与下一个分段之间的定界：`\r\n--boundary` */
   const nextDelimiter = new Uint8Array(CRLF.byteLength + delimiter.byteLength);
   nextDelimiter.set(CRLF, 0);
   nextDelimiter.set(delimiter, CRLF.byteLength);
@@ -68,7 +62,6 @@ function splitParts(body: Uint8Array, boundary: string): RawPart[] {
   const parts: RawPart[] = [];
   let cursor = first + delimiter.byteLength;
   for (;;) {
-    /* 定界符后面的两种情况：`--` = 结束；`\r\n` = 还有分段 */
     if (body[cursor] === 45 && body[cursor + 1] === 45) break;
     cursor = indexOfBytes(body, CRLF, cursor) + 2;
     if (cursor <= 1) break;
@@ -78,8 +71,6 @@ function splitParts(body: Uint8Array, boundary: string): RawPart[] {
     }
     const headers = ascii(body.subarray(cursor, headerEnd));
     const bodyStart = headerEnd + HEADER_END.byteLength;
-    /* 正文结束于下一个 `\r\n--boundary`：按规范 boundary 不得出现在正文里，
-       发送方（我们自己的前端）随机生成它，所以"第一个命中"就是真边界。  */
     const nextBoundary = indexOfBytes(body, nextDelimiter, bodyStart);
     if (nextBoundary === -1) {
       throw new CaptureError('E_CAPTURE_UPLOAD_INVALID', '分段没有结束标记：请求体被截断（拒绝按"读到的部分"当完整音频）');
@@ -90,7 +81,6 @@ function splitParts(body: Uint8Array, boundary: string): RawPart[] {
   return parts;
 }
 
-/** `content-disposition` 里的 `name` / `filename`（值可能带引号） */
 function dispositionOf(headers: string): { name: string; filename: string } {
   const line = headers.split(/\r?\n/).find((item) => /^content-disposition\s*:/i.test(item)) ?? '';
   const pick = (key: string): string => {
@@ -100,12 +90,6 @@ function dispositionOf(headers: string): { name: string; filename: string } {
   return { name: pick('name'), filename: pick('filename') };
 }
 
-/**
- * 取出这一段音频。
- *
- * `field` 默认是 ASR 要的字段名（`audio`）—— 前端与我们对齐的也是它：
- * 一个字段、一个文件、一次一段。多给分段一律拒，而不是"挑一个看着像的"。
- */
 export function parseMultipartAudio(
   contentType: string | undefined,
   body: Uint8Array,

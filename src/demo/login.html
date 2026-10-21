@@ -7,39 +7,11 @@
 <link rel="stylesheet" href="/ui.css" />
 </head>
 <body>
-<!--
-  管理后台的独立登录页（/login）。
-
-  独立成页的原因：
-  1. 未登录时配置体的 DOM 不下发。登录控件与配置体同页时，hidden 只做视觉隐藏，
-     五个子页签、字段名与签名映射的占位符仍在响应体里。
-  2. /admin 未登录时由服务端 302 到本页（见 demo-server 的 /admin 路由），不由前端切换显隐，
-     地址栏、页面内容与会话状态三者一致。
-  3. 接入院内统一身份（SSO / 多因素，见 T23）时，替换入口是本页。
-
-  本页有两种形态，由服务端二选一下发：
-  - 登录（FORM:LOGIN）：库里已有账号。
-  - 首次初始化（FORM:BOOTSTRAP）：库里一个账号都没有。
-  不需要的那一个由服务端整段裁掉（见 renderLoginPage），不发到前端。
-
-  防护范围：可挡住误入配置页随手改与无意的脚本调用；有意冒充不在范围内（没有 TLS、没有多因素），
-  相关能力属 T23（鉴权 / 租户 / 限流 / 审计防篡改）。
-
-  口令纪律：
-  - 口令只用于登录这一次；登录后浏览器只留一个 HttpOnly 会话 cookie。
-  - 口令从不下发到页面上，只存在数据库里。
-  - 登录失败统一提示 "用户名或口令不正确"；"已停用" 在口令验证通过之后才报出。
--->
 <main class="login-body">
   <div class="login-card">
-        <!-- 产品 LOGO（emr-l0-core）：与管理后台左栏那一枚是同一份图形、同一个位置关系
-       （见 admin.html 的 .admin-brand-row）—— 两处必须一起改，图形 = 项目名里的 "l0"。
-       登录页是这套系统的门面，进来第一眼看到的牌子不该和里面不是同一个。
-       用 .admin-brand-logo 复用同一套样式（尺寸、令牌着色），只把"与标题同排"这件事写在 .login-brand。 -->
     <div class="login-brand">
       <svg class="admin-brand-logo" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
         <defs>
-                <!-- id 与 admin.html 里那个不同名：将来两页若被拼进同一份文档，同名 id 会让后一个失效 -->
           <linearGradient id="emrBrandGradLogin" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
             <stop class="brand-stop-a" offset="0" />
             <stop class="brand-stop-b" offset="1" />
@@ -56,7 +28,6 @@
 
     <!--FORM:LOGIN-->
     <form id="loginForm" class="login-form" autocomplete="on">
-            <!-- 字段名用「账号」：口令不决定角色，角色是账号自身的属性 -->
       <label class="cfg-admin">账号
         <input id="loginUsername" required placeholder="数据库里的账号名，如 admin" autocomplete="username" />
       </label>

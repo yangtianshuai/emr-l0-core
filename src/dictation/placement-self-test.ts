@@ -1,9 +1,5 @@
-// 语音落位可配置形态自测（V1）。
-
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-/* 本环境的 node:fs / node:os 类型声明不完整（缺 mkdtempSync / tmpdir / rmSync 的 recursive），
-   局部断言（同 src/demo/demo-server.ts 的做法） */
 const fsx = (await import('node:fs')) as unknown as {
   mkdtempSync: (prefix: string) => string;
   rmSync: (path: string, options?: { recursive?: boolean; force?: boolean }) => void;
@@ -193,7 +189,6 @@ async function main(): Promise<void> {
     );
     const ok = validatePlacementConfig({ strategy: 'external', external: { endpoint: 'http://127.0.0.1:9100/place' } });
     assertEqual(ok.external?.timeoutMs, 20_000, '缺省超时应填默认值');
-    /* 同步入口不处理 external：必须走 resolvePlacements，否则"配了外部服务却走本地"会静默发生 */
     assertEqual(
       codeOf(() => placeSegments({ segments: [], candidates: { nodeIds: [], total: 0, excluded: 0 } }, ok)),
       'E_PLACEMENT_EXTERNAL_REQUIRES_ASYNC',
@@ -216,9 +211,6 @@ async function main(): Promise<void> {
 
       assertEqual(codeOf(() => savePlacementConfig(kv, { confidenceCeiling: 0.95 }, 'ADMIN')), 'E_PLACEMENT_CEILING_TOO_HIGH', '非法配置不得落库');
 
-      /* 外部落位密钥：单独一行、加密、永不回显（与模型/采集密钥同一套纪律）。
-         三种状态逐条钉住，因为"没传 apiKey"被当成"清空"的代价很具体：
-         管理员只改个地址，密钥就没了，而现场表现是"外部落位突然 401"。  */
       const withKey = savePlacementConfig(
         kv,
         { strategy: 'external', external: { endpoint: 'http://127.0.0.1:9100/place' }, apiKey: 'place-secret-1' },
@@ -240,10 +232,6 @@ async function main(): Promise<void> {
       assertEqual(cleared.apiKeyAction, 'cleared', '显式 null 应清除');
       assertEqual(sealedBlobOf(fixture, PLACEMENT_API_KEY_KEY), null, '清除必须是真删那一行（不留空壳）');
 
-      /* 库里那一行读不出来（口令换过 / 被人改过）→ 不许当作"没配过"。
-         文件时代这里模拟的是"写一段半截 JSON"；现在写不出半截 JSON 了
-         （密封信封带 MAC，"半截"这种损坏已经不可能出现），但"解不开"仍然可能，
-         而且它是更危险的那种 —— 现场会表现成"我配的落位没了"。  */
       writeCorruptRow(fixture, PLACEMENT_CONFIG_KEY);
       assertEqual(codeOf(() => loadPlacementConfig(kv)), 'E_PLACEMENT_CONFIG_INVALID', '读不出来的配置不得当作"没配过"');
     } finally {
@@ -317,8 +305,6 @@ async function main(): Promise<void> {
       '服务返回非 2xx 应报错（错误信息不带响应体）',
     );
 
-    /* 超时：transport 永不返回且不理会 abort —— 必须靠 race 兜住，
-       否则"服务挂住"在现场表现为"落位没反应"，排查方向会完全跑偏  */
     const timeout = validatePlacementConfig({ strategy: 'external', external: { endpoint: 'http://placement.test/place', timeoutMs: 30 } });
     assertEqual(
       await asyncCodeOf(() => resolvePlacements({ segments, candidates }, timeout, { transport: () => new Promise(() => {}) })),
@@ -343,8 +329,6 @@ async function main(): Promise<void> {
       assertEqual(await asyncCodeOf(() => call(body)), expected, `响应 ${body} 应报 ${expected}`);
     }
   });
-
-  /* ============ Q1~Q6：粘贴落位（V3）—— 落点是章节，未命中落在锚点 ============ */
 
   await test('Q1 命中章节词 → 落到该章节；未命中 → 落在锚点（不是"未落位"）', () => {
     const { session, ids } = open();

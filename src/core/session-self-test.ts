@@ -1,5 +1,3 @@
-// T05/T06/T07 验收自测：写路径、patch 策略与留痕。
-
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,9 +45,6 @@ function applyRandomOp(session: WriteSession, rng: () => number, step: number): 
     const node = pick(rng, texts) as DocNode | null;
     if (node) session.insertText({ nodeId: node.id, text: `·${step}` }, HUMAN);
   } else if (roll < 0.32) {
-    /* 区间替换也进随机脚本：它的两条关键性质（"区间外一个字节不动"、"run 不许被切碎"）
-       靠手写用例只能覆盖几个点；随机 150 步才压得到边角 ——
-       而"patch 精确还原 / 文档仍合法 / 索引未漂移"这三条不变量对每一次写入都会检查。 */
     const node = pick(rng, texts) as DocNode | null;
     if (node && node.type === 'text') {
       const length = node.runs.reduce((sum, run) => sum + run.text.length, 0);
@@ -82,18 +77,11 @@ function applyRandomOp(session: WriteSession, rng: () => number, step: number): 
 interface StepReport {
   step: number;
   patchOps: number;
-  /** 节点表是否被 patch 精确还原 */
   nodesRestored: boolean;
   /** 未被 patch 覆盖的文档级字段（按约定只允许 updatedAt 与 revisions） */
   docLevelKeys: string[];
 }
 
-/**
- * 顶层字段差异（排除 nodes）。
- * 约定：留痕的 patch 只描述节点级变更；文档级字段（updatedAt、revisions、machineReadable）
- * 由留痕条目自身或派生物承载，否则 patch 会自引用 revisions 数组。
- * machineReadable 属于派生物（T04/T16）：它随节点内容变化而变化，不可能也不应该由 patch 还原。
-  */
 function topLevelDiffKeys(rebuilt: DocumentModel, after: DocumentModel): string[] {
   const keys = new Set([...Object.keys(rebuilt), ...Object.keys(after)]);
   const diffs: string[] = [];
@@ -104,7 +92,6 @@ function topLevelDiffKeys(rebuilt: DocumentModel, after: DocumentModel): string[
   return diffs;
 }
 
-/** 跑随机脚本，并逐步校验"patch 精确还原（节点级）" */
 function runScript(session: WriteSession, seed: number, steps: number): StepReport[] {
   const rng = makeRng(seed);
   const reports: StepReport[] = [];
@@ -115,7 +102,7 @@ function runScript(session: WriteSession, seed: number, steps: number): StepRepo
       applyRandomOp(session, rng, step);
     } catch (err) {
       if (!(err instanceof WriteError)) throw err;
-      continue; // 预期内的拒绝（如成环、有子节点）不计入
+      continue;
     }
     const revisions = session.auditLog();
     if (revisions.length === revBefore) continue;
@@ -200,8 +187,6 @@ async function main(): Promise<void> {
     assert(session.indexes.childrenOf(targetSection).includes(textId), '新父节点子列表应包含');
     assertEqual(session.verifyInvariants(), [], '移动后不变量应成立');
 
-    /* 注意：必须选一个"仍在该 section 之下"的节点作为目标 ——
-       textId 已被移走，若用它作目标则不构成环（这是测试自身的陷阱，首跑就踩到了）。 */
     const sectionId = ids.sectionIds[0] as NodeId;
     const descendant = (ids.textIds[1] as NodeId) ?? '';
     assertEqual(session.document.nodes[descendant]?.parentId !== null, true, '目标节点应存在');
@@ -233,19 +218,10 @@ async function main(): Promise<void> {
     assertEqual(session.verifyInvariants(), [], '级联删除后不变量应成立');
   });
 
-  /**
-   * 必备章节（`SectionNode.required`）：由模板的章节属性在开文书那一刻抄进节点。
-   *
-   * 这一条守的是职责而不是内容：`keyContent` 判"这一块内容敢不敢删"，
-   * `required` 判"这一章在不在"。两者必须各自独立 —— 合成一道门之后，
-   * 界面只能说"这一块删不掉"，而医生说不清到底是"不能删内容"还是"不能删这一章"。
-    */
   await test('安全门：必备章节禁删（子树连带也拦），但不禁内容编辑，也不许把标记改掉', () => {
     const { doc, ids } = fixture();
     const outerId = ids.sectionIds[0] as NodeId;
     const innerId = ids.sectionIds[1] as NodeId;
-    /* 先摆出一个"必备章节嵌在别的章节里"的形状：不然 subtree 连带那一条证不出来
-       （合成文档的章节都挂在根下，而根是不可删的） */
     (doc.nodes[innerId] as unknown as { parentId: NodeId | null }).parentId = outerId;
     (doc.nodes[innerId] as unknown as { required?: boolean }).required = true;
     const session = WriteSession.open(doc);
@@ -259,21 +235,14 @@ async function main(): Promise<void> {
       cascadeMessage = (err as Error).message;
     }
     assertEqual(cascade, 'E_REQUIRED_SECTION_PROTECTED', '删外层章节不得连带删掉必备章节');
-    /* 报错要说清是哪一章：只说"删不掉"而不给章节名，医生无法判断该找谁改模板 */
-    /* title / required 是章节节点才有的字段：DocNode 是联合类型，取之前要落到章节那一支  */
     assert(cascadeMessage.includes((doc.nodes[innerId] as unknown as { title?: string })?.title ?? ''), '报错里要点出章节标题');
 
-    /* 必备 ≠ 冻结内容：这一章的段落照旧可删可改 ——
-       写成"整章锁死"会让人连错字都改不了，而"必备"管的是这一章在不在  */
     const paragraphInInner = session.indexes.childrenOf(innerId).find((id) => session.document.nodes[id]?.type === 'paragraph') as NodeId;
     assert(!!paragraphInInner, '用例前提：必备章节里应有段落');
     session.deleteNode({ nodeId: paragraphInInner, mode: 'subtree' }, HUMAN);
     assertEqual((session.document.nodes[innerId] as unknown as { required?: boolean })?.required, true, '删掉章内内容之后，这一章仍是必备');
     assertEqual(session.verifyInvariants(), [], '删除章内内容后不变量应成立');
 
-    /* 把这一章清空之后再删它（`single` 模式）：这一条要单独证 ——
-       否则"删不掉"可能只是被上一条"有子节点不许 single 删"（E_HAS_CHILDREN）拦住的，
-       换一个空章节就漏过去了。清空也是医生最可能做的那一步，它不能成为绕过禁删的路 */
     for (const childId of [...session.indexes.childrenOf(innerId)]) {
       session.deleteNode({ nodeId: childId, mode: 'subtree' }, HUMAN);
     }
@@ -307,8 +276,6 @@ async function main(): Promise<void> {
     }
     assertEqual(code, 'E_KEY_CONTENT_PROTECTED', '关键内容应禁止删除');
 
-    /* 禁删必须覆盖整棵被删子树：段落本身不标 keyContent，它下面的文本节点才标 ——
-       只看目标节点就等于给"删父节点"留了一道绕过禁删的后门（本轮加段落级删除入口时实测发现）。  */
     const otherParagraph = ids.paragraphIds[1] as NodeId;
     const textChild = session.indexes
       .childrenOf(otherParagraph)
@@ -347,8 +314,6 @@ async function main(): Promise<void> {
     const runsOf = (): TextRun[] => (session.document.nodes[nodeId] as Extract<DocNode, { type: 'text' }>).runs;
     const textOf = (): string => runsOf().map((run) => run.text).join('');
 
-    /* 手工造"带样式的 run"：现网还没有任何地方产生 run 级 marks，
-       所以"整段覆盖"才一直没暴露问题 —— 这条用例要证明区间替换在将来接入富文本时不会踩这个坑。  */
     session.updateNodeProps(
       {
         nodeId,
@@ -364,7 +329,6 @@ async function main(): Promise<void> {
     );
     assertEqual(textOf(), '体温37.2℃，精神可。', '用例前提：三段 run 拼接');
 
-    /* 替换中间的 '37.2' → '38.5'：左 run 的 bold+tags、右 run 的纯文本都不该被动 */
     const revisionBefore = session.docRev;
     session.replaceRange({ nodeId, start: 2, end: 6, payload: { text: '38.5' } }, HUMAN);
     assertEqual(textOf(), '体温38.5℃，精神可。', '文本应为替换后的内容');
@@ -489,13 +453,8 @@ async function main(): Promise<void> {
     assertEqual(revertRevision?.revert?.revertedRev, revBeforeUndo, '撤销留痕要指回被撤销的那条');
     assertEqual(session.auditLog().length, revertRevision?.rev ?? 0, '被撤销的那条留痕仍在（历史不许被删）');
 
-    /* ⑤ 撤销不留历史快照：只能撤最近一次，且签章之后槽位必须清空 ——
-       否则"撤销"会变成绕过签章去改内容的旁路  */
     assertEqual(session.undoTarget()?.rev, revBeforeUndo + 1, '刚撤销完，槽位应指向这次撤销本身（再点即重做）');
 
-    /* ⑤ 撤销"新建"与"删除"两条路径。
-       首次实现时"新建"这条是坏的：`createNode` 的 `targets` 为空，撤销槽位根本拿不到新建的节点 ——
-       点了撤销什么都没撤回来（槽位非空、节点集为空）。是在 `test:ui` 的 B26 里被抓出来的。 */
     const created = session.createNode(
       { parentId: ids.paragraphIds[0] as NodeId, type: 'text', props: { runs: [{ text: '新建段落' }] } as Partial<DocNode> },
       HUMAN,
@@ -512,7 +471,6 @@ async function main(): Promise<void> {
     session.undoLast(HUMAN);
     assertEqual(JSON.stringify(session.document.nodes[victimId]), victimBefore, '撤销"删除"应把节点原样恢复（含 rev 与 provenance）');
 
-    /* ⑥ 签章之后撤销槽位必须清空 —— 否则"撤销"会变成绕过签章改内容的旁路 */
     await session.sign({ acknowledgeUnconfirmed: true }, HUMAN);
     assertEqual(session.undoTarget(), null, '签章之后必须没有可撤销项');
     assertEqual(codeOf(() => session.undoLast(HUMAN)), 'E_NOTHING_TO_UNDO', '签章后撤销应被明确拒绝，而不是撤出个半截状态');
@@ -556,7 +514,6 @@ async function main(): Promise<void> {
     runScript(b, 7, 80);
     assertEqual(b.auditLog().length, a.auditLog().length, '两种策略的留痕条数应一致');
     assert(deepEqual(b.document.nodes, a.document.nodes), '两种策略的节点表应完全一致');
-    /* 逐个 revision 比对（比整文档比对更容易定位差异） */
     const len = Math.max(b.auditLog().length, a.auditLog().length);
     for (let i = 0; i < len; i += 1) {
       const left = a.auditLog()[i];

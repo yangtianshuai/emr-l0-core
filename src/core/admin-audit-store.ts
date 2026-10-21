@@ -1,11 +1,8 @@
-// 管理动作审计：入库 + 链式摘要（原先是一个 NDJSON 文件）。
-
 import type { SqliteDatabase } from '../storage/sqlite.ts';
 import { stableStringify } from '../model/hash.ts';
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
 import type { JsonValue } from '../model/types.ts';
 
-/** 一条管理动作审计（与界面展示的字段一一对应） */
 export interface AdminAuditRecord {
   seq: number;
   at: string;
@@ -16,7 +13,6 @@ export interface AdminAuditRecord {
   note?: string;
 }
 
-/** 入库形态：在记录之上补两个哈希（`prevHash` 指向上一条，`hash` 是这条自己的）  */
 export interface ChainedAdminAuditRecord extends AdminAuditRecord {
   prevHash: string;
   hash: string;
@@ -24,9 +20,7 @@ export interface ChainedAdminAuditRecord extends AdminAuditRecord {
 
 export const AUDIT_LOG_FORMAT = 'l0-admin-audit';
 export const AUDIT_LOG_VERSION = 1;
-/** 首条的 `prevHash`：全零。写死一个常量值而不是空串，是为了让"缺 prevHash"能被显式校验出来 */
 export const GENESIS_HASH = '0'.repeat(64);
-/** 表名（界面上要显示"账记在哪"，所以它是个对外可说的名字，不是内部细节） */
 export const ADMIN_AUDIT_TABLE = 'admin_audit';
 
 /** 规范化后求摘要：与键序无关（否则"换个序列化实现"会被判成"链断了"）  */
@@ -46,19 +40,13 @@ export function auditRecordHash(prevHash: string, record: AdminAuditRecord): str
 export type AuditChainProblem =
   | { kind: 'broken'; atLine: number; seq: number | null; reason: string }
   | { kind: 'tornTail'; atLine: number }
-  /** 序号不连续：`seq` 一直写在记录里、也一直参与摘要，但此前没有任何校验读过它  */
   | { kind: 'seqGap'; atLine: number; expected: number; actual: number };
 
 export interface AuditLoadReport {
-  /** 库里一条都没有：首次启动，可以建新账（不是"失败了"）  */
   firstRun: boolean;
-  /** 通过校验的记录数（只有这些会被展示）  */
   loaded: number;
-  /** 库里一共有多少条（含断点之后的） */
   totalInStore: number;
-  /** 哪里出的问题；null = 整条链都验过了 */
   problem: AuditChainProblem | null;
-  /** 断点之后未展示的条目数（如实上报：没能验证 ≠ 没有；它们仍留在库里）  */
   discarded: number;
 }
 
@@ -88,7 +76,6 @@ export class AdminAuditLog {
     return ADMIN_AUDIT_TABLE;
   }
 
-  /** 已通过校验、可展示的记录（追加顺序） */
   entries(): ChainedAdminAuditRecord[] {
     return [...this.records];
   }
@@ -102,18 +89,11 @@ export class AdminAuditLog {
     return this.records.length;
   }
 
-  /** 库里的总行数（含未通过校验的那些）—— 与"可展示的条数"分开报 */
   totalInStore(): number {
     const row = this.db.prepare('select count(*) as n from admin_audit').get() as { n?: number } | undefined;
     return Number(row?.n ?? 0);
   }
 
-  /**
-   * 读库并逐条验链。
-   *
-   * 校验不过就停在断点：不修补、不跳过、不把后面的条目当好数据展示。
-   * "跳过坏的那条继续读"会让篡改看起来只是"少了一条"，而那正是审计最不能出的错。
-    */
   load(): AuditLoadReport {
     const rows = this.db.prepare('select * from admin_audit order by seq asc').all() as unknown as AuditRow[];
     if (rows.length === 0) {
@@ -141,7 +121,6 @@ export class AdminAuditLog {
           hash: String(row.hash),
         };
       } catch {
-        /* `changes` 不是合法 JSON：库里的行被改过（写入时一定是合法 JSON） */
         problem = { kind: 'broken', atLine: index + 1, seq: Number(row.seq), reason: 'changes 不是合法 JSON（该行被改过）' };
         break;
       }
@@ -181,20 +160,10 @@ export class AdminAuditLog {
       loaded: verified.length,
       totalInStore: rows.length,
       problem,
-      /** 断点之后不展示，但绝不删除（删掉就是"审计系统自己销毁证据"）  */
       discarded: rows.length - consumed,
     };
   }
 
-  /**
-   * 追加一条。返回入库后的记录（含两个哈希）。
-   *
-   * 链头每次都从库里最后一行的 hash 取（不是内存副本）：这样即便有另一个进程
-   * 也在追加，接上的仍是同一条链 —— 而"接不上"的形态是 `seq` 主键冲突（可发现的失败）。
-   *
-   * 写失败会抛：审计没写上必须让调用方知道（由调用方决定怎么如实告知使用者）。
-   * 这里不做"吞掉错误继续跑" —— 那会让"这一次动作没有审计"变成一件没人知道的事。
-    */
   append(record: Omit<AdminAuditRecord, 'seq'>): ChainedAdminAuditRecord {
     const last = this.db.prepare('select seq, hash from admin_audit order by seq desc limit 1').get() as
       | { seq?: number; hash?: string }

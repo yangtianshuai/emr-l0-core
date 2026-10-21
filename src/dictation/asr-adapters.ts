@@ -1,5 +1,3 @@
-// ASR 厂商适配层：把三家形状完全不同的协议收成同一个"一段音频 → 文本"语义。
-
 import {
   CAPTURE_AUDIO,
   CAPTURE_MAX_ATTEMPTS,
@@ -10,32 +8,19 @@ import {
 } from './capture-transport.ts';
 import type { AsrConfig } from './capture.ts';
 
-/**
- * 三家的枚举。定义在这里而不是 `capture.ts`：谁提供协议，谁定义自己的名字 ——
- * 这样依赖是单向的（`capture.ts → asr-adapters.ts`），不靠"类型能被擦掉"来绕开循环。
-  */
 export type AsrKind = 'intranet-task' | 'baidu-rest' | 'aliyun-nls';
 
-/**
- * 一家的"外部事实"：地址示例、凭据形态、是否出院、协议一句话。
- *
- * 界面只从这张表渲染，不在 HTML 里各写一份：三家要显示的东西不一样
- * （凭据几格、警告要不要出现、地址预填什么），散着写就会出现"换了协议但界面没跟着变"。
-  */
 export interface AsrVendorSpec {
   kind: AsrKind;
   label: string;
   /** 音频是否离开院内网络：true → 必须显式确认，且界面/审计必须红标 */
   leavesIntranet: boolean;
-  /** 凭据形态：界面据此决定显示几格、哪些必填；服务端据此判"凭据配全了没有" */
   credentials: 'none-or-token' | 'access-key-pair' | 'nls-token-and-appkey';
   /** 界面预填的地址（可改）。空串 = 必须自己填（院内服务的地址只有部署方知道）  */
   defaultEndpoint: string;
   /** 模型标识的填写示例：三家都不回模型信息，只能由部署方声明 */
   modelIdHint: string;
-  /** 协议一句话 */
   protocol: string;
-  /** 这套协议下"分片与超时"的实际作用 —— 如实说明，不假装三家一样 */
   timingNote: string;
 }
 
@@ -47,8 +32,6 @@ export const ASR_VENDORS: Record<AsrKind, AsrVendorSpec> = {
     credentials: 'none-or-token',
     defaultEndpoint: '',
     modelIdHint: 'local/asr-zh-med:0.9@2026-09',
-    /* 这句话会原样显示在管理后台（随 state 下发）。所以它不能带 `task_id` 这种协议字段名：
-       前端一旦出现它，后来的人就会顺手在页面里写轮询 —— 而轮询是服务端的事（见设计文档第二节）。  */
     protocol: 'multipart 提交（字段 audio）→ 拿任务号 → 服务端内部轮询到完成',
     timingNote: '轮询间隔与单段预算是主参数：该接口没有失败态，超时是唯一的终止条件',
   },
@@ -84,25 +67,11 @@ export function vendorOf(kind: AsrKind): AsrVendorSpec {
   return ASR_VENDORS[kind];
 }
 
-/**
- * 凭据（内存里过一次，不进配置行、不进日志、不回显）。
- *
- * 两个槽而不是三个：`apiKey` 是主凭据（院内 token / 百度 AK / 阿里云 NLS token），
- * `apiSecret` 只有百度用得着（SK）。阿里云的 AppKey 不是密钥，落在配置里（`asr.appKey`）——
- * 它跟地址一样是"门牌号"，不是凭证；混进密钥槽会让界面显示"密钥已就位"而实际发不出去。
-  */
 export interface AsrCredentials {
   apiKey?: string;
   apiSecret?: string;
 }
 
-/**
- * 凭据缺哪些（只返回缺口名，不返回任何值）：界面据此禁用入口并说明缺哪一格。
- *
- * 这个"按位判空"的版本是给存储层用的：它手上只有 `apiKeyPresent` 这类布尔，
- * 不该为了判个"缺不缺"把密钥值再多传一处（多传一处就多一处可能被打印的地方）。
- * 带值的版本 {@link missingCredentials} 只是它的一层包装 —— 缺口名只有一份定义。
-  */
 export function missingCredentialSlots(
   spec: AsrVendorSpec,
   present: { apiKey: boolean; apiSecret: boolean },
@@ -115,7 +84,6 @@ export function missingCredentialSlots(
       return [...(present.apiKey ? [] : ['Access Key']), ...(present.apiSecret ? [] : ['Secret Key'])];
     case 'nls-token-and-appkey':
       return [...(present.apiKey ? [] : ['Token']), ...(appKey.trim() === '' ? ['AppKey'] : [])];
-    /* 穷尽性检查：新增一种凭据形态而忘了在这里判缺口，会静默变成"永远配得全" */
     default: {
       const never: never = spec.credentials;
       throw new CaptureError('E_CAPTURE_CONFIG_INVALID', `不认识的凭据形态：${String(never)}`);
@@ -128,12 +96,6 @@ export function missingCredentials(spec: AsrVendorSpec, credentials: AsrCredenti
   return missingCredentialSlots(spec, { apiKey: has(credentials.apiKey), apiSecret: has(credentials.apiSecret) }, appKey);
 }
 
-/**
- * 公有云守卫：没显式确认就拒绝，且必须在发出任何请求之前拒绝。
- *
- * "拒绝"而不是"降级回院内"：降级会让管理员以为自己配的云地址生效了（同 `placement.ts`
- * 那条"不许静默退回模拟转写"）。地址填错、音频发错地方，是这一层唯一不能容忍的事。
-  */
 export function assertPublicCloudAcknowledged(spec: AsrVendorSpec, acknowledged: boolean): void {
   if (!spec.leavesIntranet || acknowledged) return;
   throw new CaptureError(
@@ -143,9 +105,7 @@ export function assertPublicCloudAcknowledged(spec: AsrVendorSpec, acknowledged:
   );
 }
 
-/** 提交音频的 multipart 字段名（院内服务的文档写死，不做成配置项 —— 它只有一个正确值） */
 export const CAPTURE_AUDIO_FIELD = 'audio';
-/** 院内服务的提交与轮询路径（同一段前缀，只有 `task_id` 部分不同） */
 export const CAPTURE_SUBMIT_PATH = '/api/audio/inference-realtime';
 
 export interface AsrTranscribeRequest {
@@ -155,20 +115,15 @@ export interface AsrTranscribeRequest {
 }
 
 export interface AsrTranscribeResult {
-  /** 文本；空串是合法结果（这段没听到内容），但要如实回报  */
   text: string;
-  /** 厂商的任务号。云厂商没有 → 空串（`transcriptionId` 用的是会话 ID，不是它）  */
   taskId: string;
 }
 
 export interface AsrProtocolContext {
   config: AsrConfig;
   credentials: AsrCredentials;
-  /** 带超时的一次调用（超时由调用方按剩余预算收口） */
   call: (request: CaptureTransportRequest, timeoutMs: number) => Promise<CaptureTransportResponse>;
-  /** 距"单段总预算"还剩多少 ms */
   remaining: () => number;
-  /** 预算耗尽时抛的错（内网那台没有失败态，这是唯一可判形态） */
   timeoutError: () => CaptureError;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
@@ -196,7 +151,6 @@ const intranetTask: AsrProtocol = async ({ index, audio, sessionId }, ctx) => {
   const headers: Record<string, string> = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
   const url = `${config.endpoint}${CAPTURE_SUBMIT_PATH}`;
 
-  /* ---- 上传：只重试传输层故障；`code !== 200` 是"调用方给错了"，重试只会错第二遍 ----  */
   let taskId = '';
   for (let attempt = 1; attempt <= CAPTURE_MAX_ATTEMPTS && taskId === ''; attempt += 1) {
     const budget = ctx.remaining();
@@ -271,7 +225,6 @@ const intranetTask: AsrProtocol = async ({ index, audio, sessionId }, ctx) => {
     try {
       parsed = parseJsonObject(response.body, '语音识别服务');
     } catch (err) {
-      /* 网关抖一下回一张 HTML 错误页是常见的：算一次可重试的传输问题，而不是"这段白说了" */
       pollFailures += 1;
       if (pollFailures > CAPTURE_MAX_ATTEMPTS - 1) throw err;
       await ctx.sleep(config.pollIntervalMs);
@@ -320,15 +273,12 @@ async function baiduToken(ctx: AsrProtocolContext): Promise<string> {
   const parsed = parseJsonObject(response.body, '百度鉴权服务');
   const token = parsed.access_token;
   if (typeof token !== 'string' || token.trim() === '') {
-    /* 百度把鉴权失败也回 HTTP 200，错误在 error / error_description 里。
-       不点出来，现场看到的就是"HTTP 200 却没有 token"这种没有方向的报错。 */
     throw new CaptureError(
       'E_CAPTURE_CREDENTIAL_MISSING',
       `百度未返回 access_token（${String(parsed.error ?? '未知原因')}）：核对 AK/SK，以及该应用是否开通了短语音识别`,
     );
   }
   const expiresIn = Number(parsed.expires_in);
-  /* 提前 60s 到期（时钟漂移 + 请求往返），拿不到 expires_in 就只信 1 分钟 */
   const ttlMs = Number.isFinite(expiresIn) && expiresIn > 120 ? (expiresIn - 60) * 1000 : 60_000;
   tokenCache.set(cacheKey, { token: token.trim(), expiresAt: ctx.now() + ttlMs });
   return token.trim();
@@ -339,8 +289,6 @@ const baiduRest: AsrProtocol = async ({ audio, sessionId }, ctx) => {
   const budget = ctx.remaining();
   if (budget <= 0) throw ctx.timeoutError();
 
-  /* `format/rate/channel` 必须是音频真实规格，写错不会报错，只会悄悄识别率变差 ——
-     所以它取自 CAPTURE_AUDIO（采集端唯一产出规格），不是另写一份字面量。  */
   const body = JSON.stringify({
     format: CAPTURE_AUDIO.container,
     rate: CAPTURE_AUDIO.sampleRate,
@@ -366,8 +314,6 @@ const baiduRest: AsrProtocol = async ({ audio, sessionId }, ctx) => {
   const errNo = Number(parsed.err_no);
   if (errNo === BAIDU_EMPTY) return { text: '', taskId: '' };
   if (BAIDU_TOKEN_INVALID.includes(errNo)) {
-    /* token 失效：清缓存，让下一次采集重新换。本次仍旧失败 ——
-       "悄悄重试一次"会让"凭据不对"表现成"偶尔成功"，那是最难查的一类现场。  */
     clearAsrTokenCache();
     throw new CaptureError('E_CAPTURE_CREDENTIAL_MISSING', `百度判定访问令牌无效（err_no=${errNo}）：AK/SK 或应用授权有问题，本次已清掉缓存令牌`);
   }
@@ -385,7 +331,6 @@ const baiduRest: AsrProtocol = async ({ audio, sessionId }, ctx) => {
   return { text: result.map((item) => (typeof item === 'string' ? item : '')).join(''), taskId: '' };
 };
 
-/** 阿里云返回码（照其公开文档写，未对真实服务核过）：成功 20000000；40000001 无有效语音；40000004 静音超时  */
 const ALIYUN_OK = 20_000_000;
 const ALIYUN_EMPTY_CODES = [4_000_000_1, 4_000_000_4, 4_000_000_3];
 
@@ -399,7 +344,6 @@ const aliyunNls: AsrProtocol = async ({ audio }, ctx) => {
     appkey: appKey,
     format: CAPTURE_AUDIO.container,
     sample_rate: String(CAPTURE_AUDIO.sampleRate),
-    /* 标点与数字规范化：口述病历里"一天两次"写成"1天2次"是医生最烦的一类后处理 */
     enable_punctuation_prediction: 'true',
     enable_inverse_text_normalization: 'true',
   });
@@ -426,7 +370,6 @@ const aliyunNls: AsrProtocol = async ({ audio }, ctx) => {
   );
 };
 
-/** 三家实现（key 与 `AsrKind` 一一对应，缺一个编译期就报错） */
 export const ASR_PROTOCOLS: Record<AsrKind, AsrProtocol> = {
   'intranet-task': intranetTask,
   'baidu-rest': baiduRest,

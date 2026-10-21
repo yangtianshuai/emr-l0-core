@@ -1,5 +1,3 @@
-// T04/T16 验收自测：机读信息派生 + 陈旧检测。
-
 import { WriteSession, type Actor } from '../core/session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -53,7 +51,6 @@ async function main(): Promise<void> {
     const { doc, ids } = fixture();
     const block = build(doc);
     const fieldCount = ids.fieldIds.length;
-    // 每个字段在夹具里带 2 个标签（WS445 + local）
     assertEqual(block.dataElements.length, fieldCount * 2, `数据元数量应为字段数×2，实际 ${block.dataElements.length}`);
 
     const first = block.dataElements[0];
@@ -250,7 +247,6 @@ async function main(): Promise<void> {
     const tsBlock = build(tsFixture.doc);
     const jsStore = jsModule.createStore(structuredClone(tsFixture.doc), {});
 
-    // 双方同时修改同一字段
     (tsFixture.doc.nodes[tsFixture.ids.fieldIds[0] as NodeId] as Extract<DocNode, { type: 'field' }>).value = 40;
     const jsDoc = jsStore.getDoc();
     (jsDoc.nodes[tsFixture.ids.fieldIds[0] as NodeId] as Extract<DocNode, { type: 'field' }>).value = 40;

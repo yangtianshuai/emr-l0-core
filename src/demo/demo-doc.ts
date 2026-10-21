@@ -1,5 +1,3 @@
-// Demo 数据层：多患者 × 多次就诊 × 多份病历 的工作区（不是单份文档）。
-
 import { SCHEMA_VERSION, type DataElementTag, type DocNode, type DocTypeRef, type DocumentModel, type EncounterRef, type JsonValue, type NodeId, type PatientRef } from '../model/types.ts';
 
 const AT = '2026-10-08T01:00:00Z';
@@ -20,12 +18,6 @@ const TAG = {
   wbc: { system: 'WS445', code: 'DE04.30.001', display: '白细胞计数' } as DataElementTag,
 };
 
-/**
- * 体征/检验的参考范围（演示数据用的常规成人值）。
- *
- * 它不只是"多一个字段"：没有范围就没有"异常"这回事，而就诊时间轴上
- * "变化有没有写进后面的文书"整条结论，都建立在"哪些点算变化"之上。
-  */
 const RANGE = {
   temperature: { low: 36, high: 37.2 },
   pulse: { low: 60, high: 100 },
@@ -37,10 +29,6 @@ interface FieldSpec {
   tag: DataElementTag;
   value: number | string;
   unit: string;
-  /**
-   * 参考范围。体征必须带它：不带就只能显示数值，回答不了"这个值是不是异常"，
-   * 而"就诊时间轴"要把异常变化与后续病程记录对照 —— 没有范围就没有"异常"这回事。
-    */
   range?: { low?: number; high?: number };
 }
 
@@ -57,7 +45,6 @@ interface SectionSpec {
   paragraphs: ParagraphSpec[];
 }
 
-/** 每份病历的个性化内容包（避免为 6 份病历各写一套模板） */
 export interface ContentPack {
   chiefComplaint: string;
   presentIllness: string;
@@ -169,9 +156,6 @@ const TEMPLATES: Record<DocKind, { label: string; docType: DocTypeRef; sections:
     docType: { system: 'WST500', code: 'WST500.4', display: '出院记录' },
     sections: (pack) => [
       { title: '一、入院情况', code: 'admissionStatus', paragraphs: [{ text: `${pack.chiefComplaint}${pack.presentIllness}`, tags: [TAG.chiefComplaint] }] },
-      /* 既往史：出院记录本应复述入院时的事实，这里带了 `TAG.pastHistory`，
-         它同时是跨文书一致性检查的演示样本（见 P_DEMO_002 的两份文书：入院"否认冠心病史"、
-         出院"冠心病史2年"）。两份不一致是现实中真实会发生的事，也正是该被查出来的那类问题。 */
       { title: '二、既往史', code: 'pastHistory', paragraphs: [{ text: pack.pastHistory, tags: [TAG.pastHistory] }] },
       { title: '三、住院经过', code: 'hospitalCourse', paragraphs: [{ text: pack.plan }] },
       { title: '四、出院诊断', code: 'dischargeDiagnosis', paragraphs: [{ text: pack.diagnosis, tags: [pack.diagnosisTag], keyContent: true }] },
@@ -288,37 +272,17 @@ export function buildDocument(spec: DocSpec): DocumentModel {
 export interface WorkspaceDoc {
   docId: string;
   title: string;
-  /**
-   * `template` 表示"由模板包实例化出来的文书"（K4）：它不属于内置的四种固定文书，
-   * 具体是什么文书由模板自己声明的 `docType` 决定（界面显示的是 `docType.display`）。
-   *
-   * 加这一档而不是随便借用一个既有 kind，是为了让树里能区分"这是演示数据"与"这是刚按模板开的"。
-   * 它只影响树的分类标签，不参与任何渲染或门控判断。
-   */
   kind: DocKind | 'template';
 }
 
 export interface WorkspaceVisit {
   visitId: string;
   visitType: NonNullable<EncounterRef['visitType']>;
-  /**
-   * 就诊科室（存编码，不存名称）。
-   *
-   * 名称由科室字典解释（`storage/department-store.ts`）：它才是"限产科"这类判定的依据，
-   * 而名称只是给人看的。存名称会让"科室改名"变成一句谎话 ——
-   * 病历里写着旧名、字典里已经是新名，两边永远对不上，且没有任何地方会报错。
-    */
   dept: string;
   date: string;
   docs: WorkspaceDoc[];
 }
 
-/**
- * 出厂演示的科室字典（与就诊数据里的编码逐一对齐）。
- *
- * 只在空库时播种一次（与工作区数据同一次），之后以库里的那一份为准：
- * 删掉一个科室后重启，它不会自己回来。
-  */
 export const DEPARTMENTS: Array<{ code: string; name: string; enabled: boolean }> = [
   { code: 'DEPT_RESP', name: '呼吸内科', enabled: true },
   { code: 'DEPT_CARD', name: '心血管内科', enabled: true },
@@ -356,7 +320,6 @@ const PATIENTS: Array<{
       dept: string;
       date: string;
       admittedAt: string;
-      /** 出院时刻：频次类判定的右端（缺它就会把"出院之后"算成"一直没写病程记录"）  */
       dischargedAt?: string;
     };
     docs: Array<{ docId: string; kind: DocKind; pack: ContentPack; createdAt?: string }>;
@@ -417,9 +380,6 @@ const PATIENTS: Array<{
     patient: { patientId: 'P_DEMO_002', nameMasked: '李**', gender: 'F', birthDate: '1964-07-20', age: 62 },
     visits: [
       {
-        /* 这次住院是"就诊时间轴"的主样本：三份文书各有成文时刻（入院 → 6 小时后首次病程
-           → 60 小时后出院记录），因此轴上能画出一条真实的线：病程记录之后 54 小时没有记录，
-           超过 24 小时时限 —— 正是"看整条线缺了什么"要抓的那类缺漏。  */
         visit: {
           visitId: 'V_20261005_0011',
           visitType: 'inpatient',
@@ -474,8 +434,6 @@ const PATIENTS: Array<{
             pack: {
               chiefComplaint: '反复头晕1年，加重3天。',
               presentIllness: '经治疗症状缓解，血压控制平稳。',
-              /* 与入院记录（doc_002_adm：'高血压病史1年，否认糖尿病、冠心病史。'）有意不一致，
-                 演示跨文书一致性检查要抓的正是这种"同一事实两份文书说法不同"。 */
               pastHistory: '高血压病史1年，冠心病史2年。',
               physicalExam: '出院时血压 132/82mmHg。',
               auxiliaryExam: '复查未见异常。',

@@ -1,5 +1,3 @@
-// 本地客户端 ↔ 页面的桥（C3b③）：段交接的服务端侧（跑在客户端进程里）。
-
 import {
   createChunkAssembler,
   type AssembledChunk,
@@ -18,10 +16,8 @@ export interface BridgeSegmentMeta {
 export type BridgeState = 'idle' | 'recording' | 'done';
 
 export type BridgeNext =
-  /** 有未确认的段（幂等：未 ack 前重复取到同一段） */
   | { kind: 'segment'; sessionId: string; segment: BridgeSegmentMeta; audioBytes: number }
   | { kind: 'empty'; sessionId: string; state: BridgeState; finalized: number }
-  /** 采集结束且队列已清空：整次交接到此为止 */
   | { kind: 'done'; sessionId: string; total: number; delivered: number; failures: CaptureFailure[]; shortDropped: number };
 
 export type BridgeAckResult =
@@ -31,32 +27,20 @@ export type BridgeAckResult =
 export interface CaptureBridgeProgress {
   sessionId: string;
   state: BridgeState;
-  /** 已定稿的段数（含尚未被取走、以及已失败的） */
   finalized: number;
-  /** 已被页面确认处理过的段数 */
   delivered: number;
-  /** 页面回报失败的段数（如实，不当成"没有这一段"）  */
   failed: number;
   shortDropped: number;
-  /**
-   * 已录时长（秒）：取自最后一帧的 `endSec`，不是 wall clock ——
-   * 计时要与分片时间轴同源，否则界面上的秒数与段的区间对不上。
-    */
   elapsedSec: number;
-  /** 当前尚未定稿那一段已录时长（秒）；没有正在录的段时为 0 */
   currentChunkSec: number;
-  /** 最近一帧是否被判为人声（由采集源给出，页面不猜） */
   voiced: boolean;
-  /** 最近一帧的响度（0~1，16-bit PCM 的 RMS）：界面据此画电平，静音帧为 0 */
   level: number;
 }
 
 export interface CaptureBridge {
   readonly sessionId: string;
   readonly state: BridgeState;
-  /** 采集源送来一帧（内部走 `createChunkAssembler`：与页面、服务端同一份分片规则）  */
   feed(frame: CaptureFrame): void;
-  /** 采集结束（源走完 / 医生按停）：定稿当前那一段，此后 `next()` 会在取空后回 `done` */
   finish(atSec: number): void;
   next(): BridgeNext;
   /** 确认处理结果；`ok: false` 时必须带上失败原因（页面那一侧的分类失败） */
@@ -90,7 +74,6 @@ export function createCaptureBridge(options: { sessionId: string; segment: Segme
   let state: BridgeState = 'idle';
   let delivered = 0;
   let finalized = 0;
-  /* 录音过程的可见性（计时 / 电平）：由帧推进，不看墙上时钟  */
   let elapsedSec = 0;
   let voiced = false;
   let level = 0;
@@ -149,7 +132,6 @@ export function createCaptureBridge(options: { sessionId: string; segment: Segme
         return { ok: false, code: 'E_BRIDGE_SEGMENT_GONE', message: `第 ${index} 段不在队列里（可能已经确认过了）` };
       }
       if (head.meta.index !== index) {
-        /* 不顺手删掉一个：那会让"某一句不见了"变成一个查不出来的现场  */
         return {
           ok: false,
           code: 'E_BRIDGE_ACK_OUT_OF_ORDER',
@@ -191,19 +173,12 @@ export function createCaptureBridge(options: { sessionId: string; segment: Segme
   };
 }
 
-/* ============================== 令牌与请求校验（纯函数，便于测） ============================== */
-
-/** 只认 `x-capture-token` 头或 `token` 查询参数；两者都没有就等于没有令牌 */
 export function tokenFromRequest(input: { header?: string | undefined; query?: string | undefined }): string {
   const fromHeader = (input.header ?? '').trim();
   if (fromHeader !== '') return fromHeader;
   return (input.query ?? '').trim();
 }
 
-/**
- * 校验令牌。回环端口不是安全边界：本机任何进程都能连它，
- * 所以令牌是唯一把关的东西 —— 它挡的是"误连"与"顺手扫端口"，不是"本机已被攻陷"（第九之三节）。
-  */
 export function checkBridgeToken(expected: string, provided: string): { ok: true } | { ok: false; code: string; message: string } {
   if (expected.trim() === '') {
     return { ok: false, code: 'E_BRIDGE_NO_TOKEN', message: '本地客户端没有配置令牌：拒绝服务（没有令牌的回环端口等于对全机开放）' };

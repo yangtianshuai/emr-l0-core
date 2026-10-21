@@ -1,5 +1,3 @@
-// 趋势派生视图自测。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { buildTrend, buildTrends } from './trend.ts';
 import type { DocumentModel, DocNode } from './types.ts';
@@ -65,7 +63,6 @@ const RANGE = { low: 4, high: 10 };
 
 async function main(): Promise<void> {
   await test('A1 按**采样时间**升序聚合（节点 order 不能决定先后）', () => {
-    /* order 故意写成与时间相反：若实现按 order 排序，这条会失败 */
     const doc = docWith([
       { id: 'f_late', order: 10, value: 12.6, valueText: '12.6', sampledAt: '2026-10-08T07:00:00Z', sourceKey: 'LIS.WBC', range: RANGE },
       { id: 'f_early', order: 20, value: 9.8, valueText: '9.8', sampledAt: '2026-10-06T07:00:00Z', sourceKey: 'LIS.WBC', range: RANGE },
@@ -116,7 +113,6 @@ async function main(): Promise<void> {
     const doc = docWith([
       { id: 'f1', order: 10, value: 9.8, sampledAt: '2026-10-06T07:00:00Z', sourceKey: 'LIS.WBC', range: RANGE },
       { id: 'f2', order: 20, value: 12.1, sampledAt: '2026-10-07T07:00:00Z', sourceKey: 'LIS.WBC', range: RANGE, confirmed: true },
-      /* 既无 sourceKey 也无标签：无法归入任何趋势 */
       { id: 'f3', order: 30, value: 37.2 },
     ]);
     const trend = buildTrend(doc, 'LIS.WBC')!;

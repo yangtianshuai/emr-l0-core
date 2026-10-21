@@ -1,6 +1,3 @@
-// 审计链头锚定自测（A1~A13）。
-// 反过来，A8 是把边界做成可执行的事实：拿得到签名私钥的人（本例是公开的演示种子）
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { openDbFixture } from '../testing/db-fixture.ts';
 import {
@@ -23,13 +20,8 @@ import { demoKeyPair, softwareSigner, softwareVerifier } from '../crypto/provide
 import { utf8 } from '../crypto/sm3.ts';
 import type { SqliteDatabase } from '../storage/sqlite.ts';
 
-/**
- * 夹具在 `main` 里建（顶层就开库会让"跑完即退"的路径留下临时目录），
- * 但 `buildChain` / `rewriteChain` 在每条用例里都被调用，所以这里留一个模块级引用。
- */
 let db: SqliteDatabase;
 
-/** 演示签名者（种子公开 —— 这一点在 A8 里被用作"已知边界"的证明） */
 const signer = softwareSigner(demoKeyPair('l0-audit-anchor-demo').privateKey);
 const verifier = softwareVerifier(signer.publicKey);
 const OTHER_SIGNER = softwareSigner(demoKeyPair('l0-audit-anchor-demo-other').privateKey);
@@ -53,7 +45,6 @@ function record(index: number): Omit<AdminAuditRecord, 'seq'> {
   };
 }
 
-/** 建一条 n 条记录的链（写在库里），返回读出来的记录  */
 function buildChain(n: number): ChainedAdminAuditRecord[] {
   db.exec('delete from admin_audit');
   const log = new AdminAuditLog(db);
@@ -64,19 +55,12 @@ function buildChain(n: number): ChainedAdminAuditRecord[] {
   return reloaded.entries();
 }
 
-/**
- * 把整条链重写并重算：删掉若干条、重新编号、逐条重算 `prevHash`/`hash`（直接改库）。
- *
- * 这是最狠的一类篡改：`seq` 连续、`prevHash` 连续、每条自身 hash 自洽 ——
- * `admin-audit-store.load()` 会报"没有任何问题"。它是锚点存在的全部理由。
-  */
 function rewriteChain(
   removeSeq: number[] = [],
   mutate?: (records: ChainedAdminAuditRecord[]) => void,
 ): ChainedAdminAuditRecord[] {
   const before = new AdminAuditLog(db);
   before.load();
-  /* 深拷一份再改：`entries()` 给的是副本，但 `changes` 是同一批对象，改它会连带改到 store 的内存态 */
   const parsedAll = before.entries().map((item) => ({ ...item, changes: item.changes.map((change) => ({ ...change })) }));
   mutate?.(parsedAll);
   const kept = parsedAll.filter((item) => !removeSeq.includes(item.seq));
@@ -96,7 +80,6 @@ function rewriteChain(
     rewritten.push({ ...base, prevHash: prev, hash });
     prev = hash;
   });
-  /* 直接改库：清空再按重写后的形态写回去 —— 这正是"能改库的人"做的事 */
   db.exec('delete from admin_audit');
   for (const item of rewritten) insertAuditRow(db, item);
   const after = new AdminAuditLog(db);
@@ -140,8 +123,6 @@ async function main(): Promise<void> {
     assertEqual(report.unanchored, 2, '但要如实报出"其后的 2 条尚无锚点"');
     assert(report.message.includes('尚无锚点'), `信息要提示再锚定，实际：${report.message}`);
 
-    /* 也正因为如此：锚点之后那几条被删，用这个锚点是查不出来的。
-       这条断言是"必须周期性锚定"的机器证据，而不是一句口号。  */
     const truncated = buildChain(3);
     const blind = verifyAnchor(truncated, anchor, { verify });
     assertEqual(blind.status, 'match', '锚点只覆盖到第 3 条，删掉第 4/5 条时它看不出问题 —— 这就是要周期性锚定的原因');
@@ -151,7 +132,6 @@ async function main(): Promise<void> {
     const full = buildChain(5);
     const anchor = signAnchor(headOf(full)!, '2026-10-12T05:00:00.000Z', signer);
 
-    /* 只删最后两条：不重算、不编号，链的前缀原封不动 */
     db.prepare('delete from admin_audit where seq > 3').run();
     const afterDelete = new AdminAuditLog(db);
     const reload = afterDelete.load();
@@ -168,7 +148,6 @@ async function main(): Promise<void> {
     const full = buildChain(4);
     const anchor = signAnchor(headOf(full)!, '2026-10-12T05:00:00.000Z', signer);
 
-    /* 只改内容、随后把从那条起的摘要全部重算 —— 于是链内自洽，只有锚点能发现 */
     const records = rewriteChain([], (items) => {
       items[1]!.changes = [{ field: 'endpoint', before: 'http://a2', after: 'http://INNOCENT' }];
     });
@@ -186,7 +165,6 @@ async function main(): Promise<void> {
     const full = buildChain(5);
     const anchor = signAnchor(headOf(full)!, '2026-10-12T05:00:00.000Z', signer);
 
-    /* 删掉第 3 条：这是"把对自己不利的那一条抹掉"最自然的做法 */
     const records = rewriteChain([3]);
     assertEqual(records.map((item) => item.seq), [1, 2, 3, 4], '重写后 seq 连续（链内校验与 seq 校验都看不出问题）');
     assertEqual(records.length, 4, '少了一条');
@@ -207,19 +185,14 @@ async function main(): Promise<void> {
   });
 
   await test('A8 **已知边界**：拿得到签名私钥的人删尾后重签锚点 → 检不出来', () => {
-    /* 这条不是"缺陷待修"，而是这套机制的边界本身：本仓库的锚点种子（`L0_AUDIT_ANCHOR_SEED`）
-       默认是公开演示种子，任何拿到代码的人都能推导出私钥。
-       所以它防不了"有权限的人" —— 真正要防，需要私钥在受控设备里，
-       且公钥钉在审计查看方（不在被审的这台机器上）。  */
     const full = buildChain(5);
-    void signAnchor(headOf(full)!, '2026-10-12T05:00:00.000Z', signer); /* 旧锚点：这里故意不用它 */
+    void signAnchor(headOf(full)!, '2026-10-12T05:00:00.000Z', signer);
 
     db.prepare('delete from admin_audit where seq > 3').run();
     const afterDelete = new AdminAuditLog(db);
     afterDelete.load();
     const records = afterDelete.entries();
 
-    /* 攻击者持有私钥：为删尾后的链头重新签一条锚点 */
     const resigned = signAnchor(headOf(records)!, '2026-10-12T06:00:00.000Z', signer);
     const report = verifyAnchor(records, resigned, { verify });
     assertEqual(report.status, 'match', '**这是边界**：私钥泄露（或公开种子）时检不出来 —— 不能对外说成"防篡改已解决"');
@@ -249,9 +222,6 @@ async function main(): Promise<void> {
   });
 
   await test('A11 锚点入库：非法形状**写不进去**，重复锚定是幂等的', () => {
-    /* 文件时代的这条用例守的是"尾行残行 / 中间行坏 JSON 不许静默跳过"。
-       入库之后那两类损坏不可能出现（一行要么在要么不在，列上还有 NOT NULL 与主键）——
-       不是不再关心，而是它换成了另一类失败：非法形状根本写不进去。  */
     db.exec('delete from admin_audit_anchor');
     const store = new AuditAnchorStore(db);
     assertEqual(store.load().firstRun, true, '库里没有锚点应报 firstRun');
@@ -261,8 +231,6 @@ async function main(): Promise<void> {
     assertEqual(new AuditAnchorStore(db).load().anchors.length, 2, '重新读出来还是两条');
     assertEqual(store.latest()?.seq, 2, 'latest 应给最后一条');
 
-    /* 同一条链头锚两次 = 同一条：文件时代每次"再锚一次"都会多一行（实测堆到 286 条） ——
-       而"锚了多少次"与"链被锚到了哪里"是两件事，混在一起之后谁也看不懂。  */
     assertEqual(store.append({ seq: 2, hash: 'b'.repeat(64), at: '2026-10-12T03:00:00.000Z' }), false, '重复锚定不产生第二行');
     assertEqual(new AuditAnchorStore(db).load().anchors.length, 2, '库里仍然只有两条');
 
@@ -291,10 +259,6 @@ async function main(): Promise<void> {
   });
 
   await test('A13 **锚点要能被带出这台机器**（它与链同库，同机另一处挡不住同一个人）', () => {
-    /* 这条用例的旧版本断言"锚点在另一个文件里"。入库之后那句话不再成立，
-       而它本来也不该是那句：同一台机器上的两个文件、两张表，都挡不住同一个有权限的人。
-       锚点的价值在于把它带出被审的这台机器（由审计查看方保存）——
-       所以这里钉住的是"导出锚点所需的信息齐全"，而不是"它躺在哪个载体上"。  */
     db.exec('delete from admin_audit_anchor');
     const store = new AuditAnchorStore(db);
     assertEqual(store.table, 'admin_audit_anchor', '表名要能对使用者交代（它不是内部细节）');

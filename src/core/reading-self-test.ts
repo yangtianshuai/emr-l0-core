@@ -1,5 +1,3 @@
-// T18 验收自测：受控阅读（有效期 / 次数 / 环境绑定 / 内容范围）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession } from './session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -136,7 +134,6 @@ async function main(): Promise<void> {
     assertEqual(late.code, 'E_GRANT_EXPIRED', '过期必须拒绝');
     assert(late.reasons.join('').includes('过期'), '原因应说明已过期');
 
-    /* 边界：生效时刻与失效时刻应当可读（含端点的区间）  */
     assertEqual(openForReading(credential, doc, { ...CONTEXT, at: '2026-10-08T00:00:00Z' }).allowed, true, '生效时刻应可读');
     assertEqual(openForReading(credential, doc, { ...CONTEXT, at: '2026-10-09T00:00:00Z' }).allowed, true, '失效时刻应可读');
   });
@@ -224,7 +221,6 @@ async function main(): Promise<void> {
     const doc = fixture();
     const credential = await credentialFor(doc, { allowedSections: [] });
     const decision = openForReading(credential, doc, CONTEXT);
-    /* 授权本身有效、各项控制都通过，所以"允许阅读"——但视图里一个章节都不给 */
     assertEqual(decision.allowed, true, '授权有效，故不报错');
     assertEqual(decision.view!.sections.length, 0, '空白名单不得放行任何章节');
     assertEqual(decision.view!.concealedSectionCount, 2, '所有章节都应计为隐藏');
@@ -257,8 +253,6 @@ async function main(): Promise<void> {
     assertEqual(documentFingerprint(doc), documentFingerprint(cloneDoc(doc)), '同内容应得到同一指纹');
     assertEqual(documentFingerprint(doc).length, 64, '指纹应为 64 位十六进制（SM3）');
 
-    /* 患者身份必须进指纹：早期实现只放 patientId，改姓名/性别时指纹不变，
-       于是"改了姓名，旧授权仍可读"（由本用例抓到） */
     const changed = cloneDoc(doc);
     changed.patient = { ...changed.patient, nameMasked: '赵**' };
     assert(documentFingerprint(changed) !== documentFingerprint(doc), '姓名变化必须改变指纹');

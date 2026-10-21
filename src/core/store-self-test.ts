@@ -1,5 +1,3 @@
-// 工作区存储自测。
-
 import { mkdirSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -93,8 +91,6 @@ async function main(): Promise<void> {
     assertEqual(loaded.ok, true, '应加载成功');
     if (!loaded.ok) return;
     const after = loaded.scope.suggestions.add({ targetNodeId: 'n_1', text: 'b', confidence: 0.9, modelId: 'm1', at: AT }).suggestion;
-    /* 若只存 items 不存 seq，这里会再次产出 sg_0001 —— 与历史留痕里引用的那条不是同一条，
-       而审计只能看到 id，于是"这条建议被谁采纳"会指向错误的对象。  */
     assert(after.id !== first.id, `新建议 ID 不得与历史重复（${first.id} → ${after.id}）`);
     assertEqual(after.id, 'sg_0002', '应继续递增');
     assertEqual(loaded.scope.suggestions.size(), 2, '历史条目仍在');
@@ -136,7 +132,6 @@ async function main(): Promise<void> {
     const fingerprintBefore = scope.suggestions.fingerprint();
     const patientsBefore = scope.patients.fingerprint();
 
-    /* 模拟重启：不保留任何内存对象，只从文件重建 */
     const reloaded = loadWorkspace(target);
     assertEqual(reloaded.ok, true, '应加载成功');
     if (!reloaded.ok) return;
@@ -155,14 +150,12 @@ async function main(): Promise<void> {
     scope.patients.register('P_002', [{ system: 'his', value: 'H2' }], AT, 'admin');
     saveWorkspace(target, scope, { at: AT });
 
-    /* 手工把文件改成"同一标识属两个人"：真实来源可能是人工编辑或迁移脚本出错 */
     const text = readFileSync(target, 'utf8');
     const patched = text.replace('"value": "H2"', '"value": "H1"');
     writeFileSync(target, patched, 'utf8');
     const result = loadWorkspace(target);
     assertEqual(result.ok, false, '自相矛盾的快照必须被拒绝');
     if (!result.ok) {
-      /* 摘要会先挡住（内容是改过的）—— 这条本身也证明摘要有效 */
       assert(
         result.code === 'E_SNAPSHOT_CORRUPT',
         `应报损坏或结构非法，实际：${result.code}`,
@@ -178,13 +171,11 @@ async function main(): Promise<void> {
 
     saveSidecarsSealed(target, { suggestions: snapshot, annotations: scope.annotations.snapshot() }, 'pass-1', { at: AT });
     const raw = readFileSync(target, 'utf8');
-    /* 最直接的一条：密文里不该出现任何明文片段（节点 id、正文、分区名） */
     assert(!raw.includes('n_secret'), '快照里不得出现明文节点 id');
     assert(!raw.includes('胸痛'), '快照里不得出现明文正文');
     assert(!raw.includes('suggestions'), '快照里连分区名都不该是明文');
     assert(raw.includes('l0-sidecars-sealed'), '应有格式标识（用于识别，不是内容）');
 
-    /* 口令对：能解回来 */
     const ok = loadSidecarsSealed(target, 'pass-1');
     assertEqual(ok.ok, true, '口令正确应能解密');
     if (ok.ok && !ok.firstRun) assertEqual(ok.data.suggestions.seq, 1, '内容应完整恢复');
@@ -194,7 +185,6 @@ async function main(): Promise<void> {
     assertEqual(wrong.ok, false, '口令错必须失败');
     if (!wrong.ok) assertEqual(wrong.firstRun, false, '不得被当成首次启动');
 
-    /* 没有口令：拒绝写入，绝不静默退回明文  */
     assert(
       (() => {
         try {
@@ -209,8 +199,6 @@ async function main(): Promise<void> {
     assertEqual(existsSync(file('s7-plain.json')), false, '拒绝之后不得留下任何文件');
   });
 
-  /* ---------- S9~S12：盐的注入与轮换（2026-10-09 补齐） ---------- */
-
   const SALT_A = '00112233445566778899aabbccddeeff';
   const SALT_B = 'ffeeddccbbaa99887766554433221100';
 
@@ -219,9 +207,6 @@ async function main(): Promise<void> {
     const scope = emptyScope();
     const data = { suggestions: scope.suggestions.snapshot(), annotations: scope.annotations.snapshot() };
 
-    /* 盐只有一个来源：服务端配置文件（`server-config.json`）的 `stateSalt`，经参数传进来。
-       原先这一档读环境变量 `L0_STATE_SALT`，本轮取消 —— 需要存储的东西一律入库，
-       而盐与它服务的口令同源，两处配置会让"换了一处、漏了另一处"变成一场事故。  */
     assertEqual(resolveStateSalt('pass-1', SALT_A).source, 'option', '显式给盐时来源应为 option');
     assertEqual(
       saltFingerprint(resolveStateSalt('pass-1', SALT_A).salt),
@@ -236,8 +221,6 @@ async function main(): Promise<void> {
 
     assertEqual(resolveStateSalt('pass-1').source, 'derived', '没给盐时应退回按口令派生');
 
-    /* 非法值：必须抛错。静默退回派生盐会让"我以为我配了独立盐"悄悄变成假话，
-       而它恰好是这条链路上唯一被改的那个参数 —— 没有任何别的迹象会暴露它  */
     assert(
       (() => {
         try {
@@ -282,8 +265,6 @@ async function main(): Promise<void> {
     if (before.ok) assertEqual(before.usesCurrentSalt, true, '前置：文件是盐 A 写的');
     const rawBefore = readFileSync(target, 'utf8');
 
-    /* 关键的一条：换盐不会让旧文件读不出来 —— 解密用的是信封头部那一个盐，
-       不是"当前配置的盐"。正因如此，轮换不需要保留旧盐、也不需要登记表  */
     const loaded = loadSidecarsSealed(target, 'pass-1');
     assertEqual(loaded.ok, true, '换盐之后旧文件必须仍可读');
     if (loaded.ok && !loaded.firstRun) {
@@ -291,7 +272,6 @@ async function main(): Promise<void> {
       assertEqual(loaded.saltFingerprint, saltFingerprint(fromHex(SALT_A)), '读出来的应是"写作时的盐"指纹');
     }
 
-    /* 换成盐 B（配置文件里改成 B 的那种情形）：新写入的用新盐，旧的被识别为"待迁移" */
     const fresh = file('s10-fresh.json');
     saveSidecarsSealed(fresh, data, 'pass-1', { at: AT, salt: SALT_B });
     const info = inspectSealedSidecars(fresh, fromHex(SALT_B));
@@ -318,8 +298,6 @@ async function main(): Promise<void> {
       assertEqual(result.after, saltFingerprint(fromHex(SALT_B)), '应记录重写后的盐指纹');
     }
 
-    /* 迁移唯一的正确性要求：内容不变。用整份数据的深比较，
-       而不是挑一两个字段断言 —— 漏掉的字段恰恰可能在迁移里悄悄丢掉  */
     const after = loadSidecarsSealed(target, 'pass-1');
     assertEqual(after.ok, true, '迁移后应仍能读');
     if (after.ok && !after.firstRun && loadedBefore.ok && !loadedBefore.firstRun) {

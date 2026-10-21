@@ -1,6 +1,3 @@
-// 命令行：口令轮换（把库里所有密封行重新密封到新口令）。
-// 1. 默认只试运行。轮换不可逆（换完旧口令就打不开了），而执行前最该确认的是
-
 import { existsSync, readFileSync } from 'node:fs';
 import { MIGRATIONS, STORAGE_SCHEMA_VERSION } from '../storage/schema.ts';
 import { openDatabase } from '../storage/sqlite.ts';
@@ -8,8 +5,6 @@ import { applyRekey, describeRekeyPlan, planRekey } from '../storage/rekey.ts';
 import { resolveRuntimeLayout } from './runtime-dir.ts';
 import { loadServerConfig, serverConfigPath, stateKeyOf, stateSaltHexOf } from './server-config.ts';
 
-/*  本环境的 `@types/node` 对 `readFileSync` 只声明了字符串路径（运行时支持 fd 0 = 标准输入）。
-   与 `auth/user-cli.ts` 同一套局部断言。  */
 const fsx = (await import('node:fs')) as unknown as {
   readFileSync: (path: string | number, options: string) => string;
 };
@@ -65,7 +60,6 @@ function requireValue(argv: readonly string[], index: number, name: string): str
   return value.trim();
 }
 
-/** 从文件读一行口令：只去行尾换行（口令本身可以含空格，顺手 trim 会静默改掉它）  */
 function readKeyFile(file: string): string {
   if (!existsSync(file)) die(`新口令文件不存在：${file}`);
   let raw: string;
@@ -79,7 +73,6 @@ function readKeyFile(file: string): string {
   return key;
 }
 
-/** 交互确认：把"手滑执行"这一步挡住。它不是安全边界（有 `--yes`），只是一个减速带 */
 function confirmRekey(): void {
   const stdin = (process as unknown as { stdin?: { isTTY?: boolean } }).stdin;
   if (stdin?.isTTY) {
@@ -97,7 +90,6 @@ function confirmRekey(): void {
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
 
-  /* 旧口令：一律从服务端配置文件读 —— 与 demo-server 用的是同一处，避免"CLI 用一把、服务用另一把" */
   const layout = resolveRuntimeLayout({ ...process.env });
   const configPath = serverConfigPath(layout.dir);
   const loaded = loadServerConfig(configPath);
@@ -130,7 +122,6 @@ function main(): void {
 
   try {
     if (!args.apply) {
-      /* 试运行：不写任何东西，只回答"有几行、旧口令对不对" */
       const plan = planRekey(db, old.key);
       if (!plan.ok) {
         process.stderr.write(`[口令轮换] 试运行失败：${plan.message}\n`);
@@ -188,7 +179,6 @@ function main(): void {
     try {
       db.close();
     } catch {
-      /* 关不掉就算了：进程马上就退出了 */
     }
   }
 }

@@ -1,6 +1,3 @@
-// 电子签名后端（配置 + 远程适配器）自测。
-// S3 响应解析：JSON 路径（含数组）、编码、公钥/证书；
-
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -30,7 +27,6 @@ import {
 import { SIGN_API_KEY_KEY, SIGN_CONFIG_KEY, loadSignConfig, saveSignConfig } from './sign-config-store.ts';
 import { openConfigFixture, sealedBlobOf, writeCorruptRow } from '../testing/config-fixture.ts';
 
-/* 本环境的 node:fs 类型声明不完整（缺 mkdtempSync / rmSync 的 recursive），局部断言（同 demo-server） */
 const fsx = (await import('node:fs')) as unknown as {
   mkdtempSync: (prefix: string) => string;
   rmSync: (path: string, options?: { recursive?: boolean; force?: boolean }) => void;
@@ -75,7 +71,6 @@ function httpConfig(patch: SignConfigInput = {}, httpPatch: Partial<HttpSignConf
   });
 }
 
-/* 一台"假签名服务"：用自研 SM2 签一次 —— 这样自验才有意义（能验过，才是真的对） */
 const realSigner = softwareSigner(demoKeyPair('l0-sign-self-test').privateKey);
 const realPublicKeyBase64 = toBase64(realSigner.publicKeyDer);
 const realFingerprint = publicKeyFingerprint(publicKeyFromSpki(fromBase64(realPublicKeyBase64)));
@@ -110,7 +105,6 @@ async function main(): Promise<void> {
       'E_SIGN_CONFIG_INVALID',
       '预置公钥解不开应在**保存时**就报错（而不是等到签章那一刻）',
     );
-    /* 既无预置公钥、又无响应公钥路径：拿不到身份，构造不出 SignedInfo */
     assertEqual(
       codeOf(() => httpConfig({}, { response: { signaturePath: 'signature', signatureEncoding: 'base64' } })),
       'E_SIGN_CONFIG_INVALID',
@@ -137,7 +131,6 @@ async function main(): Promise<void> {
       },
     );
     const signer = createHttpSigner(config.http as HttpSignConfig, {
-      /* 密钥只从参数来（真实链路里由调用方从库中解出后递进来，见 S6）  */
       apiKey: 'secret-value',
       transport: async (request) => {
         seen.push({ url: request.url, headers: request.headers, body: JSON.parse(request.body) as Record<string, unknown> });
@@ -295,8 +288,6 @@ async function main(): Promise<void> {
       assertEqual(loadSignConfig(kv).apiKey, undefined, '清除后内存里不得再取到密钥');
       assertEqual(sealedBlobOf(fixture, SIGN_API_KEY_KEY), null, '清除应真删那一行（不是留个空壳）');
 
-      // ④ 密钥那一行解不开（口令换过 / 被改动过）→ 不许当作"没有密钥"
-
       saveSignConfig(kv, { ...signInput('http://emr-sign.test/api/sign'), apiKey: 'sk-recover' }, 'ADMIN');
       writeCorruptRow(fixture, SIGN_API_KEY_KEY);
       assertEqual(codeOf(() => loadSignConfig(kv)), 'E_SIGN_CONFIG_INVALID', '密钥读不出来不得当作"没有密钥"');
@@ -307,8 +298,6 @@ async function main(): Promise<void> {
         '非法配置不得落库',
       );
 
-      /* ⑤ 配置那一行读不出来（口令换过 / 那一行被改过）→ 不许当作"没配过"：
-         那会让"我配的签名服务没了"表现成"退回了软件签名"。  */
       writeCorruptRow(fixture, SIGN_CONFIG_KEY);
       assertEqual(codeOf(() => loadSignConfig(kv)), 'E_SIGN_CONFIG_INVALID', '读不出来的配置不得当作"没配过"');
     } finally {
@@ -320,8 +309,6 @@ async function main(): Promise<void> {
     assert(new SignConfigError('E_SIGN_CONFIG_INVALID', 'x') instanceof Error, '配置错误应是 Error');
     assert(new RemoteSignError('E_SIGN_NO_SIGNATURE', 'x') instanceof Error, '调用错误应是 Error');
   });
-
-  /* ========================= S7 接入内核（配置 → Signer） ========================= */
 
   await test('S7 接入内核：配置 → Signer；未配置一律拒绝，签出的值可被独立验签', async () => {
     assertEqual(

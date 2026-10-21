@@ -1,29 +1,20 @@
-// 即时结构化：把文本映射成数据元标签的提议，采纳与否由调用方决定。
-// 未命中返回 tag: null；置信度受 confidenceCeiling 压制。
-
 import { matchLongest, type DictationPlacementConfig } from '../dictation/placement.ts';
 import type { DataElementTag } from '../model/types.ts';
 
 export const TERM_MATCH_CONFIDENCE = 0.8;
 
 export interface StructureProposalItem {
-  /** 段序（从 1 起） */
   index: number;
   text: string;
-  /** 提议绑定的数据元；null = 未命中，不打标 */
   tag: DataElementTag | null;
   matched: string | null;
-  /** 已被 confidenceCeiling 压制；未命中恒为 0 */
   confidence: number;
-  /** 标了什么 / 为什么没标 */
   reason: string;
 }
 
 export interface StructureProposalOutcome {
-  /** 为 false 时不参与，warnings 里说明原因 */
   enabled: boolean;
   items: StructureProposalItem[];
-  /** 真正产出标签的条数 */
   proposed: number;
   warnings: string[];
 }

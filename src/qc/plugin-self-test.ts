@@ -1,5 +1,3 @@
-// 算子插件自测（P1~P9）。
-
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,7 +42,6 @@ const view = (over: Partial<QcNodeView> = {}): QcNodeView => ({
   ...over,
 });
 
-/** 一份真实可用的插件：一个算子「字数多于 N 字」 */
 const MODULE_SOURCE = `
 export function register(api) {
   api.defineOperator('demo-length-over', {
@@ -120,7 +117,7 @@ async function main(): Promise<void> {
 
     await test('P2 清单被改过 → 签名失效；实现被改过 → 文件摘要不符', () => {
       writePlugin();
-      verifyPluginDir(PLUGIN_DIR, KEY); /* 先证明合法的那一份能过 */
+      verifyPluginDir(PLUGIN_DIR, KEY);
 
       const manifestPath = join(PLUGIN_DIR, 'qc-plugin.json');
       const original = readFileSync(manifestPath, 'utf8');
@@ -151,7 +148,6 @@ async function main(): Promise<void> {
     });
 
     await test('P4 清单与模块不一致要拒：多注册一个算子，或少了实现', async () => {
-      /* 多注册：模块里多定义一个清单没写的算子 */
       writePlugin({
         module: `${MODULE_SOURCE}\nexport function extra(api) { api.defineOperator('demo-not-declared', { evaluate: () => ({ hit: true }) }); }\n`,
       });
@@ -166,7 +162,6 @@ async function main(): Promise<void> {
       assertEqual(extraReport.failures[0]?.code, E_PLUGIN_OPERATOR_MISMATCH, '报"清单与模块不一致"');
       rmSync(PLUGIN_DIR, { recursive: true, force: true });
 
-      /* 少实现：清单里声明了两个，模块只注册一个 */
       writePlugin({
         manifest: {
           operators: [
@@ -195,7 +190,6 @@ async function main(): Promise<void> {
         '下发界面的清单里也要有它（否则界面上拼不出来，而引擎却认它）',
       );
 
-      /* 用它的规则要能跑：字段 × 算子组合校验、取值校验、判定都走既有那段代码 */
       const [rule] = compileRulePack(packRef({
         kind: 'all',
         children: [
@@ -257,7 +251,6 @@ async function main(): Promise<void> {
   }
 }
 
-/** 被测的那条规则：引用刚装上的插件算子 */
 function packRef(when: unknown): QcRulePack {
   return {
     packId: 'qc.plugin-test',

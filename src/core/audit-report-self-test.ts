@@ -1,5 +1,3 @@
-// T28 验收自测：审计报告。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
 import { WriteSession } from './session.ts';
@@ -25,19 +23,9 @@ function baseDoc(): DocumentModel {
   doc.patient = { patientId: 'P_AUDIT', nameMasked: '钱**', gender: 'F', birthDate: '1975-03-03' };
   const session = WriteSession.open(doc);
   session.exportMachineReadable();
-  /* 取 session 的文档副本：写会话内部是克隆的，改原对象不会反映进去 */
   return session.document;
 }
 
-/**
- * 造一份文档并改造内容节点（审计只读文档，因此夹具可以直接改 provenance）。
- *
- * 注意这里刻意不再走 `WriteSession.open` 重算机读信息，原因有两条（都是实测踩出来的）：
- *   1) 写会话会克隆文档，改了原对象等于白改；
- *   2) 写会话打开时会校验文档，而夹具故意造的就是"未确认的 AI 内容 / 缺 provenance"这类非法状态，
- *      一旦走写路径就直接抛错，测的就不是审计而是写路径了。
- * 审计只比较 `sourceHash` 与内容哈希，直接把快照对齐即可。
-  */
 function withNodes(mutate: (nodes: Record<string, DocNode>, doc: DocumentModel) => void): DocumentModel {
   const doc = baseDoc();
   mutate(doc.nodes as Record<string, DocNode>, doc);
@@ -112,7 +100,7 @@ async function main(): Promise<void> {
   await test('B1 AI 来源不完整 → 失败并给出**具体节点**（否则无法复核）', () => {
     const doc = withNodes((nodes) => {
       const node = (Object.values(nodes) as DocNode[]).find((item) => item.type === 'text')!;
-      node.provenance = prov('ai', { evidence: [] }); // 缺 modelId / confidence
+      node.provenance = prov('ai', { evidence: [] });
     });
     const check = checkOf(buildAuditReport({ doc, generatedAt: AT }), 'AI_PROVENANCE_COMPLETE');
     assertEqual(check.pass, false, '缺模型标识必须不通过');
@@ -160,7 +148,6 @@ async function main(): Promise<void> {
     const doc = withNodes((nodes) => {
       const node = (Object.values(nodes) as DocNode[]).find((item) => item.type === 'text')!;
       node.humanConfirmed = true;
-      /* 换一个留痕里不会出现的节点 id：模拟"标记被写上了，但没有任何操作记录" */
       node.id = `n_ghost_${node.id}`;
     });
     const check = checkOf(buildAuditReport({ doc, generatedAt: AT }), 'HUMAN_CONFIRMATION_RECORDED');
@@ -202,7 +189,6 @@ async function main(): Promise<void> {
     assert(check.detail.includes('sig_1'), '应指出哪个签名');
     assert(check.detail.includes('Document.xml'), '证据里应带实际 covers（便于核对口径）');
 
-    /* covers 是容器内文件路径：机读信息载体形如 MachineReadable.xml */
     doc.signatureRefs[0]!.covers = ['Document.xml', 'MachineReadable.xml'];
     assertEqual(checkOf(buildAuditReport({ doc, generatedAt: AT }), 'SIGNATURE_COVERS_MACHINE_READABLE').pass, true, '覆盖机读文件则应通过');
   });
@@ -251,7 +237,7 @@ async function main(): Promise<void> {
   await test('D2 结论摘要与 checks 一致（通过的条数不能与实际不符）', () => {
     const doc = withNodes((nodes) => {
       const node = (Object.values(nodes) as DocNode[]).find((item) => item.type === 'text')!;
-      node.provenance = prov('ai', { evidence: [] }); // 故意让一条失败
+      node.provenance = prov('ai', { evidence: [] });
     });
     const report = buildAuditReport({ doc, generatedAt: AT });
     const passed = report.checks.filter((check) => check.pass).length;
@@ -311,8 +297,6 @@ async function main(): Promise<void> {
 
   await test('F4 审签流程：还原"谁在何时把这份病历推到哪一态"，没有迁移就不渲染该节', () => {
     const doc = withNodes(() => {});
-    /* 留痕是直接构造的：审计只按留痕还原，不必真的走一遍状态机 ——
-       而"还原得对不对"恰恰要用构造好的留痕来验（真实链路的覆盖在 `review-flow-self-test`） */
     doc.revisions.push(
       { rev: 2, at: AT, actorId: 'DR_A', op: 'submit', targetId: 'n_root', review: { decision: 'submit' } },
       { rev: 3, at: AT, actorId: 'DR_R', op: 'review', targetId: 'n_root', review: { decision: 'reject', note: '主诉缺时间' } },
@@ -330,8 +314,6 @@ async function main(): Promise<void> {
     assert(markdown.includes('审核退回'), '动作要说人话（不是把 op 原样丢出去）');
     assert(markdown.includes('主诉缺时间'), '理由要在报告里看得见');
 
-    /* 没有状态迁移的文档不该出现空小节 —— 空节会被读成"这份没走审核"，
-       而事实是"这份走没走审核，我也不知道" */
     const plain = buildAuditReport({ doc: withNodes(() => {}), generatedAt: AT });
     assertEqual(plain.reviewFlow.length, 0, '没有迁移就没有审签流');
     assert(!renderAuditReportMarkdown(plain).includes('## 六、审签流程'), '不应渲染空的审签流小节');

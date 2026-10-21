@@ -4,71 +4,40 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>电子病历编辑器</title>
-<!-- 结构与样式/脚本分离：/ui.css、/ui.js 由服务端托管，均 no-store，改动立即生效 -->
 <link rel="stylesheet" href="/ui.css" />
-<!-- 自定义弹框（确认 / 提示 / 一句话）先于 ui.js：两页共用同一份，见 dialog.js 的文件头 -->
 <script src="/dialog.js" defer></script>
-<!-- 正文渲染（正文与树木节点的那套 HTML）：与 ui.css 同理，两页共用同一份 ——
-     「模板预览」画的就是这里画的这一套，分开两份必然会分叉（见 doc-view.js 的文件头） -->
+<script src="/patch-plan.js" defer></script>
 <script src="/doc-view.js" defer></script>
-<!-- 自由流式视图（整页连续书写）：与 doc-view.js 并列的第二种编辑方式。
-     两者都必须在本页脚本之前 —— ui.js 直接调它们的全局对象（L0DocView / L0FlowView） -->
 <script src="/flow-view.js" defer></script>
-<!-- 命令面板（Ctrl+K）：纯界面件，候选与动作由 ui.js 注入（见 command-palette.js 的文件头） -->
 <script src="/command-palette.js" defer></script>
-<!-- 宿主接入桥：被嵌进医生工作站时的那一层（`?host=1`）。
-     必须在 ui.js 之前 —— 它决定"启动要不要先等宿主注入"，晚一步就会先按全量画一帧再被摘掉。
-     独立运行时它只是个空监听，页面行为与引入它之前一致。 -->
 <script src="/host-bridge.js" defer></script>
 <script src="/ui.js" defer></script>
+<style id="printPageRule"></style>
 </head>
 <body>
 <header>
   <div class="patient-card" id="patientCard"></div>
   <div class="hdr-actions">
-    <!-- 显示密度：与"编辑方式"（卡片 / 流式）是**两个正交维度**，所以是两个开关。
-         两个都只是视图偏好：不改数据、不改 rev、不进留痕。
-         显示密度住在这里、保持下拉形态，是因为它管的是**整页**（连面板里的内部标识一起）、
-         而且它是一次设置、不是频繁动作；而编辑方式是"换一种看这片纸的方式"，
-         所以它住在正文卡自己的标题行右侧，且做成分段控件（见下面 #editMode）。 -->
     <select id="viewMode" title="演示模式显示内部标识与错误码，供评审与排查；临床模式只显示医生需要的信息。数据均为虚构。">
       <option value="demo">演示模式</option>
       <option value="clinical">临床模式</option>
     </select>
     <span class="badge-status" id="docStatus">加载中…</span>
     <input type="file" id="fileInput" accept=".ofd,.xml,.dat,.txt,application/octet-stream,text/xml" class="hide" />
-    <!-- 能力开关：宿主已有导入链路时，这个入口整个不出现（见 ui.js 的 applyCapabilities） -->
     <button id="btnImport" data-capability="import">导入病历文件</button>
-    <!-- 「新建」在「保存」之前：它的顺序就是医生的写作顺序 —— 先建一份、再往里写、途中才保存。
-         点它先弹一份"能开哪几类文书"的清单（见 ui.js 的 pickTemplate）：这一步只是选，不是写。 -->
     <button id="btnTplCreate" title="新建一份文书：先选文书类型，模板只提供章节骨架与数据元绑定，正文由医生填写">新建</button>
     <button id="btnSaveAll" title="把还没保存的编辑立刻落盘（平时失焦 250ms 会自动保存，这里是手动兜底）">保存</button>
-    <!-- 「撤销」点开的是历史版本列表（最近 15 次）：一次误操作该撤最近一笔，
-         而"我要回到三小时前那一版"根本不是同一个动作 —— 两件事放在一个弹层里，
-         上面一键撤最近一次，下面按版回退，谁也不会被另一个挡住。 -->
     <button id="btnUndo" title="撤销 / 历史版本（最近 15 次，可回到任意一版）">撤销</button>
-        <!-- 「重置工作区」的入口已从本页撤掉：它两种模式都要求管理员身份，
-         而医生端已经没有登录入口，留在顶栏就是一个永远点不动的按钮。
-         入口搬到了管理后台的「系统信息 → 工作区」（那里才有登录与会话）；
-         服务端的 `/api/reset` 与权限判定保持不变（`workspace.reset` 只给管理员）。 -->
-    <!-- 命令面板的可见入口：全键盘是快捷方式，不是唯一方式。
-         藏在快捷键背后等于只有已经知道它的人能用 —— 发现性不是可选项。 -->
     <button id="btnPalette" title="命令面板：跳转段落 / 插入检验值 / 套模板 / 查术语（Ctrl+K）">命令</button>
+    <button id="btnMyContent" title="个人模板：常用语与内容段落（常用语插进当前这一句，内容段落整段带入）">个人模板</button>
     <button id="btnKeys" class="icon-btn" title="键盘快捷键（按 ? 显示 / 隐藏）" aria-label="键盘快捷键帮助">⌨</button>
     <button id="btnTheme" class="icon-btn" title="切换深色 / 浅色主题" aria-label="切换深色 / 浅色主题">◐</button>
-        <!-- 「一键演示」按钮与它的 `?auto=1` 入口已一并移除（连 `runAuto` 脚本一起）：
-         它是一段"自动跑完 AI 链路"的演示脚本，与页面上的真实操作走两套代码路径，
-         长期只能靠静态用例盯着它别走样。演示收敛为"真人在页面上点"。 -->
-        <!-- 能力配置在管理后台独立页面（/admin）；医生端只留入口，不摆配置控件。
-         入口不等于权限：权限由服务端 requireAdminSession 判定。 -->
-        <!-- 医生端不再有「登录 / 退出」与身份显示：本页按演示口径给（写病历不需要会话），
-         身份取服务端已有会话（要在本页写下一份署名，也由服务端从会话里取）。
-         登录、改配置、以及被收口的破坏性动作，都在右边这个入口的管理后台里。 -->
+    <button id="btnPaper" class="icon-btn" title="纸张视图：按 A4 纸面预览（再点一次回到普通视图）"
+      aria-label="纸张视图" aria-pressed="false">▤</button>
     <button id="btnAdmin" title="管理后台：配置模型地址、签名服务、授权源与落位策略，需要管理员登录。">管理后台</button>
   </div>
 </header>
 
-<!-- 全局进行中指示：请求期间可见 -->
 <div class="busy-bar" id="busyBar" aria-hidden="true" hidden></div>
 
 <main>
@@ -76,19 +45,26 @@
     <div class="card">
       <h2>患者病历 <span class="sub" id="treeSummary"></span></h2>
       <div class="body flush">
-        <!-- 「新建」已移到顶栏（在「保存」之前）：左栏只留病历树，树上面不再压一条选模板的横条。
-             模板只提供骨架（章节、数据元绑定、关键内容标记），正文由医生填写。 -->
         <div class="tree" id="tree"></div>
       </div>
     </div>
 
-        <!-- 这里原先有「操作者」卡片（账号 / 口令、已登录身份、可执行的操作）。
-         整卡摘掉：医生端不再出现登录入口，也不再有任何"按身份置灰"的按钮
-         （原先只有「重置」一个，它也已从顶栏撤掉），身份一律由服务端会话决定。 -->
   </section>
 
   <section class="col mid" id="midCol" aria-label="病历正文">
     <div class="doc-wrap">
+      <div class="findbar" id="findBar" hidden role="search" aria-label="查找替换">
+        <input id="findInput" class="find-input" placeholder="查找" autocomplete="off" aria-label="查找内容" />
+        <input id="findReplace" class="find-input" placeholder="替换为（留空 = 删除）" autocomplete="off" aria-label="替换为" />
+        <button id="findCase" title="区分大小写" aria-label="区分大小写" aria-pressed="false">Aa</button>
+        <span class="find-count" id="findCount" aria-live="polite">0 / 0</span>
+        <button id="findPrev" title="上一处（Shift+Enter）" aria-label="上一处">↑</button>
+        <button id="findNext" title="下一处（Enter）" aria-label="下一处">↓</button>
+        <button id="findReplaceOne" title="替换这一处">替换</button>
+        <button id="findReplaceAll" title="全部替换">全部替换</button>
+        <button id="findClose" title="关闭（Esc）" aria-label="关闭查找">×</button>
+      </div>
+
       <div class="card hide" id="importCard">
         <h2>导入来源与核对提示 <span class="sub" id="importMeta"></span></h2>
         <div class="body" id="importBody"></div>
@@ -98,16 +74,13 @@
         <h2 class="doc-head">病历正文 <span class="sub" id="docMeta"></span>
           <span class="right">
             <span id="dirtyBadge" class="chip warn hide">有未保存编辑</span>
-            <!-- 编辑方式（卡片 / 流式）放在**正文卡自己的标题行右侧**，而不是顶栏：
-                 它换掉的是"这一片纸怎么落笔"，作用范围就是下面这块纸；
-                 顶栏留给与整页有关的动作（显示密度、导入、保存）。
-                 它与显示密度仍是**两个正交维度**，合成一个控件仍说不清"我在切什么"。
-
-                 形态是**分段控件**而不是下拉：它只有两个选项，而"现在在哪个"必须一眼看见 ——
-                 下拉要先展开、选完还得回头读一眼才知道自己在哪，而这里切换的正是眼前这片纸的形态。
-                 每个选项带一枚图标，画的就是那个选项**产出的版式本身**
-                 （两个框 = 一段一张卡片；三行字 = 整页连续书写），不读字也认得出。
-                 滑块（`.seg-thumb`）全组只有一枚，位置由容器的 `data-mode` 决定（见 ui.css）。 -->
+            <div class="font-ctl" id="docFont" role="group" aria-label="正文字号">
+              <button type="button" data-font="-1" title="缩小正文字号（最小 14px，可读性底线）"
+                      aria-label="缩小正文字号">A−</button>
+              <span class="font-now" id="docFontNow" aria-live="polite" title="正文字号（像素）：只作用于病历正文">14</span>
+              <button type="button" data-font="1" title="放大正文字号：只作用于病历正文，界面不变"
+                      aria-label="放大正文字号">A+</button>
+            </div>
             <div class="seg seg-edit" id="editMode" role="radiogroup" aria-label="编辑方式" data-mode="card">
               <span class="seg-thumb" aria-hidden="true"></span>
               <button type="button" class="seg-item" data-mode="card" role="radio" aria-checked="true"
@@ -122,27 +95,25 @@
           </span>
         </h2>
         <div class="muted" id="docNotice" aria-live="polite"></div>
-        <!-- 落盘冲突的出路：入口与"影响什么、不影响什么"放在一起（有后果的操作，不能只给裸按钮）。
-             平时整行隐藏，冲突时由 ui.js 按 S.sidecar.conflict 放开。 -->
         <div class="row hide" id="sidecarConflictRow">
           <span class="muted" id="sidecarConflictHint" aria-live="polite"></span>
           <button class="danger" id="btnReloadSidecars" title="接受盘上那一版：放弃本终端尚未落盘的建议与注解处置，正文 / 留痕 / 签名不受影响">重新载入</button>
         </div>
-        <!-- 派生值重算入口：只在本文书真有派生值时出现（由 ui.js 按 S.derivedCount 切换）。 -->
         <div class="row hide" id="derivedRow">
           <span class="muted" id="derivedHint" aria-live="polite"></span>
           <button id="btnRecompute" title="按控件公式重算派生值：手改过的不动，缺输入的不编数">重算派生值</button>
         </div>
-        <!-- 段内格式工具：只在流式模式下出现（由 ui.js 按编辑范式切换 hidden）。
-             为什么放在可编辑区外面：放进去它就成了"纸面的一部分"，
-             会被跨段选中一起选中、也会被光标流穿过 —— 而它是操作，不是内容。 -->
         <div class="ftools" id="flowTools" hidden>
           <span class="muted">段内格式</span>
           <button data-mark="bold" title="加粗选中的字（也可用 Ctrl+B）"><b>B</b></button>
           <button data-mark="italic" title="斜体（也可用 Ctrl+I）"><i>I</i></button>
           <button data-mark="underline" title="下划线（也可用 Ctrl+U）"><u>U</u></button>
+          <button data-mark="highlight" title="高亮选中的字（也可用 Ctrl+Shift+H）"><mark>H</mark></button>
+          <button data-mark="sup" title="上标：如 10⁹（也可用 Ctrl+Shift+=）">x<sup>2</sup></button>
+          <button data-mark="sub" title="下标：如 H₂O（也可用 Ctrl+=）">x<sub>2</sub></button>
           <span class="muted">回车拆段 · 段首退格合段 · 可跨段选中</span>
         </div>
+        <div class="ftools-spacer" id="flowToolsSpacer" aria-hidden="true" hidden></div>
         <div class="body doc" id="docBody">
           <div class="empty" role="status">正在加载工作区…</div>
         </div>        
@@ -153,31 +124,22 @@
   <section class="col rail" id="rail" aria-label="工作面板">
     <div class="tabbar" id="tabbar" role="tablist" aria-label="工作面板菜单">
       <button class="tab active" data-tab="ai" role="tab" id="tab-ai" aria-controls="panel-ai" aria-selected="true" title="AI 助手（本地规则模拟）"><span class="ti" aria-hidden="true">✦</span><span class="tl">AI 助手</span><span class="tdot warn" id="tabDotAi"></span></button>
-      <button class="tab" data-tab="voice" role="tab" id="tab-voice" aria-controls="panel-voice" aria-selected="false" title="语音转写（模拟 ASR，只接收带时间戳的转写流）"><span class="ti" aria-hidden="true"><!-- 麦克风：这一栏是"把医生说的话转成文字"，用音符会读成"音乐" --><svg class="ti-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="9" y="2.5" width="6" height="11" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"></path><path d="M12 18v3.5"></path><path d="M8.5 21.5h7"></path></svg></span><span class="tl">语音转写</span><span class="tdot" id="tabDotVoice"></span></button>
+      <button class="tab" data-tab="voice" role="tab" id="tab-voice" aria-controls="panel-voice" aria-selected="false" title="语音转写（模拟 ASR，只接收带时间戳的转写流）"><span class="ti" aria-hidden="true"><svg class="ti-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><rect x="9" y="2.5" width="6" height="11" rx="3"></rect><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"></path><path d="M12 18v3.5"></path><path d="M8.5 21.5h7"></path></svg></span><span class="tl">语音转写</span><span class="tdot" id="tabDotVoice"></span></button>
       <button class="tab" data-tab="qc" role="tab" id="tab-qc" aria-controls="panel-qc" aria-selected="false" title="质控提示（旁挂数据，不计入文档内容）"><span class="ti" aria-hidden="true">⚠</span><span class="tl">质控提示</span><span class="tdot" id="tabDotQc"></span></button>
-      <button class="tab" data-tab="timeline" role="tab" id="tab-timeline" aria-controls="panel-timeline" aria-selected="false" title="就诊时间轴（把一次就诊的全部文书摊在一条线上，并列出缺什么：超时 / 未签 / 缺口 / 变化没写进病程）"><span class="ti" aria-hidden="true"><!-- 时间线：一条横轴串起几个节点。换掉沙漏（⌛）：那读起来是"等待/倒计时"，
-            而这一栏说的是"文书按成文时刻排开、缺口落在线上"，线条才说得清这件事 --><svg class="ti-time" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" focusable="false"><path d="M3 12h18"></path><circle cx="6.8" cy="12" r="2" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"></circle><circle cx="17.2" cy="12" r="2" fill="currentColor" stroke="none"></circle></svg></span><span class="tl">时间轴</span><span class="tdot" id="tabDotTimeline"></span></button>
+      <button class="tab" data-tab="timeline" role="tab" id="tab-timeline" aria-controls="panel-timeline" aria-selected="false" title="就诊时间轴（把一次就诊的全部文书摊在一条线上，并列出缺什么：超时 / 未签 / 缺口 / 变化没写进病程）"><span class="ti" aria-hidden="true"><svg class="ti-time" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" focusable="false"><path d="M3 12h18"></path><circle cx="6.8" cy="12" r="2" fill="currentColor" stroke="none"></circle><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"></circle><circle cx="17.2" cy="12" r="2" fill="currentColor" stroke="none"></circle></svg></span><span class="tl">时间轴</span><span class="tdot" id="tabDotTimeline"></span></button>
       <button class="tab" data-tab="machine" role="tab" id="tab-machine" aria-controls="panel-machine" aria-selected="false" title="机读信息"><span class="ti" aria-hidden="true">{}</span><span class="tl">机读信息</span><span class="tdot" id="tabDotMachine"></span></button>
       <button class="tab more" id="btnMoreTabs" title="装不下的页签收在这里（点开可切换）" aria-haspopup="true" aria-expanded="false" aria-label="更多页签">⋯</button>
       <div class="more-menu" id="moreMenu" hidden>
-        <button class="tab more-item" data-tab="compare" data-optional="compare" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected="false" title="跨次就诊对比（同一患者的其他就诊文书与本次按章节并排：新增/删除/改写各是哪段）"><span class="ti" aria-hidden="true"><!-- 两列并排：这一栏看的就是"上次 vs 这次" --><svg class="ti-compare" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" focusable="false"><path d="M9 4v16"></path><path d="M15 4v16"></path><path d="M4 8h3"></path><path d="M4 14h3"></path><path d="M17 9h3"></path><path d="M17 16h3"></path></svg></span><span class="tl">跨次对比</span><span class="tdot" id="tabDotCompare"></span></button>
-        <button class="tab more-item" data-tab="discharge" data-optional="discharge" data-visit-scope="inpatient" role="tab" id="tab-discharge" aria-controls="panel-discharge" aria-selected="false" title="出院汇总（从本次住院的入院记录 / 病程记录搬原文进出院小结，并列出缺哪份文书、哪一章）"><span class="ti" aria-hidden="true"><!-- 下箭头进方框：这一栏做的是"把别处的内容收进这一份" --><svg class="ti-derive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12 3v10"></path><path d="M8 9l4 4 4-4"></path><path d="M4 17v3h16v-3"></path></svg></span><span class="tl">出院汇总</span><span class="tdot" id="tabDotDischarge"></span></button>
-        <button class="tab more-item" data-tab="previsit" data-optional="previsit" role="tab" id="tab-previsit" aria-controls="panel-previsit" aria-selected="false" title="预问诊（患者候诊时自填，由接口写入；这里逐条列出原文与采集时刻，勾选后只生成建议，不落笔）"><span class="ti" aria-hidden="true"><!-- 表单：几条横线 + 一个勾。这一栏读的是"别人填好的东西"，不是病历正文 --><svg class="ti-form" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" focusable="false"><path d="M5 5h14"></path><path d="M5 10h9"></path><path d="M5 15h6"></path><path d="M14 17.5l2 2 4-4.5"></path></svg></span><span class="tl">预问诊</span><span class="tdot" id="tabDotPrevisit"></span></button>
+        <button class="tab more-item" data-tab="compare" data-optional="compare" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected="false" title="跨次就诊对比（同一患者的其他就诊文书与本次按章节并排：新增/删除/改写各是哪段）"><span class="ti" aria-hidden="true"><svg class="ti-compare" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" focusable="false"><path d="M9 4v16"></path><path d="M15 4v16"></path><path d="M4 8h3"></path><path d="M4 14h3"></path><path d="M17 9h3"></path><path d="M17 16h3"></path></svg></span><span class="tl">跨次对比</span><span class="tdot" id="tabDotCompare"></span></button>
+        <button class="tab more-item" data-tab="discharge" data-optional="discharge" data-visit-scope="inpatient" role="tab" id="tab-discharge" aria-controls="panel-discharge" aria-selected="false" title="出院汇总（从本次住院的入院记录 / 病程记录搬原文进出院小结，并列出缺哪份文书、哪一章）"><span class="ti" aria-hidden="true"><svg class="ti-derive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false"><path d="M12 3v10"></path><path d="M8 9l4 4 4-4"></path><path d="M4 17v3h16v-3"></path></svg></span><span class="tl">出院汇总</span><span class="tdot" id="tabDotDischarge"></span></button>
+        <button class="tab more-item" data-tab="previsit" data-optional="previsit" role="tab" id="tab-previsit" aria-controls="panel-previsit" aria-selected="false" title="预问诊（患者候诊时自填，由接口写入；这里逐条列出原文与采集时刻，勾选后只生成建议，不落笔）"><span class="ti" aria-hidden="true"><svg class="ti-form" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" focusable="false"><path d="M5 5h14"></path><path d="M5 10h9"></path><path d="M5 15h6"></path><path d="M14 17.5l2 2 4-4.5"></path></svg></span><span class="tl">预问诊</span><span class="tdot" id="tabDotPrevisit"></span></button>
         <button class="tab more-item" data-tab="export" data-optional="export" data-capability="finalize" role="tab" id="tab-export" aria-controls="panel-export" aria-selected="false" title="定稿与导出"><span class="ti" aria-hidden="true">✓</span><span class="tl">定稿与导出</span><span class="tdot" id="tabDotExport"></span></button>
         <button class="tab more-item" data-tab="log" data-optional="log" data-capability="log" role="tab" id="tab-log" aria-controls="panel-log" aria-selected="false" title="门控日志（排查用，含被拒操作的原因）"><span class="ti" aria-hidden="true">≡</span><span class="tl">门控日志</span><span class="tdot" id="tabDotLog"></span></button>
-        <button class="tab more-item" data-tab="metrics" data-optional="metrics" data-capability="metrics" role="tab" id="tab-metrics" aria-controls="panel-metrics" aria-selected="false" title="指标与留痕（审计用）"><span class="ti" aria-hidden="true"><!-- 柱状图：这一栏看的是"几个数字 + 谁在什么时候动过"，方块加横线那枚读起来像一张表格 --><svg class="ti-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" focusable="false"><path d="M5 20v-7"></path><path d="M12 20V4"></path><path d="M19 20v-11"></path></svg></span><span class="tl">指标与留痕</span><span class="tdot" id="tabDotMetrics"></span></button>
+        <button class="tab more-item" data-tab="metrics" data-optional="metrics" data-capability="metrics" role="tab" id="tab-metrics" aria-controls="panel-metrics" aria-selected="false" title="指标与留痕（审计用）"><span class="ti" aria-hidden="true"><svg class="ti-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" focusable="false"><path d="M5 20v-7"></path><path d="M12 20V4"></path><path d="M19 20v-11"></path></svg></span><span class="tl">指标与留痕</span><span class="tdot" id="tabDotMetrics"></span></button>
       </div>
     </div>
     <div class="reject-banner" id="rejectBanner" role="alert" hidden></div>
 
-        <!-- 配置抽屉：<dialog> + showModal()（top layer，不受祖先层叠上下文影响）；不参与页签体系 -->
-        <!--
-      这份标记已不再使用：配置已搬到管理后台独立页面（/admin，见 admin.html、admin.js）。
-      删除它需同步修改 4 处静态断言（ui-self-test 的 A2/A3/A4 扫描源、A6/A20 抽屉结构、B28 身份字段）。
-      在此之前它处于惰性状态：<dialog> 没有 open 属性，也没有代码会打开它。
-    -->
-    <!-- 历史版本抽屉：撤销按钮打开它。只列最近 15 次（更早的在「指标与留痕」与审计报告里，
-         这里不放全量：一次点开滚动几十行，找的是"哪一版"，不是"翻档案"）。 -->
     <dialog class="drawer" id="historyDrawer" aria-labelledby="historyDrawerTitle">
       <div class="drawer-head">
         <h3 id="historyDrawerTitle">撤销 / 历史版本</h3>
@@ -186,22 +148,88 @@
       <div class="pb" id="historyBody"></div>
     </dialog>
 
+    <dialog class="drawer" id="sourceDrawer" aria-labelledby="sourceDrawerTitle">
+      <div class="drawer-head">
+        <h3 id="sourceDrawerTitle">这几句的来源</h3>
+        <button id="sourceClose" aria-label="关闭来源" title="关闭（也可按 Esc）">×</button>
+      </div>
+      <div class="pb" id="sourceBody"></div>
+    </dialog>
+
+    <dialog class="drawer" id="contentDrawer" aria-labelledby="contentDrawerTitle">
+      <div class="drawer-head">
+        <h3 id="contentDrawerTitle">个人模板</h3>
+        <button id="contentClose" aria-label="关闭个人模板" title="关闭（也可按 Esc）">×</button>
+      </div>
+      <div class="pb" id="contentBody">
+        <div class="row tpl-toolbar content-toolbar">
+          <input type="search" id="contentSearch" placeholder="按名称 / 内容筛选（不区分大小写）"
+                 title="按名称、触发词或正文片段筛；留空 = 全列。两个页签共用同一个条件。" />
+          <label class="content-continuous" title="勾上后：带入一条不关闭抽屉，落点自动接到刚插入的字后面（适合一套查体连着挑几条）">
+            <input type="checkbox" id="contentContinuous" /> 连续带入
+          </label>
+          <button class="secondary" id="btnSaveSection"
+                  title="把光标所在那一章的每一段一次存成一条内容段落（空段不存，患者信息换成占位符）">从当前章另存</button>
+          <button class="primary" id="btnNewMyPhrase">新建内容</button>
+        </div>
+
+        <div class="content-target" id="contentTarget"></div>
+
+        <div class="content-tabs cfg-tabs" id="contentTabs" role="tablist" aria-label="个人模板分类">
+          <button type="button" role="tab" class="cfg-tab" data-content-tab="phrase" aria-selected="true" aria-controls="contentList">
+            常用语 <span class="content-count" id="contentPhraseCount">0</span>
+          </button>
+          <button type="button" role="tab" class="cfg-tab" data-content-tab="content-paragraph" aria-selected="false" aria-controls="contentList">
+            内容段落 <span class="content-count" id="contentParaCount">0</span>
+          </button>
+        </div>
+
+        <div class="hist-error" id="contentErrors" hidden></div>
+        <div id="contentList" role="tabpanel" aria-live="polite"></div>
+      </div>
+    </dialog>
+
+    <dialog class="app-dialog content-editor" id="contentEditor" aria-labelledby="contentEditorTitle">
+      <form id="contentEditorForm">
+        <div class="app-dialog-title" id="contentEditorTitle">新建内容</div>
+        <label class="content-field">
+          <span>名称</span>
+          <input id="contentName" type="text" maxlength="60" autocomplete="off"
+                 placeholder="清单里那一行，如“腹部查体（正常）”“已告知病情”" />
+        </label>
+        <label class="content-field">
+          <span>触发词（可选）</span>
+          <input id="contentTrigger" type="text" maxlength="12" autocomplete="off"
+                 placeholder="如 fb：正文里输入 ;fb 再按空格，直接带入这一条（常用语插进当前句，多段落另起）" />
+        </label>
+        <label class="content-field">
+          <span>内容</span>
+          <textarea id="contentText" rows="8" placeholder="直接写正文。一行 = 插进当前这一句；按回车换行 = 会在光标之后另起段落。"></textarea>
+        </label>
+        <div class="content-similar" id="contentSimilar" hidden></div>
+        <div class="content-compose-foot">
+          <span class="muted" id="contentHint">一行话：会插进光标所在的那一句</span>
+          <span class="app-dialog-actions">
+            <button type="button" class="secondary" id="btnContentCancel" data-dialog="cancel">取消</button>
+            <button type="submit" class="primary" id="btnContentSave" data-dialog="ok">保存</button>
+          </span>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="drawer" id="modelDrawer" aria-labelledby="modelDrawerTitle" aria-describedby="modelDrawerDesc">
       <div class="drawer-head">
         <div>
           <h3 id="modelDrawerTitle">配置管理</h3>
           <div class="muted" id="modelDrawerDesc">AI 功能接入配置 · 管理员操作</div>
         </div>
-                <!-- 管理员身份放在抽屉头部：五个子页签的保存与测试都用到它 -->
         <label class="cfg-admin">管理员身份
           <input id="cfgAdmin" required placeholder="必填（会记入审计日志）" />
         </label>
         <button id="cfgClose" aria-label="关闭配置管理" title="关闭（也可按 Esc 或点击右侧阴影）">×</button>
       </div>
       <div class="pb">
-                <!-- 只放需要配置的字段；设计论证见 docs/ -->
 
-                <!-- 子页签：三类配置各自成页；页签表达载体，不表达功能 -->
         <div class="cfg-tabs" role="tablist" aria-label="配置分类">
           <button class="cfg-tab active" role="tab" data-cfg-tab="model" id="cfgTabModel" aria-controls="cfgPaneModel" aria-selected="true">AI 模型接入</button>
           <button class="cfg-tab" role="tab" data-cfg-tab="voice" id="cfgTabVoice" aria-controls="cfgPaneVoice" aria-selected="false">语音转写</button>
@@ -227,7 +255,6 @@
           </div>
           <div id="cfgStatus" class="muted cfg-status" aria-live="polite"></div>
           <div class="row">
-                        <!-- 保存用 primary（蓝）而非 ai（紫）：紫色是 "AI 产出内容" 的专用色 -->
             <button class="primary" id="cfgSave">保存</button>
             <button id="cfgTest">测试连接</button>
             <button id="cfgClearKey">清除密钥</button>
@@ -253,8 +280,6 @@
             <span>密钥</span><input id="cfgPlaceApiKey" type="password" placeholder="留空 = 不修改（已配置的密钥永不回显）" />
           </div>
           <textarea id="cfgPlaceTerms" rows="3" class="cfg-terms" placeholder="每行一条：主诉=t_1&#10;现病史=t_2"></textarea>
-          <!-- 即时结构化（V4）：命中即**提议**把这一段绑成某个数据元，医生采纳才落笔。
-               未命中、或词表为空时一条都不产 —— 标签会进机读信息被下游直接消费，猜错比不打更糟。 -->
           <textarea id="cfgPlaceStructure" rows="3" class="cfg-terms" placeholder="结构化词表（每行一条）：体温=WS445:DE05.01.001:体温&#10;格式：词=体系:编码[:显示名]；留空 = 不做任何数据元提议"></textarea>
           <div id="cfgPlaceStatus" class="muted cfg-status" aria-live="polite"></div>
           <div class="row">
@@ -363,7 +388,6 @@
         <span class="ph-badge" id="badgeAi"></span>
       </h2>
       <div class="pb">
-                <!-- 操作区：可点控件集中放置，每个独占一行、左对齐 -->
         <div class="stack">
           <div class="row">
             <span class="ai-label">产出方式</span>
@@ -395,8 +419,6 @@
           <button id="btnToggleProcessed" title="默认只显示待处理；已处理（含被拒绝）的记录仍在数据与留痕中，点击可切换查看">显示已处理（含拒绝）</button>
         </div>
         <div class="muted" id="suggNotice" aria-live="polite"></div>
-        <!-- AI 侧的"未产出"清单与原因：与质控的未判定同一条纪律。
-             它紧靠建议列表，因为"只产出 2 条"与"看了 5 个只写了 2 个"必须同屏可辨 -->
         <div class="muted" id="aiSilenceLine"></div>
         <div id="suggestions" class="mt4"></div>
       </div>
@@ -407,9 +429,7 @@
         <span class="ph-badge" id="badgeQc"></span>
       </h2>
       <div class="pb">
-                <!-- 规则包与启用条数不再常驻显示；只有"库里一条规则都没有"时这一行才有内容 -->
         <div class="muted" id="qcPackLine"></div>
-                <!-- 未判定数量与命中数同屏显示 -->
         <div class="muted" id="qcUnevalLine"></div>
         <div class="row mb10">
           <select id="qcTarget"></select>
@@ -419,8 +439,6 @@
                 <!-- 内涵类质控：跑过之后才写结论（可用 / 不可用）；"还没跑过"不占位 -->
         <div class="muted" id="qcContentLine"></div>
         <div class="row mb8">
-          <!-- 外部引擎是"这条链路在不在"的能力问题，不是"配了没有"的配置问题：
-               没有引擎时这两个入口整个不出现（规则库自身产生的质控提示照旧） -->
           <button id="btnQcContent" data-capability="qc" title="把本文书交给外部内涵类质控引擎判定（需配置引擎与规则清单，当前未接入）。产出会逐条校验，契约版本、越权规则、引文幻觉、夹带建议都会被拒">跑内涵类质控（外部引擎）</button>
           <button id="btnQcContract" data-capability="qc" title="查看外部引擎契约：字段、约束、禁用字段与上限，供实现方参考">查看引擎契约</button>
           <span class="muted" id="qcContentHint"></span>
@@ -439,7 +457,6 @@
         <span class="ph-badge" id="badgeTimeline"></span>
       </h2>
       <div class="pb">
-                <!-- 读一次本就诊的全部文书：读数是纯函数算的（判定复用已启用规则），按钮只做取数 -->
         <div class="row mb10">
           <button class="ai" id="btnVisitTimeline" title="读一次本就诊的全部文书，按成文时刻排出间隔与缺口；判定复用已启用的时限规则，不新增口径">读一次就诊时间轴</button>
           <span class="muted" id="timelineHint"></span>
@@ -493,33 +510,17 @@
         <span class="ph-badge" id="badgeVoice"></span>
       </h2>
       <div class="pb">
-        <!-- 采集可用性：**只在已配置时**写一行（音频会不会被留下）。
-             未配置时不在这里展开"缺哪几格、去哪儿配"——那是部署方的动作；
-             点采集仍会明确报错，原因在那句报错里，而不是每台终端上的一段常驻说明。 -->
         <div class="muted mb6" id="dictationCapture" hidden></div>
-        <!-- 采集入口：**只有本机客户端这一条来源**（音频由本机进程采、分片也在本机做）。
-             不再给"音频来源"下拉：浏览器麦克风在 http://10.x 下拿不到设备，服务端脚本音频只是演示 ——
-             把它们摆成可选项，现场只能靠猜"哪个才是真的"。
-             入口仍是一个开始 + 一个停止：采集只能由人按，中途随时可停，已说出口的段不丢。 -->
         <div class="row mb10">
           <button class="ai" id="btnCaptureStart" title="按本机客户端开始一次采集；中途随时可停，已说出口的段不丢">开始采集</button>
           <button id="btnCaptureStop" disabled title="立即定稿当前那一段（已完成的段不受影响）">停止</button>
         </div>
-        <!-- 本机客户端采集：音频由**本机进程**采（不受 HTTPS 限制），页面只做"取段 → 上传同源路由"。
-             该进程当前的采集源是脚本音频，真麦克风待接（它自己会在 /hello 里如实回报 source）。
-             地址与一次性令牌来自 URL 参数（客户端打开页面时带上）—— 页面**不写死任何地址**。
-             状态行里的"已连接 / 连不上"来自一次只读探测（`/hello`），不打开设备、不发音频。 -->
         <div class="mb6" id="captureLocalStatus" hidden></div>
-        <!-- 录音电平条：高度由客户端真实给出的帧响度决定（脚本音频时它是冷的，但**不是假的**：
-             静音帧不跳、人声帧才动）。视觉上让人一眼看出"它正在听"。 -->
         <div class="capture-wave mb10" id="captureLocalWave" hidden aria-hidden="true"></div>
         <div class="row mb10">
           <button class="ai" id="btnDictate" title="模拟一段录音的转写结果（含空段与乱序时间戳，用于演示规范化）">模拟一段录音转写</button>
         </div>
         <div id="dictation"></div>
-        <!-- 采集记录：只记"什么时候、用哪块设备、录了多久、几段成功几段失败"。
-             **不含音频、也不含转写文本**（文本作为建议走上面那条通道），
-             所以这里没有播放按钮 —— 不是漏了，是音频按设计不留存。 -->
         <div class="mb6" id="captureHistory" hidden></div>
       </div>
     </section>
@@ -555,7 +556,6 @@
         <span class="tag-note">查看 / 执行授权 · 签发已移至「管理后台 → 受控阅读」</span>
       </h2>
       <div class="pb">
-                <!-- 这一页只做执行：查看授权、按授权阅读、必要时停用；签发属于授权源，入口在管理后台 -->
         <div class="muted mb6">
           本文档内容指纹（<b>提交给授权平台</b>，用于绑定授权的具体内容）：
           <code id="readingDocFingerprint">—</code>
@@ -600,6 +600,42 @@
     </section>
   </section>
 </main>
+
+<!-- 选中文字浮条：只在同一段内的非空选区出现；写类动作一律先出结果、再落笔。 -->
+<div class="sel-bar" id="selBar" role="toolbar" aria-label="选中文字操作" hidden>
+  <button type="button" data-sel-action="save-content">存为常用语</button>
+  <button type="button" data-sel-action="replace-content">替换为常用语</button>
+  <button type="button" data-sel-action="polish-selection" title="只润色选中的这一截：先看原文与建议，接受后才替换">润色选中</button>
+  <button type="button" data-sel-action="compare-previous" title="找这位患者上一份文书里的同一章，看看上次怎么写的">对比上次</button>
+  <button type="button" data-sel-action="copy">复制</button>
+</div>
+
+<dialog class="sel-dialog" id="polishDialog" aria-label="选区润色">
+  <h3>润色选中 <span class="muted" id="polishMeta"></span></h3>
+  <div class="sel-pair">
+    <div>
+      <div class="muted">原文</div>
+      <div class="sel-text" id="polishBefore"></div>
+    </div>
+    <div>
+      <div class="muted">建议</div>
+      <div class="sel-text" id="polishAfter"></div>
+    </div>
+  </div>
+  <div class="row mt6">
+    <button class="primary" id="polishAccept">接受并替换</button>
+    <button class="secondary" id="polishCancel">放弃</button>
+  </div>
+</dialog>
+
+<dialog class="sel-dialog" id="compareDialog" aria-label="与上次同章对照">
+  <h3>上次怎么写 <span class="muted" id="compareMeta"></span></h3>
+  <div class="sel-text" id="compareText"></div>
+  <div class="row mt6">
+    <button class="secondary" id="compareCopy">复制上次</button>
+    <button class="secondary" id="compareClose">关闭</button>
+  </div>
+</dialog>
 
 <div class="key-hint" id="keyHint" role="status" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

@@ -1,5 +1,3 @@
-// 检验/体征趋势 —— 派生视图，不是文档结构。
-
 import type { DataElementTag, DocumentModel, JsonValue, NodeId, ProvenanceOrigin } from './types.ts';
 import { orderedNodeIds } from './machine.ts';
 
@@ -7,24 +5,20 @@ export type TrendFlag = 'low' | 'normal' | 'high' | 'unknown';
 
 export interface TrendPoint {
   nodeId: NodeId;
-  /** 采样时间（ISO8601）；缺失时为 undefined —— 该点仍会列出，但不参与时间排序 */
   at?: string;
   value: number | string;
   valueText: string;
   unit?: string;
   flag: TrendFlag;
   origin: ProvenanceOrigin;
-  /** 是否已人工确认：趋势里的"未确认点"要能看出来（它们还没被医生核对过） */
   humanConfirmed: boolean;
 }
 
 export interface TrendSeries {
-  /** 聚合键：`sourceKey` 或 `system:code` */
   key: string;
   label: string;
   unit?: string;
   referenceRange?: { low?: number; high?: number; text?: string; unit?: string };
-  /** 时间升序；缺 sampledAt 的点排在最后（不丢数据，但要让人看出来）  */
   points: TrendPoint[];
   stats: {
     count: number;
@@ -32,15 +26,12 @@ export interface TrendSeries {
     last?: number;
     min?: number;
     max?: number;
-    /** 参考范围外的点数 —— 住院看趋势，真正要看的就是它 */
     abnormal: number;
-    /** 尚未人工确认的点数 */
     unconfirmed: number;
   };
   warnings: string[];
 }
 
-/** 数值化：只接受真正的 number；字符串数字不硬转（避免把"阴性"变成 NaN） */
 function numericOf(value: JsonValue): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
@@ -61,12 +52,6 @@ function keyOf(sourceKey: string | undefined, tags: DataElementTag[] | undefined
   return undefined;
 }
 
-/**
- * 聚合出全部趋势序列（按聚合键分组）。
- *
- * 只收 `field` 节点：`text` 节点里的数值可能是叙述的一部分（"体温 38.5℃"），
- * 把它们也当采样点会让趋势混入非结构化内容 —— 那是"看起来更全、实际更脏"。
- */
 export function buildTrends(doc: DocumentModel): TrendSeries[] {
   const buckets = new Map<string, { label: string; points: TrendPoint[] }>();
   const orphans: string[] = [];
@@ -98,7 +83,6 @@ export function buildTrends(doc: DocumentModel): TrendSeries[] {
 
   const series: TrendSeries[] = [];
   for (const [key, bucket] of buckets) {
-    /* 有时间的按时间升序；没时间的排在最后（不丢数据，但要让人看出来）  */
     const timed = bucket.points.filter((point) => point.at !== undefined);
     const untimed = bucket.points.filter((point) => point.at === undefined);
     timed.sort((a, b) => (a.at as string).localeCompare(b.at as string));
@@ -145,7 +129,6 @@ export function buildTrends(doc: DocumentModel): TrendSeries[] {
     });
   }
 
-  /* 无法聚合的孤立点：如实报告 —— 硬凑成趋势比不给趋势更糟 */
   if (orphans.length > 0) {
     series.push({
       key: '(无法聚合)',
@@ -159,7 +142,6 @@ export function buildTrends(doc: DocumentModel): TrendSeries[] {
   return series.sort((a, b) => a.key.localeCompare(b.key));
 }
 
-/** 取单条趋势（按聚合键） */
 export function buildTrend(doc: DocumentModel, key: string): TrendSeries | undefined {
   return buildTrends(doc).find((series) => series.key === key);
 }

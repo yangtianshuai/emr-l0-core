@@ -1,5 +1,3 @@
-// 模型形态的内涵类质控引擎自测（M1~M8）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
   CONTENT_ENGINE_API,
@@ -44,7 +42,6 @@ const modelConfig = (overrides: Record<string, unknown> = {}) => () =>
     ...overrides,
   }) as never;
 
-/** 假模型：回复里塞一段文本（`content`），或直接给一个 HTTP 状态 */
 const fakeModel = (content: string, status = 200) => ({
   fetchImpl: async () => ({
     ok: status >= 200 && status < 300,
@@ -106,8 +103,6 @@ async function main(): Promise<void> {
   });
 
   await test('M3 **模型给了建议 → 整份产出被拒**（提示词不是防线，拒收才是）', async () => {
-    /* 这是这条路的核心性质：模型（尤其换了提示词、或被人诱导之后）给出"建议补充……"，
-       而契约里没有任何可以落笔的字段 —— 于是它不是"被悄悄丢掉"，而是整份产出被拒。  */
     const withSuggestion = JSON.stringify({
       judged: ['R-1'],
       findings: [
@@ -131,16 +126,12 @@ async function main(): Promise<void> {
       assertEqual(validated.code, CONTENT_ENGINE_ERRORS.E_QC_ENGINE_FORBIDDEN_FIELD, '应给出"禁字段"错误码');
     }
 
-    /* 顶层多给字段（不在契约里的 key）同样拒 —— 模型常把整份报告塞进来 */
     const withExtraTop = JSON.stringify({ judged: ['R-1'], findings: [], unevaluated: [], summary: '整体质量良好' });
     const raw2 = await createModelContentEngine({ loadConfig: modelConfig(), ...fakeModel(withExtraTop) }).run(REQUEST);
     assertEqual(validateEngineOutput(raw2, REQUEST).ok, false, '契约外的顶层字段（summary）也必须被拒');
   });
 
   await test('M4 违背单条约束（quote 不是原文 / 级别升级）→ **逐条拒**（与"整份拒"是两级）', async () => {
-    /* 两级要分清：外壳级问题（契约、禁字段、缺 judged）整份拒；
-       单条问题只拒那一条（其余判定仍然可用）。混成一级，会让"一条引文不准"
-       把整次质控作废 —— 而现场需要的是"这条不算数、别的照看"。  */
     const badQuote = JSON.stringify({
       judged: ['R-1'],
       findings: [{ ruleId: 'R-1', nodeId: 'n-1', severity: 'warn', title: 't', rationale: 'r', quote: '这句话不在原文里' }],
@@ -210,7 +201,6 @@ async function main(): Promise<void> {
     } catch (err) {
       message = (err as Error).message;
     }
-    /* `run` 是异步的：构造成功、run 里抛 —— 关键结论相同：不发出这一趟  */
     void message;
   });
 

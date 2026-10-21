@@ -1,9 +1,6 @@
-// SQLite 接入层：唯一触碰 `node:sqlite` 的地方。
-
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-/**  本环境的类型声明里没有 `node:sqlite`，按用到的形状局部断言（同 core/persistence.ts 对 fs 的处置）  */
 export interface SqliteStatement {
   run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
   get(...params: unknown[]): Record<string, unknown> | undefined;
@@ -20,35 +17,26 @@ interface SqliteModule {
   DatabaseSync: new (file: string) => SqliteDatabase;
 }
 
-/* 用变量做说明符：本环境的 `@types/node` 里还没有 `node:sqlite` 的声明，
-   写成字面量会在编译期报"找不到模块"。运行时是真模块（Node 内置），
-   所以这里既是绕开类型解析，也是在明说"类型是这个环境的短板"。  */
 const sqliteSpecifier = 'node:sqlite';
 const sqlite = (await import(sqliteSpecifier)) as unknown as SqliteModule;
 
-/** 库文件里记的键（`storage_meta` 表） */
 export const SCHEMA_VERSION_KEY = 'schema_version';
 
 export interface Migration {
-  /** 迁移标识（`0001-init` 这种有序、可读的名字） */
   id: string;
   note: string;
   sql: string[];
 }
 
 export interface OpenDatabaseOptions {
-  /** 本程序要求的结构版本。库里更低 → 迁到它；更高 → 拒绝 */
   schemaVersion: number;
   migrations: readonly Migration[];
-  /** 迁移执行时刻（测试可注入，保证可复现） */
   at?: string;
 }
 
 export interface OpenDatabaseResult {
   db: SqliteDatabase;
-  /** 本次实际执行的迁移 id（空 = 库已是最新） */
   applied: string[];
-  /** 首次建库（文件是新的） */
   fresh: boolean;
 }
 
@@ -67,18 +55,10 @@ function readMeta(db: SqliteDatabase, key: string): string | null {
   return typeof row?.value === 'string' ? row.value : null;
 }
 
-/**
- * 打开数据库并把它迁到本程序要求的版本。
- *
- * 失败即抛（`StorageError`）：调用方据此决定"回落到文件存储"还是"拒绝启动"。
- * 绝不返回一个"看起来能用的"半迁移库 —— 那是数据损坏最常见的入口。
-  */
 export function openDatabase(file: string, options: OpenDatabaseOptions): OpenDatabaseResult {
   let db: SqliteDatabase;
   let fresh = false;
   try {
-    /* 父目录不存在时 SQLite 会直接报 "unable to open database file"（它不建目录）——
-       同 `core/persistence.ts` 的 `writeSnapshot`：目录不存在就建，别让调用方先猜这一步。 */
     mkdirSync(dirname(file), { recursive: true });
     db = new sqlite.DatabaseSync(file);
   } catch (err) {
@@ -86,7 +66,6 @@ export function openDatabase(file: string, options: OpenDatabaseOptions): OpenDa
   }
 
   try {
-    /* WAL：读写不互相阻塞；FULL：提交即落盘（病历数据不接受"提交了但断电丢了"） */
     db.exec('pragma journal_mode = wal');
     db.exec('pragma synchronous = full');
     db.exec('pragma foreign_keys = on');
@@ -105,7 +84,6 @@ export function openDatabase(file: string, options: OpenDatabaseOptions): OpenDa
       throw new StorageError('E_STORAGE_VERSION_INVALID', `库里的 ${SCHEMA_VERSION_KEY} 不是非负整数：${String(recorded)}`);
     }
     if (current > options.schemaVersion) {
-      /* 用更新的程序写过、再用旧程序读：结构可能已经不同，猜着读会"成功地"读出错内容 */
       throw new StorageError(
         'E_STORAGE_VERSION_AHEAD',
         `数据库结构版本 ${current} 高于本程序支持的 ${options.schemaVersion}（${file}）：请升级程序，不要用旧版本读新库`,
@@ -124,7 +102,6 @@ export function openDatabase(file: string, options: OpenDatabaseOptions): OpenDa
   }
 }
 
-/** 按清单把库推到目标版本。每个迁移一个事务：失败即回滚，不留半个结构  */
 function migrate(db: SqliteDatabase, options: OpenDatabaseOptions, current: number): string[] {
   const done = new Set(
     db.prepare('select id from schema_migrations').all().map((row) => String(row.id)),
@@ -153,7 +130,6 @@ function migrate(db: SqliteDatabase, options: OpenDatabaseOptions, current: numb
       String(options.schemaVersion),
     );
   } else if (current !== options.schemaVersion) {
-    /* 清单里没有可执行的迁移，却版本不符 —— 不能静默把版本号改掉（那等于凭空宣称"迁过了"） */
     throw new StorageError(
       'E_STORAGE_MIGRATION_MISSING',
       `库结构版本为 ${current}，本程序需要 ${options.schemaVersion}，但迁移清单里没有对应的迁移：请补齐迁移，不要手改版本号`,
@@ -162,7 +138,6 @@ function migrate(db: SqliteDatabase, options: OpenDatabaseOptions, current: numb
   return applied;
 }
 
-/** 在一个事务里执行一段写入（失败即回滚）。用于"多表一起生效"的场景，如保存一份文书 + 它的留痕 */
 export function inTransaction<T>(db: SqliteDatabase, fn: () => T): T {
   db.exec('begin immediate');
   try {
@@ -175,7 +150,6 @@ export function inTransaction<T>(db: SqliteDatabase, fn: () => T): T {
   }
 }
 
-/** 计数用的小工具（把 `select count(*)` 的返回值收敛成 number） */
 export function countOf(db: SqliteDatabase, sql: string, ...params: unknown[]): number {
   const row = db.prepare(sql).get(...params) as { n?: number | bigint } | undefined;
   const value = row?.n ?? 0;

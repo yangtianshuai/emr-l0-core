@@ -1,5 +1,3 @@
-// T27 验收自测：WS/T 500（电子病历共享文档）XML 导出。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
 import type { DocNode, DocumentModel, FieldNode, SectionNode } from '../model/types.ts';
@@ -15,7 +13,6 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text);
 
-/** 夹具：两节（一节带 sectionCode、一节不带）、段落文本各不相同、一个 AI 来源字段 */
 function fixture(): DocumentModel {
   const { doc } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 2 });
   doc.patient = { patientId: 'P_WS_001', nameMasked: '王**', gender: 'M', birthDate: '1990-03-12' };
@@ -26,8 +23,6 @@ function fixture(): DocumentModel {
   if (sections[0]) sections[0].title = '主诉';
   if (sections[1]) {
     sections[1].title = '现病史';
-    /* 合成文档会自动给 section 一个 sectionCode（sec2）：这里显式删掉，
-       用于验证"没有编码时不写 code 元素"这条纪律 */
     delete sections[1].sectionCode;
   }
 
@@ -102,12 +97,10 @@ async function main(): Promise<void> {
     const { doc } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1 });
     doc.docType = { system: 'WST500', code: 'X', display: 'X' };
     const sections = (Object.values(doc.nodes) as DocNode[]).filter((node): node is SectionNode => node.type === 'section');
-    /* 造一个嵌套子章节：把第 2 个 section 挂到第 1 个下面 */
     if (sections[0] && sections[1]) sections[1].parentId = sections[0].id;
 
     const { xml, stats } = buildWst500Xml(doc);
     assert(xml.includes('<structuredBody>'), '必须写 structuredBody');
-    /* 嵌套层级：section → component → section */
     assert(/<section>[\s\S]*<component>\s*<section>/.test(xml), '嵌套子章节必须用 component 包裹');
     assertEqual(stats.sections, 2, '两个 section 都应导出');
   });
@@ -126,7 +119,6 @@ async function main(): Promise<void> {
     assert(xml.includes('<code code="DE04.01.068" codeSystem="2.16.156.10011.2.1.1.4" displayName="体温"/>'), '标签应带 code/codeSystem/displayName');
     assert(xml.includes('<value xsi:type="PQ" value="38.5" unit="℃"/>'), '数值型应写成 PQ（带单位）');
     assert(xml.includes('<code code="WBC" codeSystem="2.16.840.1.113883.6.1" displayName="白细胞计数"/>'), 'LOINC 应映射到 HL7 注册的 OID');
-    /* 夹具：2 节 × 2 段 × 2 字段 = 8 个结构化数据元 */
     assertEqual(stats.fields, 8, '夹具应有 8 个结构化数据元');
   });
 
@@ -135,7 +127,6 @@ async function main(): Promise<void> {
     const sectionBlocks = xml.split('<section>').slice(1);
     assertEqual(sectionBlocks.length, 2, '应有两个章节');
     assert(sectionBlocks[0]!.includes('<code code="WST500.2.001"'), '带 sectionCode 的章节应写 code');
-    /* 断言"章节的第一个子元素不是 code"（不能用整块 includes —— 章节里的 observation 也有 code） */
     assert(
       sectionBlocks[1]!.trimStart().startsWith('<title>'),
       `没有 sectionCode 的章节不得写 section 级 code（宁可缺元素，不糊假编码），实际开头：${sectionBlocks[1]!.trimStart().slice(0, 40)}`,
@@ -148,7 +139,7 @@ async function main(): Promise<void> {
     const paragraph = (Object.values(doc.nodes) as DocNode[]).find((node) => node.type === 'paragraph');
     const field = (Object.values(doc.nodes) as DocNode[]).find((node): node is FieldNode => node.type === 'field');
     assert(!!paragraph && !!field, '前置：夹具应有段落与字段');
-    field.parentId = paragraph!.id; // 把字段挂到段落下面
+    field.parentId = paragraph!.id;
     field.tags = [{ system: 'WST500', code: 'DE_TEST', display: '测试项' }];
 
     const { stats, xml } = buildWst500Xml(doc);
@@ -180,7 +171,6 @@ async function main(): Promise<void> {
     const overridden = buildWst500Xml(doc, { tagSystemOids: { custom: '1.2.3.4.5' } }).xml;
     assert(overridden.includes('codeSystem="1.2.3.4.5"'), '注入的映射必须生效（院方字典可覆盖）');
 
-    /* 未映射的体系：显式落 unmapped，而不是悄悄用别的 OID */
     const unknown = { ...doc, nodes: { ...doc.nodes } } as DocumentModel;
     const unknownField = (Object.values(unknown.nodes) as DocNode[]).find((node): node is FieldNode => node.type === 'field');
     unknownField!.tags = [{ system: 'WS445', code: 'X', display: 'X' }];
@@ -327,11 +317,8 @@ async function main(): Promise<void> {
     fields[2]!.value = '';
 
     const { xml } = buildWst500Xml(doc);
-    /* 注意断言要带 unit：原字段本身带单位，PQ 会一并写出（写死无 unit 的形态会误判） */
     assert(xml.includes('<value xsi:type="PQ" value="12.5" unit="℃"/>'), '数值应写 PQ（带单位）');
     assert(xml.includes('<value xsi:type="ST">阳性</value>'), '文本应写 ST');
-    /* 空值不写 value：写 `<value xsi:type="ST"></value>` 会被对方读成"结果为空/阴性"。
-       断言必须切到该 observation 内部 —— 只看"其后 200 字符"会撞上后面数据元的 value。  */
     const emptyObservation = xml.slice(xml.indexOf('<code code="E"')).split('</observation>')[0] ?? '';
     assert(!emptyObservation.includes('<value'), '空值不得写出 value 元素（会被误读为"阴性/正常"）');
   });

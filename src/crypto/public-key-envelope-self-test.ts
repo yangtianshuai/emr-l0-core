@@ -1,7 +1,4 @@
-// T18c 验收自测：SM2 公钥加密 → 公钥信封 → 受控加密阅读（授权即密钥交付）。
-// A SM2 加解密：往返、结构、C3 校验必须拦住篡改与错私钥（"拒绝而不是纠错"）；
-
-import { createHash } from 'node:crypto'; // 用于交叉印证 SM3 摘要（外部实现）
+import { createHash } from 'node:crypto';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { sm3Hex, utf8 } from './sm3.ts';
 import { demoKeyPair } from './provider.ts';
@@ -20,7 +17,6 @@ const suite = new TestSuite('T18c 受控加密阅读（SM2 信封 + 授权即密
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/** 泛化的取码/取因：SM2 解密与信封解密是两套错误码，但断言方式完全一样 */
 interface CodedResult {
   ok: boolean;
   code?: string;
@@ -86,7 +82,7 @@ async function main(): Promise<void> {
   await test('A3 结构预检：过短或 C1 非法时给出明确错误码（不是"解密失败"一句糊过去）', async () => {
     assertEqual(inspectSm2Ciphertext(new Uint8Array(50)).code, 'E_SM2_MALFORMED', '过短应报结构错误');
     const badPoint = new Uint8Array(65 + 32);
-    badPoint.set([0x02], 0); // 压缩点标记：本实现只接受未压缩
+    badPoint.set([0x02], 0);
     assertEqual(inspectSm2Ciphertext(badPoint).code, 'E_SM2_MALFORMED', 'C1 非 04 开头应报结构错误');
     const offCurve = new Uint8Array(65 + 32);
     offCurve.set([0x04, ...new Uint8Array(64).fill(9)], 0);
@@ -175,14 +171,11 @@ async function main(): Promise<void> {
     const kdf = tampered.header.kdf;
     if (kdf.algorithm !== 'SM2-ENVELOPE') throw new Error('前置：应为公钥信封');
     const wrapped = new Uint8Array(Buffer.from(kdf.wrappedKey, 'base64'));
-    kdf.wrappedKey = Buffer.from(flipByte(wrapped, 65 + 31)).toString('base64'); // 落在 C3
+    kdf.wrappedKey = Buffer.from(flipByte(wrapped, 65 + 31)).toString('base64');
     assertEqual(codeOf(decryptEnvelopeWith(tampered, privateA)), 'E_ENVELOPE_KEY_UNWRAP_FAILED', '封装被改应报解封失败');
   });
 
   await test('B6 注入固定 dek/iv 时**密文**可复现；被封装的密钥每次不同（SM2 加密本身随机）', async () => {
-    /* 注意：不能断言"整个信封逐字节可复现" —— SM2 加密内部取随机 k，
-       所以即使 DEK 固定，封装结果（wrappedKey，以及覆盖它的 MAC）每次也不同。
-       可复现的是密文（由 dek+iv 决定）。这里把这条性质写清楚，避免后来人误以为实现有随机性 bug。  */
     const plaintext = utf8('可复现性');
     const options = { dek: new Uint8Array(16).fill(3), iv: new Uint8Array(16).fill(4) };
     const first = encryptEnvelopeFor(plaintext, keyA, options);
@@ -286,7 +279,7 @@ async function main(): Promise<void> {
     const a = fixture();
     const b = fixture();
     const sealedA = sealDocumentJson(a.json, keyA);
-    const sealedB = sealDocumentJson(b.json, keyA); // 同一接收方，但内容密钥不同
+    const sealedB = sealDocumentJson(b.json, keyA);
     const credential = await issueReadingGrant(grantFor(documentFingerprint(a.doc), a.doc.docId, sealedA.keyDelivery), ISSUER);
     /* 信封换成 B 的，但授权书（含 A 的交付片段）不变：指纹一致，密钥却对不上 */
     const result = openSealedForReading({ envelope: sealedB.envelope, credential, recipient: privateA, context: a.context });
@@ -318,7 +311,7 @@ async function main(): Promise<void> {
     const { doc, json, context } = fixture();
     const sealed = sealDocumentJson(json, keyA);
     const credential = await issueReadingGrant(
-      grantFor('0'.repeat(64), doc.docId, sealed.keyDelivery), // 故意用错的文档指纹
+      grantFor('0'.repeat(64), doc.docId, sealed.keyDelivery),
       ISSUER,
     );
     const result = openSealedForReading({ envelope: sealed.envelope, credential, recipient: privateA, context });

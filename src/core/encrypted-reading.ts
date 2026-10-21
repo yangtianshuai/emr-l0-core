@@ -1,7 +1,3 @@
-// T18c 受控加密阅读：把「加密」与「受控阅读」缝成一条链。
-// - 加密（envelope.ts）解决"文件离库后是密文"，但密钥怎么交给该看的人？口令模式又回到"共享口令"；
-// ② 把授权书转给第三人 → 他没有对应私钥，解不出内容密钥（换终端也没用）；
-
 import { sm3Hex, utf8 } from '../crypto/sm3.ts';
 import {
   decryptEnvelopeWithDek,
@@ -71,9 +67,7 @@ export interface SealedReadingResult {
   ok: boolean;
   code?: SealedReadingCode;
   reasons: string[];
-  /** 受控视图（章节白名单已生效，未授权章节不进视图） */
   view?: ReadingView;
-  /** 解出的明文（仅 ok 时返回；校验失败时不返回，避免"被拒了却还能拿到内容"）  */
   plaintext?: Uint8Array;
 }
 
@@ -88,7 +82,6 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
 export interface OpenSealedParams {
   envelope: Envelope;
   credential: ReadingCredential;
-  /** 阅读者私钥（+ 公钥指纹）：没有它就连内容密钥都解不出来 */
   recipient: RecipientPrivateKey;
   context: ReadingContext;
   revokedGrantIds?: string[];
@@ -96,16 +89,8 @@ export interface OpenSealedParams {
   parseDocument?: (text: string) => DocumentModel;
 }
 
-/**
- * 受控加密阅读：凭证与交付片段核对 → 解封密钥 → 解密 → 反序列化 → 走完整受控阅读校验 → 返回视图。
- *
- * 顺序说明：先用私钥解封并解密（私钥本身就界定了"谁是接收方"），
- * 再做授权校验（有效期/次数/终端/章节/文档指纹）。校验不过时明文不返回。
-  */
 export function openSealedForReading(params: OpenSealedParams): SealedReadingResult {
   const { envelope, credential, recipient, context } = params;
-
-  // ① 凭证本身与撤销（不涉及文档内容，先做掉，避免"无效凭证也做私钥运算"）
 
   const credentialCheck = verifyCredential(credential);
   if (!credentialCheck.ok) {
@@ -175,7 +160,6 @@ export function openSealedForReading(params: OpenSealedParams): SealedReadingRes
     };
   }
 
-  /* ⑤ 解密（内部会验 MAC、长度与明文摘要） */
   const decrypted = decryptEnvelopeWithDek(envelope, fromCredential.key);
   if (!decrypted.ok) {
     return { ok: false, code: decrypted.code, reasons: [decrypted.reason] };
@@ -188,7 +172,6 @@ export function openSealedForReading(params: OpenSealedParams): SealedReadingRes
     };
   }
 
-  /* ⑥ 反序列化 + 完整受控阅读校验（有效期/次数/终端/章节白名单/文档指纹） */
   let doc: DocumentModel;
   try {
     doc = params.parseDocument
@@ -214,7 +197,6 @@ export function digestOfPlaintext(plaintext: Uint8Array): string {
   return sm3Hex(plaintext);
 }
 
-/** 便于调用方把"文档 JSON 文本"直接加密（少一步编码转换，避免各处各写一遍） */
 export function sealDocumentJson(
   json: string,
   recipient: RecipientPublicKey,

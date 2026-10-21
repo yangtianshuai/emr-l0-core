@@ -1,13 +1,7 @@
-// 模型形态的内涵类质控引擎：把"外部质控引擎"换成这台机器已经接上的那个模型。
-
 import type { LoadedModelConfig } from '../ai/model-config-store.ts';
 import { CONTENT_ENGINE_API, resolveEngineEndpoint, type ContentQcEngine, type ContentQcRequest } from './content-engine.ts';
 
 export interface ModelEngineOptions {
-  /**
-   * 取当前生效的模型接入配置。每次 `run` 都取一次 —— 与仓库其它配置同一口径：
-   * 管理员改完立即生效，不做缓存（"改了要重启才生效"是运维最容易踩空的坑）。
-    */
   loadConfig: () => LoadedModelConfig;
   /** 测试可注入（默认用全局 fetch） */
   fetchImpl?: (input: string, init: Record<string, unknown>) => Promise<{
@@ -15,19 +9,12 @@ export interface ModelEngineOptions {
     status: number;
     text: () => Promise<string>;
   }>;
-  /** 不传则用模型配置里的 `timeoutMs`，再退到 20000 */
   timeoutMs?: number;
   maxResponseBytes?: number;
 }
 
 export const MODEL_ENGINE_ID = 'qc-content-model';
 
-/**
- * 提示词：照契约写，但真正的约束在校验里。
- *
- * 刻意不在这里复制一份"完整契约"（那会与 `describeContentContract()` 漂移）：
- * 该说的三件事说清楚 —— 只能用给的规则、只能报判过的与判不了的、不许给建议。
-  */
 export function buildModelPrompt(request: ContentQcRequest): string {
   return [
     '你在做病历内涵质控：**只判定，不改写**。',
@@ -52,7 +39,6 @@ export function buildModelPrompt(request: ContentQcRequest): string {
     .join('\n');
 }
 
-/** 从模型回复里取出那个 JSON 对象：容忍 ```json 围栏与前后废话，取第一个 `{` 到最后一个 `}` */
 export function extractJsonObject(text: string): unknown {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -82,7 +68,6 @@ export function createModelContentEngine(options: ModelEngineOptions): ContentQc
         );
       }
       const url = resolveEngineEndpoint(loaded.config.endpoint);
-      /* 与模型适配器同一路径：`/chat/completions`（地址里已经带 /v1 就不要再加一层） */
       const target = `${url.toString().replace(/\/+$/, '')}/chat/completions`;
       const budget = signal?.timeoutMs ?? loaded.config.timeoutMs ?? timeoutMs;
       const controller = new AbortController();
@@ -105,7 +90,6 @@ export function createModelContentEngine(options: ModelEngineOptions): ContentQc
           signal: controller.signal,
         });
         if (!response.ok) {
-          /* 只带状态码，不回显响应体：它可能含模型服务的内部信息（令牌也绝不进这里） */
           throw new Error(`模型返回 HTTP ${response.status}`);
         }
         const raw = await response.text();
@@ -122,8 +106,6 @@ export function createModelContentEngine(options: ModelEngineOptions): ContentQc
         }
         const body = extractJsonObject(content) as Record<string, unknown>;
 
-        /* 外壳是我们的：模型自报的 api/engine 一律被覆盖（它答的是别人的身份）。
-           模型多给的其它字段原样带上去 —— 由校验去拒，这里不替它清理门户。  */
         return {
           api: CONTENT_ENGINE_API,
           engine: { id: MODEL_ENGINE_ID, kind: 'model', version: '1', modelId: loaded.config.model },

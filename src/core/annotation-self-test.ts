@@ -1,5 +1,3 @@
-// 旁挂注解自测（T30）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession, type Actor } from './session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -74,7 +72,6 @@ async function main(): Promise<void> {
     const textId = ids.textIds[0] as NodeId;
     const withEvidence = { nodeId: textId, title: '提示', evidence: [{ kind: 'rule' as const, ref: 'R-001' }] };
 
-    /* AI 冒充人工提交：等于给质控提示伪造责任主体（与身份收口同一条纪律） */
     assertEqual(
       codeOf(() => session.annotate({ ...withEvidence, source: { kind: 'human' } }, AI)),
       'E_ANNOTATION_NO_EVIDENCE',
@@ -127,7 +124,6 @@ async function main(): Promise<void> {
       '误报被忽略后、内容未变，不得复活 —— 反复弹回会让医生开始无脑点"忽略"，整套提示都会失效',
     );
 
-    /* 内容变了 → 旧判断只针对当时那段文字，不再适用 */
     session.insertText({ nodeId: textId, text: '（本次新记录）' }, HUMAN);
     assertEqual(session.annotate(spec, SYSTEM).created, true, '内容已改后重新命中，应允许新增');
   });
@@ -135,7 +131,6 @@ async function main(): Promise<void> {
   await test('N4 锚点三态（派生）：有效 → 可重锚 → 已丢失；非文本节点保守判有效', () => {
     const { session, ids } = open();
     const textId = ids.textIds[0] as NodeId;
-    /* 用"改后采纳"把文本写成单 run 的整句（后续才能整段替换） */
     const first = session.suggestText({ nodeId: textId, text: 'x', confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: first.suggestionId, editedText: '胸痛3天，伴心悸' }, HUMAN);
 
@@ -149,12 +144,10 @@ async function main(): Promise<void> {
     session.insertText({ nodeId: textId, text: '（补充）' }, HUMAN);
     assertEqual(stateOf(), 'relocated', '内容变了但原文片段仍在 → 可重锚');
 
-    /* 整段替换：改后采纳替换最后一个 run，此刻该节点只有一个 run */
     const second = session.suggestText({ nodeId: textId, text: 'y', confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: second.suggestionId, editedText: '腹痛1周' }, HUMAN);
     assertEqual(stateOf(), 'lost', '原文片段已不存在 → 锚点丢失（必须让人看见，不能静默消失）');
 
-    /* 非文本节点不谈内容比较：误报 lost 会让人做无谓的确认 */
     const { annotationId: onRoot } = session.annotate(
       { nodeId: session.document.rootId, title: '本章缺少知情同意记录', source: { kind: 'system', ruleId: 'R-300' } },
       SYSTEM,
@@ -235,7 +228,6 @@ async function main(): Promise<void> {
       '确认后不应再计入"待处理的锚点丢失"（否则界面会永远挂着一个无从处理的计数，很快就会被无视）',
     );
 
-    /* 已终态的注解即使锚点失效，也不需要人再确认一次 —— 它已经处理完了 */
     const otherId = ids.textIds[2] as NodeId;
     session.insertText({ nodeId: otherId, text: '（某段内容）' }, HUMAN);
     const done = session.annotate(

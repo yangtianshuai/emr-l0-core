@@ -1,5 +1,3 @@
-// 知识资产包存储自测（S1~S10，一个包一行的新模型）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,7 +21,6 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'pack-store');
 const SAMPLE_DIR = join(ROOT, 'samples', 'packs');
 
-/**  本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
 const suite = new TestSuite('知识资产包存储自测（一个包一行）', [
@@ -48,12 +45,10 @@ function open(registry: PackRegistry, db: SqliteDatabase): ReturnType<typeof ope
   return openPackStore({ registry, db, supported: SUPPORTED_PACK_ENGINE_APIS, validateFor: packValidatorFor });
 }
 
-/** 真实样例包（`samples/packs/` 就是给人照着写的现成例子） */
 function samplePack(name = 'qc.form.builtin.json'): Pack {
   return JSON.parse(readFileSync(join(SAMPLE_DIR, name), 'utf8').replace(/^\uFEFF/, '')) as Pack;
 }
 
-/** 改一个字段造"内容变了"的版本（不升版本号——新模型里没有版本号了）  */
 function modified(pack: Pack, patch: Record<string, unknown>): Pack {
   return { ...(pack as unknown as Record<string, unknown>), ...patch } as unknown as Pack;
 }
@@ -71,7 +66,6 @@ async function main(): Promise<void> {
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch {
-    /* 见其它套件的说明：本环境对 SQLite 目录的删除偶发失败 */
   }
 
   await test('S1 空库就是空库：如实上报 empty、注册表被清空、**不播种任何内置内容**', () => {
@@ -131,13 +125,11 @@ async function main(): Promise<void> {
     assertEqual(write(registry, db, pack).ok, true, '前置：写入');
     const firstId = String((pack.items[0] as { itemId: string }).itemId);
     const secondId = String((pack.items[1] as { itemId: string }).itemId);
-    /* 停用两条，其中一条在下一版里会消失 */
     registry.setItemEnabled(pack.packId, firstId, false);
     registry.setItemEnabled(pack.packId, secondId, false);
     saveDisabledItems(registry, db);
     assertEqual(readPackRows(db)[0]?.disabled.sort(), [firstId, secondId].sort(), '前置：两条开关已落库');
 
-    /* 只留第一条：第二条在新版里不存在 */
     const next = modified(pack, { name: `${pack.name}（修订）`, items: [pack.items[0]] });
     const result = write(registry, db, next);
     assertEqual(result.ok, true, `覆盖应成功：${result.ok ? '' : result.message}`);
@@ -160,7 +152,6 @@ async function main(): Promise<void> {
     const broken = modified(pack, { items: [] });
     const result = write(registry, db, broken);
     assertEqual(result.ok, false, '空 items 必须被拒');
-    /* 校验失败要走返回而不是抛异常：抛出去时接口层只剩 500，而原因本来写着  */
     assertEqual(result.ok ? '' : result.code, 'E_PACK_STORE_BAD_CONTENT', '错误码应可定位');
     assert(result.ok ? true : result.message.includes('没有任何条目'), `消息要带上具体原因，实际：${result.ok ? '' : result.message}`);
     assertEqual(readPackRows(db)[0]?.fingerprint, before.fingerprint, '被拒时库里一个字节都不该变');
@@ -207,7 +198,6 @@ async function main(): Promise<void> {
     assertEqual(after.fingerprint, before.fingerprint, '内容指纹**必须不变** —— 否则"换包"与"关一条规则"又混成一件事');
     assertEqual(after.content, before.content, '内容列也一个字节都不许碰');
 
-    /* 重开一次：开关要还在（内存态时它一重启就回出厂，而界面上看不出异常） */
     const reopened = createEmptyPackRegistry();
     assertEqual(open(reopened, db).ok, true, '重开应成功');
     const items = (reopened.get(pack.packId)?.items ?? []) as Array<{ itemId: string; enabled?: boolean }>;
@@ -218,7 +208,6 @@ async function main(): Promise<void> {
     const db = freshDb();
     const registry = createEmptyPackRegistry();
     const pack = samplePack();
-    /* 只装进注册表，不写库 —— 模拟"内存与库不一致"  */
     registry.load(pack, { validate: packValidatorFor(pack.kind) });
     let code = '';
     try {
@@ -243,7 +232,6 @@ async function main(): Promise<void> {
     const items = pack.items as Array<{ itemId: string }>;
     const liveItem = items[0]!.itemId;
     const goneItem = 'R-GONE-99';
-    /* v2 时代的内容里带 `version` 字段（那时它是必填的）；迁移后能不能读，正是这条要验的 */
     const content = JSON.stringify({ ...(pack as unknown as Record<string, unknown>), version: '0.9.0' });
     const fingerprint = 'f'.repeat(64);
     v2.prepare(
@@ -275,8 +263,6 @@ async function main(): Promise<void> {
     assertEqual(rows[0]?.packId, pack.packId, '留下的是生效的那个包');
     assertEqual(rows[0]?.disabled, [liveItem, goneItem], '开关要按原样带过来');
 
-    /* 迁移后的内容必须仍然可装载：带着 `version` 字段的旧内容若被新的校验拒掉，
-       那这次迁移就是把"能用的包"变成了"装载失败" —— 这条断言就是那道闸。  */
     const registry = createEmptyPackRegistry();
     const loaded = open(registry, v3.db);
     assertEqual(loaded.ok, true, `迁移后的库必须能装载：${loaded.ok ? '' : loaded.message}`);
@@ -300,7 +286,6 @@ async function main(): Promise<void> {
     assertEqual(readPackRows(db).length, 0, '库里那一行也没有了');
     assertEqual(removed.report.source, 'empty', '删完如实上报 empty —— 不是"有一个空包"');
 
-    /* 幂等：删一个不存在的包，结果就是"没有它"，不该报错（那会让人以为自己删错了东西） */
     const again = deletePack({ registry, db, packId: pack.packId });
     assertEqual(again.ok, true, '再删一次仍成功（"没有它"正是这个动作要的结果）');
     assertEqual(again.report.source, 'empty', '结论不变');

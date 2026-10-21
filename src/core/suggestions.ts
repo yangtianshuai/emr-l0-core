@@ -1,5 +1,3 @@
-// T10 · AI 建议存储（SuggestionBook）。
-
 import type { ActorId, EvidenceRef, ISODateTime, NodeId } from '../model/types.ts';
 
 export type SuggestionStatus = 'pending' | 'accepted' | 'rejected';
@@ -16,23 +14,7 @@ export interface Suggestion {
   status: SuggestionStatus;
   modified?: boolean;
   editRatio?: number;
-  /**
-   * 组 ID：一次批量提交（`suggestBatch`）产出的一组建议共用同一个 ID。
-   *
-   * 这是内部操作单元，不是语义：它只让界面能把"同一批"当成一个整体操作
-   * （接受本组 / 忽略本组），不改变任何单条的门控与统计口径。
-   * 因此它不参与 `fingerprint()` —— 否则"批量提交 10 条"与"逐条提交 10 条"
-   * 会被判成两个实现有差异，而它们的数据完全相同。
-    */
   groupId?: string;
-  /**
-   * 外部调用关联 ID：由调用方（模型服务）指定，用于把"同一次模型调用"产生的
-   * 多组建议串起来（一次调用可能同时产出正文建议与质控提示 —— 那是两组）。
-   *
-   * 与 `groupId` 必须分开：groupId 系统生成、不可伪造，是操作单元；
-   * traceId 调用方给出，仅用于追溯。若让调用方指定 groupId，
-   * 两次调用的建议会被错误地并成一组（界面上的"接受本组"会一次落笔两批不相干的建议）。
-    */
   traceId?: string;
   at: ISODateTime;
   acceptedBy?: ActorId;
@@ -47,28 +29,17 @@ export interface SuggestionMetrics {
   accepted: number;
   rejected: number;
   modified: number;
-  /** 采纳率 = accepted / suggested */
   adoptionRate: number;
-  /** 修改率 = modified / accepted（医生改稿比例） */
   editRate: number;
-  /** 拒绝率 = rejected / suggested */
   rejectRate: number;
 }
 
-/**
- * 分档边界：改动幅度 ≤ `light` 算微改，超过算大改。
- *
- * 0.2 的含义是"五分之一的字被改动"。定这个数不是为了精确，而是为了让
- * "改错字 / 换措辞"与"重写半句 / 补事实"落在不同的档里 —— 前者改提示词，
- * 后者改上下文供给（取数、模板、章节上下文）。
-  */
 export const SUGGESTION_EDIT_BANDS = {
   light: 0.2,
 } as const;
 
 export type SuggestionEditBand = 'as-is' | 'light' | 'heavy';
 
-/** 把改动幅度分档。`0` 单独成"原样采纳"一档，不与"改得很少"混在一起 */
 export function editBandOf(ratio: number): SuggestionEditBand {
   if (!Number.isFinite(ratio) || ratio <= 0) return 'as-is';
   return ratio <= SUGGESTION_EDIT_BANDS.light ? 'light' : 'heavy';
@@ -93,11 +64,9 @@ export function editRatioOf(suggested: string, final: string): number {
   return levenshtein(a.slice(start, endA), b.slice(start, endB)) / longest;
 }
 
-/** 编辑距离：滚动数组，空间 O(min(n,m))。按码点比较（调用方已用 `Array.from` 切好）  */
 function levenshtein(a: readonly string[], b: readonly string[]): number {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
-  /* 让较短的做列：滚动数组只需它的长度 */
   const short = a.length <= b.length ? a : b;
   const long = a.length <= b.length ? b : a;
   let prev = Array.from({ length: short.length + 1 }, (_, index) => index);
@@ -108,8 +77,6 @@ function levenshtein(a: readonly string[], b: readonly string[]): number {
       const cost = long[i - 1] === short[j - 1] ? 0 : 1;
       curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
     }
-    /* 双缓冲交换：刚算完的行使下一轮的"上一行"。旧 `prev` 转为缓冲，
-       它每一格都会被覆写（`curr[0]` 赋值 + j 全遍历），因此不必清空 */
     const reuse = prev;
     prev = curr;
     curr = reuse;
@@ -118,15 +85,10 @@ function levenshtein(a: readonly string[], b: readonly string[]): number {
 }
 
 export interface SuggestionAttribution {
-  /** 采纳总数（= `metrics().accepted`，两处必然相等） */
   accepted: number;
-  /** 原样采纳（`editRatio === 0`）：模型写对了 */
   asIs: number;
-  /** 微改（`0 < editRatio ≤ SUGGESTION_EDIT_BANDS.light`） */
   light: number;
-  /** 大改（超过边界）：多半是事实或结构不对 */
   heavy: number;
-  /** 没有改动幅度记录的采纳（老快照 / 别的实现写入）——不符合并进任何一档  */
   unknown: number;
   asIsShare: number;
   lightShare: number;
@@ -140,7 +102,6 @@ export interface SuggestionInput {
   modelId: string;
   promptId?: string;
   evidence?: EvidenceRef[];
-  /** 由 `addBatch` 统一分配；单条 `add` 不带组 */
   groupId?: string;
   traceId?: string;
   at: ISODateTime;
@@ -168,7 +129,6 @@ export interface SuggestionGroup {
   pending: number;
   accepted: number;
   rejected: number;
-  /** 组内目标节点（去重），供界面一次性定位/高亮 */
   targetNodeIds: NodeId[];
   firstAt: ISODateTime;
   lastAt: ISODateTime;
@@ -285,17 +245,9 @@ export class SuggestionBook {
           lastAt: ats[ats.length - 1] as ISODateTime,
         };
       })
-      /* 按组号排序：组号递增即提交顺序，界面据此稳定展示（不依赖 Map 插入顺序） */
       .sort((a, b) => a.groupId.localeCompare(b.groupId));
   }
 
-  /**
-   * 采纳：记录改动幅度（不是"改没改"）。
-   *
-   * `editRatio` 由调用方用 `editRatioOf()` 算好传入（口径只写一处，见该函数）；
-   * `modified` 是它的投影，不接受单独传入 —— 两个参数一旦能各自传入，
-   * 就会出现"说改了、幅度却是 0"这种自相矛盾的记录，而它只会在报表对不上时才被发现。
-    */
   markAccepted(id: string, actor: ActorId, at: ISODateTime, editRatio: number): void {
     const item = this.items.get(id);
     if (!item) return;
@@ -371,14 +323,6 @@ export class SuggestionBook {
     };
   }
 
-  /**
-   * 导出为可持久化的快照。
-   *
-   *  必须带上 `seq` 与 `groupSeq`：它们决定下一个建议 / 组的 ID。
-   * 若只存 `items`，重启后新建议会从 `sg_0001` 重新开始 ——
-   * 于是历史留痕里引用的 `aiSuggestionId` 会指向另一个建议。
-   * 这类"ID 复用"事故不会报错，只会让审计对不上账。
-    */
   snapshot(): SuggestionBookSnapshot {
     return {
       seq: this.seq,
@@ -387,7 +331,6 @@ export class SuggestionBook {
     };
   }
 
-  /** 从快照恢复。必要字段缺失即抛错（不猜、不修补 —— 与持久化的严格读一致）  */
   static restore(snapshot: SuggestionBookSnapshot): SuggestionBook {
     if (!snapshot || !Array.isArray(snapshot.items)) {
       throw new Error('建议快照结构非法：缺少 items');
@@ -407,14 +350,6 @@ export class SuggestionBook {
     return book;
   }
 
-  /**
-   * 供跨实现比对使用的稳定投影（顺序固定，避免因插入顺序不同而误判差异）。
-   *
-   * 有意不含 `groupId` / `traceId`：它们是提交方式与调用关联（操作层），不是建议内容。
-   * 若纳入，"一方批量提交、另一方逐条提交"会被判成数据差异，而两者的建议完全相同 ——
-   * 跨实现比对会退化成"比对提交风格"。若将来分组影响了语义（例如同组共命运），
-   * 必须同步更新这里，否则指纹会漏掉真正该比的东西。
-    */
   fingerprint(): string {
     const projection = this.list()
       .map((item) => `${item.id}|${item.status}|${item.modified === true ? 'M' : '-'}|${item.confidence.toFixed(2)}`)

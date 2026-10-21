@@ -1,6 +1,3 @@
-// 密码学后端（CryptoProvider）—— 生产替换点。
-// 私钥也绝不能像演示密钥那样可推导。替换方式是实现 `Signer` / `Verifier` 两个接口。
-
 import { createHash, createPublicKey, generateKeyPairSync, sign as nodeSign, verify as nodeVerify, type KeyObject } from 'node:crypto';
 import { ECDSA_CROSS_ALGORITHM, ecdsaSm3Sign, ecdsaSm3Verify } from './ecdsa-sm3.ts';
 import {
@@ -17,33 +14,17 @@ import {
 } from './sm2.ts';
 import { fromHex, sm3, sm3Hex, toHex, utf8 } from './sm3.ts';
 
-/** 产品签名算法：SM2 公钥 + SM3 杂凑（写进 OFD 的 SignatureMethod 与文档 signatureRefs） */
 export const SIGNATURE_ALGORITHM = 'SM2-SM3';
 
 export interface Signer {
   readonly algorithm: string;
-  /** 后端名称（'software' / 'openssl' / 未来的 'hsm' / 'ukey'），写进签名元数据便于审计 */
   readonly provider: string;
   readonly publicKey: Sm2Point;
-  /** 公钥 SPKI（DER）—— 第三方独立验签只需要它，不需要本项目任何代码 */
   readonly publicKeyDer: Uint8Array;
   readonly fingerprint: string;
-  /**
-   * 签名。
-   *
-   *  允许异步：真实签名后端要么是网络服务（`src/sign/remote-signer.ts`），要么是密码设备 ——
-   * "同步就能拿到签名值"是只有软件实现才成立的假设。内核里只有 `signTargets()` 一处会 await 它，
-   * 其余调用方只需把 async 沿调用链传出去。
-    */
   sign(message: Uint8Array): Uint8Array | Promise<Uint8Array>;
 }
 
-/**
- * 同步后端（自研软件实现 / 本地密码模块）：签名值立刻可得。
- *
- * 单独标出来，是为了让"我用的确实是同步后端"这件事由类型保证 ——
- * 否则 `signTargets` 之外的简单用途（自检、交叉验证、测试构造签名值）全都要 `await`，啰嗦且没必要。
-  */
 export interface SyncSigner extends Signer {
   sign(message: Uint8Array): Uint8Array;
 }
@@ -54,8 +35,6 @@ export interface Verifier {
   readonly fingerprint: string;
   verify(message: Uint8Array, signature: Uint8Array): boolean;
 }
-
-/* ------------------------- 软件后端：SM2-SM3（自研） ------------------------- */
 
 export function softwareSigner(privateKey: bigint): SyncSigner {
   const publicKey = derivePublicKey(privateKey);
@@ -85,8 +64,6 @@ export function softwareVerifier(publicKey: Sm2Point): Verifier {
   };
 }
 
-/* --------------------- 交叉验证用：ECDSA-SM3（非产品算法） --------------------- */
-
 export function ecdsaSigner(privateKey: bigint): SyncSigner {
   const publicKey = derivePublicKey(privateKey);
   return {
@@ -114,8 +91,6 @@ export function ecdsaVerifier(publicKey: Sm2Point): Verifier {
   };
 }
 
-/* --------------------------- OpenSSL 后端（内置） --------------------------- */
-
 /** SM3 是否可用（OpenSSL 3.x 提供）；不可用时交叉验证必须如实降级说明，不能静默跳过 */
 export function opensslSm3Available(): boolean {
   try {
@@ -126,7 +101,6 @@ export function opensslSm3Available(): boolean {
   }
 }
 
-/** SM2 曲线是否可用（部分发行版裁剪过曲线集） */
 export function opensslSm2CurveAvailable(): boolean {
   try {
     generateKeyPairSync('ec', { namedCurve: 'SM2' });
@@ -156,16 +130,6 @@ export function opensslEcdsaSigner(): OpensslKeyPair | null {
   return { privateKey: pair.privateKey, signer: opensslSignerFromKey(pair.privateKey, publicKey) };
 }
 
-/**
- * 把 OpenSSL 原生密钥做成签名器/验签器。只接受原生 KeyObject，不接受从 DER 导入的公钥 ——
- * 因为从 DER 导入的 SM2 公钥是个静默陷阱（实测）：
- *   `createPublicKey({ key: sm2Spki, format: 'der', type: 'spki' })` 会成功、
- *   回读出的 SPKI 与原字节完全一致，但该 key 的 `asymmetricKeyType` 是 `undefined`，
- *   且 `verify()` 恒返回 false 且不报错。
- * 如果拿它做验签，现象会是"所有签名都验不过"，而排查方向会被完全带偏
- * （会怀疑签名算法、摘要、编码，唯独不会怀疑"key 是废的"）。
- * 所以这里只暴露"从原生 key 构造"这一条路，并把陷阱写成可测试的探针。
-  */
 export function opensslSignerFromKey(privateKey: KeyObject, publicKey: Sm2Point): SyncSigner {
   return {
     algorithm: ECDSA_CROSS_ALGORITHM,
@@ -192,19 +156,12 @@ export function opensslVerifierFromKey(publicKeyObject: KeyObject, publicKey: Sm
   };
 }
 
-/**
- * 探针：把"从 DER 导入 SM2 公钥"这一陷阱变成可断言的实测结论。
- * 返回 `usable: false` 时表示这条路不能用（不是调用方的错），用来防止后来人踩同一个坑。
-  */
 export function inspectDerImportedKey(spki: Uint8Array): { asymmetricKeyType: string; signatureValid: boolean; usable: boolean } {
   const key = createPublicKey({ key: spki, format: 'der', type: 'spki' });
   const message = utf8('der-imported-key-probe');
   const pair = generateKeyPairSync('ec', { namedCurve: 'SM2' });
   const signature = nodeSign('sm3', message, pair.privateKey);
 
-  /* 先自证"这份签名本身是有效的"（用能正常工作的 key 验一次）。
-     少了这一步，usable=false 就有两种解释：key 不可用，或者签名/消息本身有问题 ——
-     那样这条探针就得不出结论。 */
   const signatureValid = nodeVerify('sm3', message, pair.publicKey, signature);
   let usable = false;
   try {
@@ -215,11 +172,6 @@ export function inspectDerImportedKey(spki: Uint8Array): { asymmetricKeyType: st
   return { asymmetricKeyType: key.asymmetricKeyType ?? 'undefined', signatureValid, usable };
 }
 
-/**
- * 从 PKCS8 私钥中提取标量 d（仅交叉验证用）。
- * 提取后必须校验"由 d 推导的公钥 == SPKI 里的公钥"，否则宁可报错也不要拿错密钥去签 ——
- * 用错密钥的表现是"验签失败"，而人会往算法上找原因。
-  */
 export function extractPrivateScalar(privateKey: KeyObject, publicKey: Sm2Point): bigint {
   const hex = toHex(privateKey.export({ format: 'der', type: 'pkcs8' }));
   const at = hex.indexOf('0420');
@@ -232,11 +184,6 @@ export function extractPrivateScalar(privateKey: KeyObject, publicKey: Sm2Point)
   return scalar;
 }
 
-/**
- * 探明 OpenSSL 在 SM2 曲线上实际用的签名算法（ecdsa / sm2 / unknown）。
- * 这是"如实上报环境能力"的机制：判定的依据是用两套自研验签器去验 OpenSSL 的签名，
- * 谁验通就是谁 —— 而不是相信文档或命名。
-  */
 export function probeOpensslSideAlgorithm(): { algorithm: 'ecdsa' | 'sm2' | 'unknown' } {
   const generated = opensslEcdsaSigner();
   if (!generated) return { algorithm: 'unknown' };
@@ -251,7 +198,6 @@ export function probeOpensslSideAlgorithm(): { algorithm: 'ecdsa' | 'sm2' | 'unk
 }
 
 export interface CrossCheckReport {
-  /** 环境是否具备交叉验证条件（缺什么会写在 unavailableReason 里，绝不静默跳过） */
   available: boolean;
   unavailableReason?: string;
   /** 同算法比对：SM3 摘要逐字节 */
@@ -260,14 +206,10 @@ export interface CrossCheckReport {
   softwareToOpenssl: string[];
   /** OpenSSL 签名 → 自研验签 */
   opensslToSoftware: string[];
-  /** OpenSSL 在 SM2 曲线上实际使用的算法（实测判定，不是推测） */
   opensslAlgorithm: 'ecdsa' | 'sm2' | 'unknown';
-  /** DER 导入的 SM2 公钥是否可用（false = 已知陷阱，不该走这条路） */
   derImportedKeyUsable: boolean;
   notes: string[];
 }
-
-// 交叉验证要验的正是这些，而不是"私钥从哪来"。
 
 export function opensslCrossCheck(messages: Uint8Array[]): CrossCheckReport {
   if (!opensslSm3Available() || !opensslSm2CurveAvailable()) {
@@ -310,25 +252,12 @@ export function opensslCrossCheck(messages: Uint8Array[]): CrossCheckReport {
   };
 }
 
-/**
- * 确定性演示密钥：d = SM3(seed) mod (n-1) + 1。
- *
- *  只用于演示与测试：种子公开、私钥可被任何人推导。
- *    真实部署必须由密码设备生成并保管私钥（L0 永不落盘私钥）。
- *    之所以要确定性：验收要求"同样输入 → 同样字节"，随机密钥会让 OFD 产物不可复现。
-  */
 export function demoKeyPair(seed: string): { privateKey: bigint; publicKey: Sm2Point } {
   const digest = BigInt(`0x${sm3Hex(utf8(seed))}`);
   const privateKey = (digest % (SM2_N - 1n)) + 1n;
   return { privateKey, publicKey: derivePublicKey(privateKey) };
 }
 
-/**
- * 让 A 签名、让 B 验签，并逐一验证"篡改必须失败"。
- * 返回失败描述（空数组 = 全部通过）。
- *
- * 刻意同时验证正例与反例：只验正例时，一个"永远返回 true"的验签器也能全绿。
-  */
 export function crossCheck(signer: SyncSigner, verifier: Verifier, messages: Uint8Array[]): string[] {
   const failures: string[] = [];
   if (signer.algorithm !== verifier.algorithm) {

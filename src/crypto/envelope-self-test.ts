@@ -1,6 +1,3 @@
-// T18b 验收自测：SM4 运行时自检 + HMAC/PBKDF2-SM3 + 认证加密信封。
-// C 信封：重点全在拒绝——篡改密文/IV/头部/KDF 参数、错误口令、截断，每一条都必须被 MAC 拦住。
-
 import { createCipheriv, createHmac } from 'node:crypto';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { fromHex, sm3, toHex, utf8 } from './sm3.ts';
@@ -18,7 +15,6 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 const ITER = 1_000; // 测试用小迭代数；默认值由 C13 守住
 const PHRASE = '归档口令-2026#门诊';
 
-/** 解密的失败分支才有 code/reason：统一取值，避免每处都写类型收窄 */
 const codeOf = (result: DecryptResult): string => (result.ok ? 'OK' : result.code);
 const reasonOf = (result: DecryptResult): string => (result.ok ? '' : result.reason);
 
@@ -37,7 +33,6 @@ function clone(envelope: Envelope): Envelope {
   return JSON.parse(JSON.stringify(envelope)) as Envelope;
 }
 
-/** 断言某段调用会抛错，且错误信息里提到关键字（"报错但报得看不懂"等于没报） */
 function expectError(run: () => unknown, keyword: string): void {
   let message = '';
   try {
@@ -60,7 +55,7 @@ async function main(): Promise<void> {
     const availability = sm4Availability();
     assertEqual(availability.ok, true, `本环境应具备 SM4：${availability.reason ?? ''}`);
     assert(availability.ciphers.includes('sm4-ctr'), `应列出 sm4-ctr，实际 ${availability.ciphers.join(',')}`);
-    assertSm4(); // 缺 SM4 时这里会抛错，而不是悄悄继续
+    assertSm4();
   });
 
   await test('A3 ECB 单块与 OpenSSL 逐字节一致（验证封装参数：免填充、块长）', () => {

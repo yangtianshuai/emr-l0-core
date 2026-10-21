@@ -6,12 +6,6 @@ import type { NodeId } from '../model/types.ts';
 /** 契约版本：引擎与本地校验必须完全一致，不一致整份拒绝（不猜、不做兼容猜测）  */
 export const CONTENT_ENGINE_API = 'qc.content/1';
 
-/**
- * 禁用字段：任何能"写进文档"或构成一条 AI 建议的字段名。
- *
- * 逐字写出来而不只写规则：引擎实现方需要的是可照着改的清单，
- * 而"字段不认识"这种笼统的报错会让人以为只是拼写问题。
-  */
 export const FORBIDDEN_CONTENT_FIELDS = [
   'suggestion',
   'suggestedText',
@@ -34,7 +28,6 @@ export interface ContentQcRuleBrief {
   title: string;
   /** 该规则允许报出的最高级别：引擎不得自行升级（判定标准由本地控）  */
   severity: AnnotationSeverity;
-  /** 这条规则在问什么（给引擎看的原话，不含改法）  */
   requirement: string;
 }
 
@@ -42,7 +35,6 @@ export interface ContentQcNodeBrief {
   nodeId: string;
   sectionCode?: string;
   keyContent: boolean;
-  /** 节点全文（不截断：截断的文本会让引擎得出"这里没写"的错误结论）  */
   text: string;
 }
 
@@ -52,7 +44,6 @@ export interface ContentQcRequest {
   now: string;
   docTypeCode?: string;
   visitType?: string;
-  /** 允许使用的规则清单。引擎只能用这里的 ruleId  */
   rules: ContentQcRuleBrief[];
   /** 允许查看的节点。引用这些之外的节点一律拒绝 */
   nodes: ContentQcNodeBrief[];
@@ -60,22 +51,14 @@ export interface ContentQcRequest {
   omittedNodes: number;
 }
 
-/**
- * 一条发现。
- *
- * 注意它没有任何可以落笔的字段：`title` / `rationale` 是给人看的话，
- * `quote` 是已被引用的原文（只能等于文档里的既有内容，不能是新内容）。
-  */
 export interface ContentQcFinding {
   ruleId: string;
   nodeId: string;
   severity: AnnotationSeverity;
   title: string;
-  /** 凭什么这么判：医生据此复核 */
   rationale: string;
   /** 被引用的原文片段：必须逐字出现在该节点文本里 */
   quote: string;
-  /** 0~1；可选（内容类判定常给不出有意义的置信度，编一个反而误导） */
   confidence?: number;
 }
 
@@ -87,28 +70,19 @@ export interface ContentQcUnevaluated {
 export interface ContentQcResponse {
   api: typeof CONTENT_ENGINE_API;
   engine: { id: string; kind: 'rules' | 'model'; version: string; modelId?: string };
-  /**
-   * 它实际判过哪些规则。必填，且不能省 ——
-   * 少了它，"没有发现"与"根本没跑"在数据上完全同形（这正是内涵质控最容易撒的谎）。
-    */
   judged: string[];
   findings: ContentQcFinding[];
-  /** 判不了的：与"没命中"分开（同 `QcPredicateUncertain` 的处置） */
   unevaluated?: ContentQcUnevaluated[];
 }
 
 export const CONTENT_ENGINE_ERRORS = {
   /** 契约版本不符 */
   E_QC_ENGINE_API_MISMATCH: 'E_QC_ENGINE_API_MISMATCH',
-  /** 顶层形状不对（不是对象 / 缺必填字段 / 未知字段） */
   E_QC_ENGINE_SHAPE: 'E_QC_ENGINE_SHAPE',
-  /** 出现禁用字段（能写进文档的那种）—— 与"字段不认识"分开报 */
   E_QC_ENGINE_FORBIDDEN_FIELD: 'E_QC_ENGINE_FORBIDDEN_FIELD',
-  /** 产出规模越界 */
   E_QC_ENGINE_TOO_LARGE: 'E_QC_ENGINE_TOO_LARGE',
   /** 引擎未接入（明确不可用，不是"没有发现"） */
   E_QC_ENGINE_NOT_CONFIGURED: 'E_QC_ENGINE_NOT_CONFIGURED',
-  /* 以下为逐条丢弃的理由（不废掉整份）  */
   E_QC_FINDING_UNKNOWN_RULE: 'E_QC_FINDING_UNKNOWN_RULE',
   E_QC_FINDING_OUT_OF_SCOPE: 'E_QC_FINDING_OUT_OF_SCOPE',
   E_QC_FINDING_BAD_CITATION: 'E_QC_FINDING_BAD_CITATION',
@@ -121,11 +95,9 @@ export type ContentEngineErrorCode =
   | 'E_QC_UNEVALUATED_UNKNOWN_RULE';
 
 export const CONTENT_ENGINE_LIMITS = {
-  /** 一次请求最多送多少个节点（超出的按"未送"计数，不截断文本） */
   maxNodes: 400,
   /** 请求总字符上限（超了就少送节点：宁可少问，也不给半截文本） */
   maxTotalChars: 120_000,
-  /** 一次最多接受多少条发现 */
   maxFindings: 200,
   maxTitle: 120,
   maxRationale: 600,
@@ -135,7 +107,6 @@ export const CONTENT_ENGINE_LIMITS = {
 
 export interface ValidatedFinding extends ContentQcFinding {
   ruleTitle: string;
-  /** 引文在该节点文本里的位置（下游锚点定位用；-1 表示只在"仅引文"模式下命中的情况，不会出现） */
   quoteAt: number;
 }
 
@@ -149,11 +120,9 @@ export interface EngineValidationOk {
   ok: true;
   findings: ValidatedFinding[];
   unevaluated: ContentQcUnevaluated[];
-  /** 引擎自报实际判过哪些规则（原样带出来：界面/日志要能区分"判过没命中"与"没判"）  */
   judged: string[];
   /** 逐条丢弃的（必须报出来：静默丢一条等于替引擎美化产出）  */
   rejected: RejectedFinding[];
-  /** 引擎既没说判了、也没说没判的规则 —— 界面按"未判定"显示，不能算干净 */
   silentRules: string[];
 }
 
@@ -172,7 +141,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** 递归找禁用字段（未知字段本来就会被拒，但禁用字段要给专门的理由）  */
 function findForbidden(value: unknown, path = '$'): string | null {
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
@@ -197,13 +165,6 @@ function nonEmptyString(value: unknown, max: number): string | null {
   return trimmed;
 }
 
-/**
- * 校验引擎产出。两步处置（刻意分开）：
- *   - 整份拒绝：契约版本不符、顶层形状不对、出现禁用字段、规模越界、缺 `judged`。
- *     这些说明"这份东西不是按契约产出的"，逐条挑拣只会掩盖问题；
- *   - 逐条丢弃：单条发现的规则号不认识 / 越界 / 引文对不上 / 字段非法 / 重复。
- *     质控是提示性的，一条坏的不该废掉整份 —— 但丢弃必须逐条报出来。
-  */
 export function validateEngineOutput(raw: unknown, request: ContentQcRequest): EngineValidation {
   if (!isPlainObject(raw)) {
     return { ok: false, code: CONTENT_ENGINE_ERRORS.E_QC_ENGINE_SHAPE, message: '引擎产出不是 JSON 对象' };
@@ -330,13 +291,10 @@ export function validateEngineOutput(raw: unknown, request: ContentQcRequest): E
     }
     const quoteAt = node.text.indexOf(quote);
     if (quoteAt < 0) {
-      /* 引文对不上 = 幻觉。这条是本契约里最要紧的一道闸：
-         医生会照着一条不存在的问题去改病历，那比"不判定"危险得多。  */
       reject(CONTENT_ENGINE_ERRORS.E_QC_FINDING_BAD_CITATION, `引文在节点 ${node.nodeId} 的文本里找不到："${quote}"`);
       return;
     }
     if (item.confidence !== undefined) {
-      /* 有限性必须显式判：只判 typeof === 'number' 会让 NaN 通过（本仓库在建议通道踩过同一个坑） */
       if (typeof item.confidence !== 'number' || !Number.isFinite(item.confidence) || item.confidence < 0 || item.confidence > 1) {
         reject(CONTENT_ENGINE_ERRORS.E_QC_FINDING_BAD_FIELD, `confidence 必须是 0~1 的有限数，实际：${String(item.confidence)}`);
         return;
@@ -349,8 +307,6 @@ export function validateEngineOutput(raw: unknown, request: ContentQcRequest): E
     }
     seen.add(dedupeKey);
     findings.push({
-      /* 用规则清单 / 节点清单里的那个 id（与入参同值，但类型上确定非空 ——
-         `nonEmptyString` 的返回值是可空的，控制流分析跟不到 `rule`/`node` 判断上去） */
       ruleId: rule.ruleId,
       nodeId: node.nodeId,
       severity,
@@ -394,12 +350,6 @@ export interface ContentQcEngine {
   run(request: ContentQcRequest, signal?: { timeoutMs: number }): Promise<unknown>;
 }
 
-/**
- * 未接入的引擎。
- *
- * 它不是"桩"：它不产出任何发现，而是把全部规则逐条报成"未判定（引擎未接入）"。
- * 这样"没接"这件事会走既有的未判定通道显示出来 —— 而不是让界面看起来"跑了、没问题"。
-  */
 export function createUnavailableEngine(reason: string): ContentQcEngine {
   return {
     id: 'qc-content-none',
@@ -415,15 +365,6 @@ export function createUnavailableEngine(reason: string): ContentQcEngine {
   };
 }
 
-/**
- * 解析并守住引擎地址：明文 HTTP 只允许本机。
- *
- * 这一下会把病历内容发出去，而配置里写错一个字符（`http://` 而非 `https://`、写错主机名）
- * 就会把患者数据明文发到外部。宁可在构造时抛错，也不"先跑起来再说"。
- *
- * 导出而不是留在 HTTP 工厂里：模型形态的引擎（`content-engine-model.ts`）走的是
- * 同一类外呼，必须守同一套规矩。安全规则有两份实现，迟早有一份被漏改。
-  */
 export function resolveEngineEndpoint(endpoint: string): URL {
   let url: URL;
   try {
@@ -443,14 +384,8 @@ export function resolveEngineEndpoint(endpoint: string): URL {
 }
 
 export interface HttpEngineOptions {
-  /** 引擎地址。明文 HTTP 只允许本机（见工厂里的拒绝逻辑）  */
   endpoint: string;
-  /** 鉴权令牌：放 `Authorization: Bearer …`。不进日志、不进审计、不回显  */
   token?: string;
-  /**
-   * 期望的引擎标识。设了它，响应里的 `engine.id` 必须一致 ——
-   * 否则"换了一个引擎"这件事会看不出来（而判定标准换了，是必须看得出来的）。
-    */
   expectEngineId?: string;
   timeoutMs?: number;
   maxResponseBytes?: number;
@@ -487,8 +422,6 @@ export function createHttpContentEngine(options: HttpEngineOptions): ContentQcEn
           signal: controller.signal,
         });
         if (!response.ok) {
-          /* 失败也要把响应体的一小段带回来：否则现场只有"HTTP 500"，无从排查。
-             只截断、不回显整个响应（它可能很大，也可能含引擎的内部信息）。  */
           const body = await response.text().catch(() => '');
           throw new Error(`引擎返回 HTTP ${response.status}${body ? `：${body.slice(0, 200)}` : ''}`);
         }
@@ -558,12 +491,6 @@ export interface BuildRequestInput {
   nodes: Array<{ nodeId: NodeId; text: string; keyContent: boolean; sectionCode?: string }>;
 }
 
-/**
- * 构造请求：按重要度挑节点、不截断文本。
- *
- * 优先送关键内容节点；超上限的节点只计数（`omittedNodes`）——
- * 让引擎知道"还有 N 个节点没收到"，而不是把"没给我"当成"没写"（那正是假阳性之源）。
-  */
 export function buildContentRequest(input: BuildRequestInput): ContentQcRequest {
   const ordered = [...input.nodes].sort((a, b) => Number(b.keyContent) - Number(a.keyContent));
   const picked: ContentQcNodeBrief[] = [];
@@ -591,12 +518,6 @@ export function buildContentRequest(input: BuildRequestInput): ContentQcRequest 
   };
 }
 
-/**
- * 契约的可读形态：外部实现方要照着它写，所以它得能被查（`GET /api/qc-content-contract`）。
- *
- * 例子里的规则号刻意写成 `R-CONTENT-示例` 并注明"占位"：本程序不发明临床标准，
- * 拿一条编出来的规则当样例，读的人会以为那就是内置规则。
-  */
 export function describeContentContract(): Record<string, unknown> {
   return {
     api: CONTENT_ENGINE_API,

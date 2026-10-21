@@ -1,12 +1,6 @@
-// 后台账号（用户名 + 口令 + 角色）落库。
-
 import { countOf, type SqliteDatabase } from '../storage/sqlite.ts';
 import { ROLE_LABELS, type Role } from './principal.ts';
 
-/*  本环境的 `@types/node` 里 `node:crypto` 的类型不完整（没有 `scryptSync` / `timingSafeEqual`，
-   `randomBytes` 的返回值也只声明了无参 `toString()`）。处置办法与 `storage/sqlite.ts` 对
-   `node:sqlite` 完全相同：用变量做说明符绕开模块解析，再按用到的形状局部断言。
-   这里既是绕开类型的短板，也是在明说"类型是这个环境的短板" —— 而不是把类型放宽到 any。  */
 const cryptoSpecifier = 'node:crypto';
 const nodeCrypto = (await import(cryptoSpecifier)) as unknown as {
   randomBytes: (size: number) => Uint8Array;
@@ -14,7 +8,6 @@ const nodeCrypto = (await import(cryptoSpecifier)) as unknown as {
   timingSafeEqual: (a: Uint8Array, b: Uint8Array) => boolean;
 };
 
-/** 本环境 `Buffer` 只有值、没有可用的类型声明（`Buffer` 当类型用会编译报错），所以只借它的编码能力 */
 interface BufferCtor {
   from(bytes: Uint8Array): { toString(encoding: string): string };
   from(text: string, encoding: string): Uint8Array;
@@ -25,13 +18,9 @@ const toBase64 = (bytes: Uint8Array): string => Buf.from(bytes).toString('base64
 /** 口令最小长度。唯一的长度规则：只设下限，不设"必须含大小写+符号"那类规则  */
 export const PASSWORD_MIN_LENGTH = 8;
 
-// 而离线爆破的成本是每条候选口令都要付一次这个代价（内存 128·N·r = 16MB/次，也不是白给的）。
-// 那个代价会让人去改短口令，反而更糟。
-
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 32 } as const;
 const HASH_ALGO = 'scrypt';
 
-/** 用户名规则：ASCII 工号/账号风格。不做中文名 —— 中文名是"姓名"，不是账号，两者混在一起必然要被问到"到底是哪个"  */
 const USERNAME_PATTERN = /^[A-Za-z0-9._@-]{2,32}$/;
 
 export type UserErrorCode =
@@ -53,10 +42,6 @@ export class UserError extends Error {
   }
 }
 
-/**
- * 入库的账号视图。不含任何口令材料 —— 它会被下发给管理后台，
- * 所以这里放什么，就等于"页面响应体里有什么"。
-  */
 export interface AdminUser {
   username: string;
   role: Role;
@@ -66,7 +51,6 @@ export interface AdminUser {
   updatedAt: string;
   updatedBy: string;
   lastLoginAt: string | null;
-  /** 哈希算法标识（如 `scrypt`）：只用于展示"用的是什么算法"，不是哈希本身 */
   passwordAlgo: string;
 }
 
@@ -74,12 +58,6 @@ export type VerifyResult =
   | { ok: true; user: AdminUser }
   | { ok: false; code: 'E_USER_NOT_FOUND' | 'E_USER_DISABLED' | 'E_USER_BAD_PASSWORD' };
 
-/**
- * 生成口令哈希：`scrypt$N$r$p$<salt-b64>$<hash-b64>`。
- *
- * 盐每条独立随机（16 字节）：共用盐会让"同一个口令在两个账号上哈希相同"，
- * 于是攻破一个就等于攻破另一个。
-  */
 export function hashPassword(password: string): string {
   assertPasswordAcceptable(password);
   const salt = nodeCrypto.randomBytes(16);
@@ -99,7 +77,6 @@ export function passwordParamsOf(encoded: string): { algo: string; N: number; r:
   return { algo, N, r, p };
 }
 
-/** 验证口令。参数按哈希串自己声明的取值（于是提高参数不会让旧口令一起失效）  */
 export function verifyPassword(password: string, encoded: string): boolean {
   const parts = String(encoded).split('$');
   if (parts.length !== 6) return false;
@@ -120,8 +97,6 @@ export function verifyPassword(password: string, encoded: string): boolean {
   try {
     derived = nodeCrypto.scryptSync(String(password), salt, expected.length, { N: params.N, r: params.r, p: params.p });
   } catch {
-    /* 参数大到本机算不出来（如库被人改成 N=2^30）：判为验证失败，不把异常抛给调用方 ——
-       抛出去会让登录接口 500，而那看起来像服务坏了，不像"口令不对"。  */
     return false;
   }
   return derived.length === expected.length && nodeCrypto.timingSafeEqual(derived, expected);
@@ -132,7 +107,6 @@ function dummyVerify(password: string): void {
   verifyPassword(password, DUMMY_HASH);
 }
 
-/** 口令本身的规则（长度）。不在口令上做字符集要求：那类规则会把人逼去写 `Abc123!@#`  */
 function assertPasswordAcceptable(password: string): void {
   if (typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH) {
     throw new UserError(
@@ -175,8 +149,6 @@ const COLUMNS = 'username, role, password_hash, disabled, created_at, updated_at
 function toUser(row: UserRow): AdminUser {
   const role = String(row.role ?? '');
   if (!Object.prototype.hasOwnProperty.call(ROLE_LABELS, role)) {
-    /* 角色值读不出来就报错，不回落成某个默认角色：把"库被人改坏了"静默变成
-       "这个人现在是只读"，会让一个越权问题看起来像一个功能问题。  */
     throw new UserError('E_USER_INVALID', `账号角色不是已知角色：${JSON.stringify(role)}（库被改过？）`);
   }
   const username = String(row.username ?? '');
@@ -194,14 +166,9 @@ function toUser(row: UserRow): AdminUser {
 }
 
 export interface UserStoreOptions {
-  /** 时钟（测试注入，保证可复现） */
   now?: () => string;
 }
 
-/**
- * 账号仓储。本仓库唯一读写 `admin_users` 的地方 ——
- * 于是"口令怎么哈希、红了哪些线"只有一处答案。
-  */
 export class UserStore {
   private readonly db: SqliteDatabase;
   private readonly now: () => string;
@@ -211,12 +178,10 @@ export class UserStore {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  /** 账号总数（未初始化 = 0；服务据它决定登录页显示"初始化"还是"登录"）  */
   count(): number {
     return countOf(this.db, 'select count(*) as n from admin_users');
   }
 
-  /** 还有几个能登录的管理员：最后一个人不能被删/停用/降级，判据就是它  */
   enabledAdminCount(): number {
     return countOf(this.db, "select count(*) as n from admin_users where role = 'admin' and disabled = 0");
   }
@@ -225,7 +190,6 @@ export class UserStore {
     return (this.db.prepare(`select ${COLUMNS} from admin_users order by role, username collate nocase`).all() as UserRow[]).map(toUser);
   }
 
-  /** 按用户名取账号（大小写不敏感：`Admin` 与 `admin` 不该是两个账号，那只会让人登错入口）  */
   get(username: string): AdminUser | null {
     const row = this.db
       .prepare(`select ${COLUMNS} from admin_users where username = ? collate nocase`)
@@ -241,11 +205,6 @@ export class UserStore {
     return row?.username ? String(row.username) : null;
   }
 
-  /**
-   * 验证登录。三种失败在返回码里分开、在给用户的文案里合并 ——
-   * 服务端要据此写审计（"有人在试不存在的账号"与"口令错"是两件事），
-   * 而登录页一律只说"用户名或口令不正确"（多说一句就是给爆破者的反馈）。
-    */
   verify(username: string, password: string): VerifyResult {
     const row = this.db
       .prepare(`select ${COLUMNS} from admin_users where username = ? collate nocase`)
@@ -258,13 +217,10 @@ export class UserStore {
     if (!verifyPassword(password, String(row.password_hash ?? ''))) {
       return { ok: false, code: 'E_USER_BAD_PASSWORD' };
     }
-    /* 先验口令、再报停用：反过来的话，"这个账号存在但被停用"会变成一个不需要口令
-       就能问出来的事实（拿一个字典挨个试用户名即可）。  */
     if (user.disabled) return { ok: false, code: 'E_USER_DISABLED' };
     return { ok: true, user };
   }
 
-  /** 记一次成功登录（审计之外唯一被更新的字段：它回答"这个账号到底有没有人在用"） */
   touchLogin(username: string): void {
     this.db.prepare('update admin_users set last_login_at = ? where username = ? collate nocase').run(this.now(), String(username).trim());
   }
@@ -310,12 +266,6 @@ export class UserStore {
     return this.requireUser(user.username);
   }
 
-  /**
-   * 停用 / 启用。
-   *
-   * 启用的方向不检查"最后一个管理员"：把一个被停用的管理员重新启用只会让可用管理员变多，
-   * 而"变多"永远不会把人锁在外面。
-    */
   setDisabled(input: { username: string; disabled: boolean; by: string }): AdminUser {
     assertBy(input.by);
     const user = this.requireUser(input.username);
@@ -359,14 +309,6 @@ export class UserStore {
   }
 }
 
-/**
- * 操作者必填。每个改数据的动作都要先过这一关 ——
- * `updated_by` 如实地记下"是谁做的这件事"是这张表存在的理由之一，
- * 而空操作者会让审计里出现一条没人认领的变更。
- *
- * 这一条曾经只写在 `assertNotSelf` 里，于是只改了别人口令的那条路径漏掉了它
- * （谁都能用空操作者改口令，审计里就查不出是谁改的）—— 被 U8 抓住。
-  */
 function assertBy(by: string): void {
   if (typeof by !== 'string' || by.trim() === '') {
     throw new UserError('E_USER_INVALID', '操作者不得为空（`updated_by` 要如实地记下是谁做的这件事）');

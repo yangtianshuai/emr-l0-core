@@ -1,5 +1,3 @@
-// T10~T15 验收自测：AI 建议通道与门控。
-
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -222,8 +220,6 @@ async function partA(): Promise<void> {
     assertEqual(session.getMetrics().editRate, 0, '未经改稿的采纳不应计入修改率');
   });
 
-  /* ---------- A15~A21：建议分组（一次提交 = 一组）与批量门控 ---------- */
-
   await test('A15 批量提交 = 一组：不落笔、不留痕、不改 rev；组 ID 由存储层生成', async () => {
     const { session, ids } = open();
     const before = JSON.stringify(session.document.nodes);
@@ -255,7 +251,6 @@ async function partA(): Promise<void> {
     const { session, ids } = open();
     const first = ids.textIds[0] as NodeId;
     const second = ids.textIds[1] as NodeId;
-    /* 第二条设为关键内容（阈值 0.90），组内混入一条不够门槛的 */
     session.updateNodeProps({ nodeId: second, patch: { keyContent: true } }, HUMAN);
     const { groupId } = session.suggestBatch(
       {
@@ -273,7 +268,6 @@ async function partA(): Promise<void> {
     assertEqual(result.blocked[0]?.code, 'E_AI_LOW_CONFIDENCE', '被拦原因应为置信度不足');
     assertEqual(textOf(session, first), '一般内容草稿', '够门槛的应落笔');
     assertEqual(textOf(session, second).includes('关键内容草稿'), false, '不够门槛的不得落笔');
-    /* 关键：被拦的条目仍是 pending —— 医生没有拒绝它，算成拒绝会污染拒绝率 */
     const stillPending = session.listSuggestions({ groupId, status: 'pending' });
     assertEqual(stillPending.length, 1, '被拦的条目应保持待处理');
     assertEqual(stillPending[0]?.id, result.blocked[0]?.suggestionId, '保持待处理的正是被拦那一条');
@@ -312,7 +306,6 @@ async function partA(): Promise<void> {
       AI,
     );
     const items = session.listSuggestions({ groupId });
-    /* 逐条处理成"部分完成"：组不该因此产生一个"部分接受"状态 */
     session.acceptSuggestion({ suggestionId: String(items[0]?.id) }, HUMAN);
     session.rejectSuggestion({ suggestionId: String(items[1]?.id) }, HUMAN);
 
@@ -356,8 +349,6 @@ async function partA(): Promise<void> {
     assertEqual(revision?.patch, [], 'reject-ai 不改节点，patch 为空');
     assertEqual([textOf(session, first), textOf(session, second)], before, '拒绝不应改内容');
     assertEqual(session.listSuggestions({ groupId, status: 'pending' }).length, 0, '组内不应再有待处理');
-    /* 必须查不变量：留痕新增字段（aiSuggestionIds）要同时登记进模型校验白名单，
-       否则"批量拒绝后的文档"会以 E_UNKNOWN_FIELD 通不过校验 —— 不查就发现不了 */
     assertEqual(session.verifyInvariants(), [], '不变量应成立');
   });
 
@@ -385,7 +376,6 @@ async function partA(): Promise<void> {
       '显式指定不存在的建议应报错',
     );
 
-    /* 两种范围的语义有意不同：显式指定已处理的条目报状态错；按组操作则跳过已处理项 */
     session.acceptSuggestion({ suggestionId: suggestionIds[0] as string }, HUMAN);
     assertEqual(
       codeOf(() => session.acceptSuggestions({ suggestionIds }, HUMAN)),
@@ -417,8 +407,6 @@ async function partA(): Promise<void> {
     assertEqual(batched.session.listSuggestionGroups().length, 1, '批量提交应有一组');
     assertEqual(oneByOne.session.listSuggestionGroups().length, 0, '逐条提交不应产生组');
   });
-
-  /* ---------- A22~A23：生成幂等（连点不膨胀建议数，也不膨胀指标） ---------- */
 
   await test('A22 单条幂等：同目标 + 同文本且仍待处理 → 复用；已处理的**不挡住**"再要一条"', async () => {
     const { session, ids } = open();
@@ -470,8 +458,6 @@ async function partA(): Promise<void> {
     assertEqual(session.listSuggestionGroups().length, groupsBefore, '不应多出一个空组');
   });
 
-  /* ---------- A24~A28：三级归因（"改了没有"之外，还要回答"改得轻还是重"） ---------- */
-
   await test('A24 改动幅度：一字未改记 0，不计修改率，也不进任何"改过"的档', async () => {
     const { session, ids } = open();
     const textId = ids.textIds[0] as NodeId;
@@ -495,11 +481,9 @@ async function partA(): Promise<void> {
     const { session, ids } = open();
     const first = ids.textIds[0] as NodeId;
     const second = ids.textIds[1] as NodeId;
-    /* 长文本 + 一处小改：剥掉公共前后缀后只剩一个字符，比例必然很小 */
     const long = '患者今日体温正常，无咳嗽咳痰，精神可，饮食睡眠可，二便正常。';
     const light = session.suggestText({ nodeId: first, text: long, confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: light.suggestionId, editedText: long.replace('精神可', '精神尚可') }, HUMAN);
-    /* 短文本 + 整句重写：比例必然很大 */
     const heavy = session.suggestText({ nodeId: second, text: '考虑肺炎', confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: heavy.suggestionId, editedText: '考虑急性支气管炎，建议复查胸片' }, HUMAN);
 
@@ -519,12 +503,8 @@ async function partA(): Promise<void> {
 
   await test('A26 归因恒等式：四类之和恒等于采纳数，且与 metrics 的采纳数同源', async () => {
     const { session, ids } = open();
-    /* 一条原样、一条微改、一条大改、外加一条拒绝（拒绝不进归因，它有自己的原因）  */
     const asIs = session.suggestText({ nodeId: ids.textIds[0] as NodeId, text: '原文', confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: asIs.suggestionId }, HUMAN);
-    /* 微改样本：只加一个"尚"字。注意 0.2 的边界并不宽松 ——
-       "甲：无异常。"改成"甲：未见异常。"（加两字 / 共七字）已经是 0.29，直接翻成大改；
-       所以界面上"微改"这一档描述的确实是"只动了措辞"  */
     const light = session.suggestText({ nodeId: ids.textIds[1] as NodeId, text: '甲：体温正常，精神可。', confidence: 0.99, modelId: 'm1' }, AI);
     session.acceptSuggestion({ suggestionId: light.suggestionId, editedText: '甲：体温正常，精神尚可。' }, HUMAN);
     const heavy = session.suggestText({ nodeId: ids.textIds[2] as NodeId, text: '考虑肺炎', confidence: 0.99, modelId: 'm1' }, AI);
@@ -543,14 +523,10 @@ async function partA(): Promise<void> {
     assertEqual(attribution.asIs, 1, '一条原样');
     assertEqual(attribution.light, 1, '一条微改');
     assertEqual(attribution.heavy, 1, '一条大改');
-    /* 占比分母是采纳数（含未归因）：把 unknown 从分母里拿掉，指标会随老数据存量无声变好  */
     assertEqual(attribution.asIsShare.toFixed(4), '0.3333', '占比分母应为采纳数');
   });
 
   await test('A27 未归因的采纳单列：老数据不能被读成"原样采纳"', async () => {
-    /* `editRatio` 是这次才加的字段，老快照里的采纳没有它。
-       默认成"原样采纳"恰好把指标推向模型表现最好的一档 ——
-       这正是本仓库反复拒绝的那种"把不知道说成知道"。  */
     const book = SuggestionBook.restore({
       seq: 1,
       groupSeq: 0,
@@ -579,13 +555,9 @@ async function partA(): Promise<void> {
     assertEqual(editRatioOf('同样一句话', '同样一句话'), 0, '完全相同应为 0');
     assertEqual(editRatioOf('', ''), 0, '都为空应为 0');
     assertEqual(editRatioOf('', '新增内容'), 1, '从无到有应为 1');
-    /* "血压偏高" → "偏高血压"：字符集合完全相同、顺序不同。
-       用"不同字符数"算会得出 0（该记的改动被漏掉）；编辑距离会如实算成改动。 */
     assert(editRatioOf('血压偏高', '偏高血压') > 0.5, '字符顺序变了必须算改动');
-    /* 长文本里改一个字：剥公共前后缀后只剩一个字符，比例极小 */
     const base = '患者今日体温正常，无咳嗽咳痰，精神可，饮食睡眠可，二便正常。';
     assert(editRatioOf(base, base.replace('精神可', '精神尚可')) <= 0.2, '一处小改应落在微改档内');
-    /* 分档边界：`light` 是闭区间（≤），差一点就翻档  */
     assertEqual(editBandOf(0), 'as-is', '0 是原样');
     assertEqual(editBandOf(0.2), 'light', '边界值算微改（≤）');
     assertEqual(editBandOf(0.2000001), 'heavy', '刚过边界算大改');
@@ -650,7 +622,6 @@ async function partA(): Promise<void> {
     assertEqual(textOf(session, textId), '医生原句。', '正文应保持医生写的那句');
     assertEqual(node.runs.length, 1, '没有 AI 字符就不该多出一段 run');
     assertEqual(node.runs[0]?.provenance, undefined, '一个字符都不该标 AI');
-    /* 节点级仍是 ai：这是一次"采纳"的决策记录，与"谁逐字写了哪些字"分开记 */
     assertEqual(node.provenance.origin, 'ai', '节点级记录采纳行为');
   });
 }
@@ -661,7 +632,6 @@ interface Ids {
   fieldId: NodeId;
 }
 
-/** 直接复用真实实现的参数类型，避免适配层出现"两套参数定义"而悄悄漂移 */
 type MethodKey = 'suggestText' | 'acceptSuggestion' | 'rejectSuggestion' | 'confirmNode' | 'sign' | 'insertText' | 'updateNodeProps' | 'deleteNode';
 type P<M extends MethodKey> = Parameters<WriteSession[M]>[0];
 
@@ -849,8 +819,6 @@ async function partB(createJsStore: (doc: unknown, options?: unknown) => RawStor
         fieldId: jsFixture.ids.fieldIds[0] as NodeId,
       };
 
-      /* 用异步版：签章场景返回 Promise，同步 codeOf 抓不到它的拒绝
-         （那会让"应当被拒"的场景假装通过 —— 这次改造里真实踩到过）  */
       const tsOutcome = await codeOfAsync(() => scenario.run(tsAdapter(tsSession), tsIds));
       const jsOutcome = await codeOfAsync(() => scenario.run(jsAdapter(jsStore), jsIds));
 
@@ -924,9 +892,6 @@ async function main(): Promise<void> {
     assertEqual(tsMetrics.adoptionRate, jsMetrics.adoptionRate, '采纳率应一致');
     assert(tsMetrics.editRate > 0 && tsMetrics.editRate < 1, `修改率应在 (0,1) 之间，实际 ${tsMetrics.editRate}`);
 
-    /* 三级归因同样跨实现比对：改动幅度是一个算法（剥公共前后缀、滚动数组边界、
-       分档的闭区间），两套实现各写一遍正是双实现验证的意义 ——
-       任何一处漂移都会在这里露出来，而不是等到某天发现两张报表对不上  */
     const tsAttribution = tsSession.getSuggestionAttribution();
     assertEqual(tsAttribution, jsStore.getSuggestionAttribution(), '三级归因应逐项一致');
     assertEqual(

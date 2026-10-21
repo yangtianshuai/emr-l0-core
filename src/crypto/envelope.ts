@@ -1,6 +1,3 @@
-// 认证加密信封：SM4-CTR + HMAC-SM3（Encrypt-then-MAC），口令派生密钥。
-// - 本模块只做对称加密（口令模式）。"给谁的密钥"这件事需要公钥信封（用接收方 SM2 公钥
-
 import { randomBytes } from 'node:crypto';
 import { sm3, sm3Hex, toHex, utf8 } from './sm3.ts';
 import { DEFAULT_PBKDF2_ITERATIONS, concatBytes, hmacSm3, passphraseBytes, pbkdf2HmacSm3 } from './kdf.ts';
@@ -11,40 +8,30 @@ import { sm2Decrypt, sm2Encrypt } from './sm2-encrypt.ts';
 export const ENVELOPE_SUITE = 'SM4-CTR-HMAC-SM3' as const;
 export const ENVELOPE_VERSION = 1 as const;
 
-// 密钥来源：口令派生 或 公钥封装（互斥，由 algorithm 判别）。
-
 export type EnvelopeKeySource =
   | {
       algorithm: 'PBKDF2-HMAC-SM3';
-      /** base64 */
       salt: string;
       iterations: number;
     }
   | {
       algorithm: 'SM2-ENVELOPE';
-      /** SM2 加密后的内容密钥（C1C3C2，base64） */
       wrappedKey: string;
-      /** 接收方公钥指纹（SM3(SPKI)）：用于"这个信封到底是不是给我的"的早期判断  */
       recipientFingerprint: string;
     };
 
 export interface EnvelopeHeader {
   version: typeof ENVELOPE_VERSION;
   suite: typeof ENVELOPE_SUITE;
-  /** SM4-CTR 的 IV（base64） */
   iv: string;
   kdf: EnvelopeKeySource;
-  /** 明文长度（解密后可核对，避免"解出来少一截"被当成正常） */
   plaintextLength: number;
-  /** SM3(明文)，十六进制小写 */
   plaintextDigest: string;
-  /** HMAC-SM3(Kmac, 规范化头部 ‖ 密文)，十六进制小写 */
   mac: string;
 }
 
 export interface Envelope {
   header: EnvelopeHeader;
-  /** 密文（base64） */
   ciphertext: string;
 }
 
@@ -54,26 +41,16 @@ export type EnvelopeErrorCode =
   | 'E_ENVELOPE_MAC_MISMATCH'
   | 'E_ENVELOPE_LENGTH_MISMATCH'
   | 'E_ENVELOPE_DIGEST_MISMATCH'
-  /** 信封不是给这把私钥的（指纹不符）——在解封之前就能判定，不必做无谓的私钥运算  */
   | 'E_ENVELOPE_WRONG_RECIPIENT'
-  /** 密钥解封失败（封装被篡改，或私钥与指纹不配对） */
   | 'E_ENVELOPE_KEY_UNWRAP_FAILED';
 
 export type DecryptResult =
   | { ok: true; plaintext: Uint8Array }
   | { ok: false; code: EnvelopeErrorCode; reason: string };
 
-/* 导出（而非模块私有）：调用方需要读头部而不解密时（例如判断一份快照是"哪一代盐"写的），
-   必须能自己解析这些编码 —— 为此在 store 里另写一份 base64 实现，才是真正的风险（两套口径会漂移）。  */
 export const toBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
 export const fromBase64 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, 'base64'));
 
-/*  这里曾有过一个真 bug，留痕以免重犯：
-   早期有一个 `const hex = (bytes) => sm3Hex(bytes)`，然后到处写成 `hex(sm3(plaintext))` ——
-   而 `sm3Hex` 自己就会做 SM3，于是明文摘要与 MAC 都变成了"两层 SM3"。
-   由于加密与校验用的是同一个错误口径，内部完全自洽，所有既有用例都是绿的；
-   是后来加的一条"摘要必须等于 SM3(明文)（并用 OpenSSL 交叉印证）"的断言才把它抓出来。
-   教训："取十六进制字符串"与"算摘要并取十六进制"必须是两个名字。  */
 const hexToBytes = (text: string): Uint8Array => {
   if (typeof text !== 'string' || text.length % 2 !== 0 || !/^[0-9a-f]*$/.test(text)) return new Uint8Array(0);
   const out = new Uint8Array(text.length / 2);
@@ -89,10 +66,6 @@ function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-/**
- * 头部规范化文本：字段顺序固定、`mac` 不参与（它就是要算出来的东西）。
- * 与签名链的 SignedInfo 同一纪律：协议字节不能随实现或对象属性顺序漂移。
-  */
 export function canonicalHeader(header: EnvelopeHeader): Uint8Array {
   const keyLines =
     header.kdf.algorithm === 'PBKDF2-HMAC-SM3'
@@ -107,8 +80,6 @@ export function canonicalHeader(header: EnvelopeHeader): Uint8Array {
       `envelope/${header.version}`,
       `suite=${header.suite}`,
       `iv=${header.iv}`,
-      /* 口令模式的字节序列与加入公钥模式之前完全一致（顺序未变），
-         否则已经生成的 `.l0enc` 会全部验不过 —— 协议字节不能随功能扩展而漂移  */
       ...keyLines,
       `plaintextLength=${header.plaintextLength}`,
       `plaintextDigest=${header.plaintextDigest}`,
@@ -117,14 +88,9 @@ export function canonicalHeader(header: EnvelopeHeader): Uint8Array {
   );
 }
 
-// 派生结果缓存：同 (口令, salt, 迭代数) 只派生一次。
-// - 缓存的是子密钥（不是口令）。能读进程内存的人早已能读到解密后的明文，
-
 const DERIVED_KEY_CACHE = new Map<string, { kMac: Uint8Array; kEnc: Uint8Array }>();
-/** 正常只有 1~2 种（当前口令 + 轮换期的旧口令）；给 32 是留足余量，同时防止无限增长 */
 const DERIVED_KEY_CACHE_LIMIT = 32;
 
-/** 从口令派生两个子密钥：Kmac(32) ‖ Kenc(16)。密钥分离是硬要求，不是风格偏好 */
 function deriveKeys(passphrase: Uint8Array, salt: Uint8Array, iterations: number): { kMac: Uint8Array; kEnc: Uint8Array } {
   const cacheKey = `${iterations}|${toHex(salt)}|${sm3Hex(passphrase)}`;
   const cached = DERIVED_KEY_CACHE.get(cacheKey);
@@ -132,7 +98,6 @@ function deriveKeys(passphrase: Uint8Array, salt: Uint8Array, iterations: number
   const material = pbkdf2HmacSm3(passphrase, salt, iterations, 48);
   const keys = { kMac: material.subarray(0, 32), kEnc: material.subarray(32, 48) };
   if (DERIVED_KEY_CACHE.size >= DERIVED_KEY_CACHE_LIMIT) {
-    /* 按插入序淘汰最早一条（不做 LRU：这里命中率天然极高，不值得为它引入计数器） */
     const oldest = DERIVED_KEY_CACHE.keys().next().value;
     if (oldest !== undefined) DERIVED_KEY_CACHE.delete(oldest);
   }
@@ -141,7 +106,6 @@ function deriveKeys(passphrase: Uint8Array, salt: Uint8Array, iterations: number
 }
 
 function macOf(kMac: Uint8Array, header: EnvelopeHeader, ciphertext: Uint8Array): string {
-  /* toHex（纯转换），不是 sm3Hex（会再算一次摘要） */
   return toHex(hmacSm3(kMac, concatBytes(canonicalHeader(header), ciphertext)));
 }
 
@@ -175,10 +139,6 @@ export function encryptEnvelope(plaintext: Uint8Array, options: EncryptOptions):
   return { header, ciphertext: toBase64(ciphertext) };
 }
 
-/**
- * 解密顺序必须是：结构校验 → MAC 校验 → 解密 → 长度/摘要校验。
- * 先解密再校验会让攻击者用"错误类型"当 oracle（填充/解析差异都能被利用）。
-  */
 export function decryptEnvelope(envelope: Envelope, passphrase: string): DecryptResult {
   const header = envelope?.header;
   if (!header || typeof header.iv !== 'string' || typeof envelope.ciphertext !== 'string') {
@@ -239,38 +199,24 @@ export function decryptEnvelope(envelope: Envelope, passphrase: string): Decrypt
 
 export interface RecipientPublicKey {
   publicKey: Sm2Point;
-  /** 缺省时由公钥算（SM3(SPKI)）；显式传入便于与外部核对 */
   fingerprint?: string;
 }
 
 export interface RecipientPrivateKey {
   privateKey: bigint;
-  /** 公钥指纹：用于"这个信封是不是给我的"的早期判断（在动用私钥之前）  */
   fingerprint: string;
 }
 
-/**
- * MAC 密钥由内容密钥再派生一次（带域分隔），不复用内容密钥本身：
- * 同一份密钥材料既做加密又做认证会引入跨用途攻击面。
-  */
 function macKeyOfDek(dek: Uint8Array): Uint8Array {
   return sm3(concatBytes(utf8('l0-envelope-mac'), dek));
 }
 
-/**
- * 用接收方公钥加密：随机内容密钥（DEK）加密正文，DEK 再用 SM2 封装进头部。
- * 于是"谁能读"由密码学保证：没有私钥就解不出 DEK，拿到文件也没用。
-  */
 export function encryptEnvelopeFor(
   plaintext: Uint8Array,
   recipient: RecipientPublicKey,
   options: { iv?: Uint8Array; dek?: Uint8Array } = {},
 ): Envelope {
   assertSm4();
-  /* 边界（实测发现）：SM2 加密的 KDF 要求输出长度为正整数，
-     所以空明文无法用公钥模式加密。这里给出明确错误，
-     而不是把"KDF 输出长度必须为正整数"这种内部错误抛给调用方。
-     需要加密空内容（例如空草稿）时用口令模式。  */
   if (plaintext.length === 0) {
     throw new Error('公钥信封不支持空明文（SM2 加密的 KDF 要求长度 > 0）：空内容请改用口令模式');
   }
@@ -298,14 +244,6 @@ export function encryptEnvelopeFor(
   return { header, ciphertext: toBase64(ciphertext) };
 }
 
-/**
- * 用接收方私钥解密。
- *
- * 顺序：结构校验 → 指纹是否匹配（先判断"是不是给我的"，避免无谓的私钥运算）
- * → SM2 解封 DEK（C3 校验）→ 验整体 MAC → SM4 解密 → 长度/摘要校验。
- * 与口令模式的差别：这里必须先解出 DEK 才能算 MAC，因此把"密钥解封失败"独立成一个错误码，
- * 避免和"MAC 不符"混在一起（现场排查时这两个原因的处置完全不同）。
-  */
 export function decryptEnvelopeWith(envelope: Envelope, recipient: RecipientPrivateKey): DecryptResult {
   const header = envelope?.header;
   if (!header || typeof header.iv !== 'string' || typeof envelope.ciphertext !== 'string') {
@@ -363,10 +301,6 @@ export function unwrapWrappedKey(
   return { ok: true, key: unwrapped.plaintext };
 }
 
-/**
- * 用已解封的内容密钥解密（低层接口）：校验头部/套件 → 验 MAC → 解密 → 核对长度与摘要。
- * 结构校验在这里重做一遍，因为它也可能被独立调用（不能依赖调用方已经校验过）。
-  */
 export function decryptEnvelopeWithDek(envelope: Envelope, dek: Uint8Array): DecryptResult {
   const header = envelope?.header;
   if (!header || typeof header.iv !== 'string' || typeof envelope.ciphertext !== 'string') {

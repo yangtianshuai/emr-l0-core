@@ -1,5 +1,3 @@
-// AI 模型接入自测（P1~P5）。
-
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -33,8 +31,6 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 
 const AT = '2026-10-09T10:00:00.000Z';
 
-/* 本仓库环境的 node:fs 类型声明不完整（缺 mkdtempSync / rmSync 的完整声明，运行时存在）。
-   这里做一次局部断言，与 core/store-self-test.ts 同一处理方式。 */
 const fsx = (await import('node:fs')) as unknown as {
   mkdtempSync: (prefix: string) => string;
   rmSync: (path: string, options: { recursive?: boolean; force?: boolean }) => void;
@@ -93,7 +89,6 @@ async function asyncCodeOf(fn: () => Promise<unknown>): Promise<string> {
   }
 }
 
-/** 一台"假模型"：按给定响应体返回，或永不返回（用于测超时） */
 function fakeTransport(response: { status: number; body: string }): { transport: ModelTransport; seen: Array<{ url: string; headers: Record<string, string>; body: string }> } {
   const seen: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
   return {
@@ -108,16 +103,11 @@ function fakeTransport(response: { status: number; body: string }): { transport:
 async function main(): Promise<void> {
   await test('P1 配置 fail-closed：**选了真模型却没给地址必须抛错**，非法数值不取默认', () => {
     assertEqual(DEFAULT_AI_MODEL_CONFIG.format, 'offline', '默认离线（一个都没配就不外呼，病历内容也不出这台机器）');
-    /* 校验口径只有一处（`validateModelConfigInput`）：界面保存与库读取共用它，
-       所以这一组覆盖的是两条路径共通的规则，而不是某一条路径的私规 ——
-       两条路径若各有一套口径，就会出现"界面能存进去、读的时候却拒绝"的配置。  */
     assertEqual(
       codeOf(() => validateModelConfigInput({ format: 'openai-compatible', model: 'qwen-med-7b' })),
       'E_AI_CONFIG_NO_ENDPOINT',
       '选了 openai-compatible 却没给地址，**必须抛错** —— 静默退回离线模板会让"已接入真模型"变成假话',
     );
-    /* 模型名不能省：它是写进留痕的 modelId，
-       省掉它留痕就答不出"这条内容是哪个模型写的"，而那正是审计要看的东西  */
     assertEqual(
       codeOf(() => validateModelConfigInput({ format: 'openai-compatible', endpoint: 'http://x/v1' })),
       'E_AI_CONFIG_INVALID',
@@ -226,9 +216,36 @@ async function main(): Promise<void> {
     assertEqual(String(polished.items[0]?.text).includes('离线模板润色'), false, '润色不得添加标记文字，只做规范化');
   });
 
+  await test('P4b 选区润色：只返回选中那一截的替换文本，整段由内核拼回', async () => {
+    const adapter = createOfflineAdapter({ ...DEFAULT_AI_MODEL_CONFIG });
+    const base = context();
+    const target = { ...base.items[1], text: '腹平软   无压痛。' };
+    const response = await adapter.suggest(request({
+      context: { ...base, items: [target] },
+      mode: 'polish',
+      selection: { nodeId: 'n_2', text: '腹平软   无压痛' },
+    }));
+    assertEqual(response.items.length, 1, '选区请求仍只产出一条');
+    assertEqual(
+      response.items[0]?.text,
+      '腹平软 无压痛',
+      '只规范化选中那一截（返回整段会把前后文复制进替换文本）',
+    );
+    assertEqual(
+      String(response.items[0]?.text).includes('胸痛'),
+      false,
+      '不得把上下文里的其它内容带进来',
+    );
+
+    const elsewhere = await adapter.suggest(request({
+      mode: 'polish',
+      selection: { nodeId: 'n_1', text: '腹平软' },
+    }));
+    assertEqual(elsewhere.items[0]?.nodeId, 'n_2', '仍只对目标节点产出');
+    assertEqual(String(elsewhere.items[0]?.text).includes('现病史'), true, '没有命中选区时按整段规范化');
+  });
+
   await test('P5 HTTP 适配器（假模型）：请求构造、围栏容错、**错误不携带响应体**、超时不靠传输层配合', async () => {
-    /* 配置对象直接构造（它现在只从库里来，构造形状就是库里那一行的形状）；
-       密钥不在它里面 —— 它经 `createHttpAdapter` 的 `apiKey` 参数单独递进去，见下面那一处。  */
     const config: AiModelConfig = {
       format: 'openai-compatible',
       endpoint: 'http://127.0.0.1:11434/v1/',
@@ -255,10 +272,6 @@ async function main(): Promise<void> {
     assertEqual(String(ok.seen[0]?.body).includes('n_2'), true, '请求体应列出允许的 nodeId');
     assertEqual(String(ok.seen[0]?.body).includes('secret'), false, '**请求体里不得出现密钥**（它只该在请求头）');
 
-    /* 真服务（OpenAI 兼容）回的不是模型输出，而是信封：模型正文在
-       `choices[0].message.content` 这个字符串里。少了拆信封这一步，
-       配置全对也只会报"没有 suggestions 字段" —— 而错误信息按纪律不带响应体，
-       现场几乎无从推断。假模型直接回模型输出，恰好把这一层遮住。  */
     const enveloped = fakeTransport({
       status: 200,
       body: JSON.stringify({
@@ -278,7 +291,6 @@ async function main(): Promise<void> {
     const unwrapped = await createHttpAdapter(config, { transport: enveloped.transport }).suggest(request());
     assertEqual(unwrapped.items[0]?.text, '信封里的续写。', '标准 chat 信封必须先拆开取 content');
 
-    /* 信封在、正文是空的：要报"取不到正文"，不能错误地退化成"没有 suggestions 字段" */
     const emptyContent = fakeTransport({
       status: 200,
       body: JSON.stringify({ choices: [{ finish_reason: 'content_filter', message: { role: 'assistant', content: '' } }] }),
@@ -289,7 +301,6 @@ async function main(): Promise<void> {
       '信封里正文为空必须报错（含 finish_reason，便于判断是否被拦下）',
     );
 
-    /* 截断：JSON 断在半截时，报错要带上 finish_reason —— 否则会被读成"模型不听话" */
     const truncated = fakeTransport({
       status: 200,
       body: JSON.stringify({
@@ -304,7 +315,6 @@ async function main(): Promise<void> {
     }
     assertEqual(truncatedMessage.includes('finish_reason=length'), true, '截断的输出要报出 finish_reason，否则排查方向会跑偏');
 
-    /* 错误响应常回显请求内容 —— 若把它抄进错误信息，等于为了排查方便把病历又存了一份 */
     const leak = fakeTransport({ status: 400, body: 'invalid input: 患者主诉：胸痛3天。' });
     const leakAdapter = createHttpAdapter(config, { transport: leak.transport });
     let leakMessage = '';
@@ -335,7 +345,6 @@ async function main(): Promise<void> {
       '模型越界到背景节点 → 在适配器内部就被拦下，不会进入建议集',
     );
 
-    /* 一个不理会 abort 的传输层：若超时只靠 signal，这个请求会永远挂着  */
     const never: ModelTransport = () => new Promise(() => {});
     const timeoutConfig = { ...config, timeoutMs: 60 };
     const started = Date.now();
@@ -377,13 +386,10 @@ async function main(): Promise<void> {
       assertEqual(shown.apiKeyPresent, true, '只报"是否就位"');
       assertEqual(shown.updatedBy, 'admin@test', '应记下是谁改的（这是一项改数据流向的操作）');
 
-      /* 三态语义：不传 = 不改；null = 清除；字符串 = 设置 */
       saveModelConfig(kv, { ...base, model: 'qwen-med-8b' }, 'admin@test', { at: AT });
       assertEqual(loadModelConfig(kv).apiKey, 'secret-key-1', '**没传 apiKey 时不得动密钥**（否则改地址会顺手清掉密钥，现场表现是"模型突然 401"）');
       saveModelConfig(kv, { ...base, model: 'qwen-med-8b', apiKey: null }, 'admin@test', { at: AT });
       assertEqual(loadModelConfig(kv).apiKeyPresent, false, '显式 null 应清除密钥');
-      /* 清除必须是真删那一行：留着一份"没人读的密文"，等于"我清掉了"是句假话。
-         这里曾经写成"把文件写空"（注释说真删、实现留了个 0 字节空壳），所以这条要钉住。  */
       assertEqual(sealedBlobOf(fixture, MODEL_KEY_KEY), null, '清除密钥必须是真删行（不留空壳）');
 
       /* 非法配置必须拒绝（与环境变量那条路径同一口径） */
@@ -394,15 +400,10 @@ async function main(): Promise<void> {
       );
       assertEqual(codeOf(() => saveModelConfig(kv, { ...base, maxItems: 0 }, 'admin@test')), 'E_AI_CONFIG_INVALID', '非法条数拒绝');
 
-      /* 配置只有一个来源（库）：这里不再有"环境变量把界面配置压住"这一档。
-         钉住它是因为那条现场最难查：改了界面、环境里还留着一份旧的，看起来像"没保存成功"。  */
       const again = loadModelConfig(kv);
       assertEqual(again.source, 'store', '库里有配置时来源就是 store（不再有 env 这一档）');
       assertEqual(again.config.model, 'qwen-med-8b', '生效的应是库里那一份');
 
-      /* 解不开 ≠ 没配过：口令换过（或那一行被改过）时必须报错。
-         若静默当作"没配过"，现场会表现成"我配的模型悄悄变回离线模板" ——
-         与"没配过"完全同形，而两件事的处置完全不同。  */
       writeCorruptRow(fixture, MODEL_CONFIG_KEY);
       assertEqual(codeOf(() => loadModelConfig(kv)), 'E_AI_CONFIG_INVALID', '配置读不出来时不得当作"没配过"');
       writeCorruptRow(fixture, MODEL_KEY_KEY);

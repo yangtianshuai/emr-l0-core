@@ -1,5 +1,3 @@
-// T02 · 节点索引层。
-
 import { hashValue } from './hash.ts';
 import type { DocNode, JsonValue, NodeId, NodeType, ProvenanceOrigin, TagSystem } from './types.ts';
 
@@ -24,7 +22,6 @@ function tagKey(system: TagSystem | string, code: string): string {
 export class DocumentIndex {
   private readonly children = new Map<NodeId, NodeId[]>();
 
-  /** 子节点列表待排序的父节点（延迟排序：写入 O(1)，读取时才排序） */
   private readonly dirtyParents = new Set<NodeId>();
 
   private readonly parents = new Map<NodeId, NodeId | null>();
@@ -33,9 +30,6 @@ export class DocumentIndex {
 
   private readonly nodeById = new Map<NodeId, DocNode>();
 
-  /* 倒排索引用 Set 存储：写入 O(1)，读取时排序。
-     早期版本用数组并在每次插入时 includes + sort，导致批量建索引退化为 O(n²)
-     —— 3601 节点实测 99ms，改为 Set 后大幅下降。 */
   private readonly tags = new Map<string, Set<NodeId>>();
 
   private readonly origins = new Map<ProvenanceOrigin, Set<NodeId>>();
@@ -64,7 +58,6 @@ export class DocumentIndex {
     return this.root;
   }
 
-  /** 根节点变更（如切换文书模板）时调用，不改变其它索引 */
   setRoot(rootId: NodeId): void {
     this.root = rootId;
   }
@@ -91,19 +84,17 @@ export class DocumentIndex {
     return list;
   }
 
-  /** 单节点深度：沿父链上溯（带环保护） */
   depthOf(id: NodeId): number {
     let depth = 0;
     let cursor = this.parents.get(id);
     while (cursor !== undefined && cursor !== null) {
       depth += 1;
-      if (depth > 10_000) break; // 环保护
+      if (depth > 10_000) break;
       cursor = this.parents.get(cursor);
     }
     return depth;
   }
 
-  /** 子树 id（含自身），可选深度限制（0 = 仅自身） */
   subtreeIds(id: NodeId, maxDepth = Number.POSITIVE_INFINITY): NodeId[] {
     if (!this.nodeById.has(id)) return [];
     const out: NodeId[] = [];
@@ -124,13 +115,12 @@ export class DocumentIndex {
     return Math.max(0, this.subtreeIds(id).length - 1);
   }
 
-  /** 从自身到根的路径（含两端） */
   pathToRoot(id: NodeId): NodeId[] {
     const path: NodeId[] = [];
     let cursor: NodeId | null | undefined = id;
     const guard = new Set<NodeId>();
     while (cursor !== undefined && cursor !== null) {
-      if (guard.has(cursor)) break; // 环保护
+      if (guard.has(cursor)) break;
       guard.add(cursor);
       path.push(cursor);
       cursor = this.parents.get(cursor);
@@ -145,7 +135,6 @@ export class DocumentIndex {
   siblingsOf(id: NodeId): NodeId[] {
     const parent = this.parentOf(id);
     if (parent === null) {
-      // 根节点无兄弟
       return this.nodeById.has(id) && this.parents.get(id) === null ? [] : [];
     }
     return this.childrenOf(parent).filter((child) => child !== id);
@@ -194,7 +183,6 @@ export class DocumentIndex {
     return [...candidates];
   }
 
-  /** 把 nodeId 移到 newParentId 下是否会成环 */
   wouldCreateCycle(nodeId: NodeId, newParentId: NodeId): boolean {
     if (nodeId === newParentId) return true;
     let cursor: NodeId | null | undefined = newParentId;
@@ -218,7 +206,6 @@ export class DocumentIndex {
     this.addMemberships(node);
   }
 
-  /** 仅移除该节点；其子节点保留（成为孤儿，可由 unreachable() 发现） */
   onNodeRemoved(id: NodeId): void {
     const node = this.nodeById.get(id) ?? null;
     this.detach(id);
@@ -228,7 +215,6 @@ export class DocumentIndex {
     this.removeMemberships(node, id);
   }
 
-  /** 显式级联删除（含全部后代）；返回被删除的 id 列表 */
   removeSubtree(id: NodeId): NodeId[] {
     const victims = this.subtreeIds(id);
     for (const victim of [...victims].reverse()) this.onNodeRemoved(victim);
@@ -251,7 +237,6 @@ export class DocumentIndex {
     this.addMemberships(after);
   }
 
-  /** 结构指纹：覆盖父子关系、同级顺序、标签/来源/类型归属与关键内容标记 */
   fingerprint(): string {
     const projection: Record<string, JsonValue> = {};
     for (const id of [...this.nodeById.keys()].sort()) {
@@ -270,7 +255,6 @@ export class DocumentIndex {
     return hashValue(projection);
   }
 
-  /** 与"从节点表全量重建"的结果对比（增量维护的正确性判据） */
   verifyAgainst(nodes: Record<NodeId, DocNode>, rootId: NodeId): VerifyReport {
     const rebuilt = DocumentIndex.build(nodes, rootId);
     const diffs: string[] = [];
@@ -313,7 +297,7 @@ export class DocumentIndex {
     const list = this.children.get(parentId) ?? [];
     list.push(childId);
     this.children.set(parentId, list);
-    this.dirtyParents.add(parentId); // 延迟到读取时排序
+    this.dirtyParents.add(parentId);
   }
 
   private sortSiblings(list: NodeId[]): void {
@@ -359,7 +343,6 @@ export class DocumentIndex {
     if (node.keyContent === true) this.keyContentIds.delete(id);
   }
 
-  /** 桶写入 O(1)：直接加入 Set，排序推迟到读取（sortedBucket） */
   private addToBucket<K>(bucket: Map<K, Set<NodeId>>, key: K, id: NodeId): void {
     const set = bucket.get(key) ?? new Set<NodeId>();
     set.add(id);
@@ -374,7 +357,6 @@ export class DocumentIndex {
   }
 }
 
-/** 读取桶时排序，保证查询结果与插入顺序无关（指纹与等价性断言依赖这一点） */
 function sortedBucket<K>(bucket: Map<K, Set<NodeId>>, key: K): readonly NodeId[] {
   const set = bucket.get(key);
   if (!set || set.size === 0) return EMPTY_IDS;

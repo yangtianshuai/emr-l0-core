@@ -1,5 +1,3 @@
-// 极小 ZIP 写入器（store 方式，不压缩），零依赖。
-
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
   for (let i = 0; i < 256; i += 1) {
@@ -48,16 +46,16 @@ export function buildZip(entries: ZipEntry[], options: { date?: Date } = {}): Ui
     const local = new Uint8Array(30 + nameBytes.length + dataBytes.length);
     const lv = new DataView(local.buffer);
     lv.setUint32(0, 0x04034b50, true); // 本地文件头签名
-    lv.setUint16(4, 20, true); // 版本
-    lv.setUint16(6, 0x0800, true); // 通用标志：UTF-8 文件名
-    lv.setUint16(8, 0, true); // 压缩方式：store
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);
     lv.setUint16(10, time, true);
     lv.setUint16(12, dosDate, true);
     lv.setUint32(14, crc, true);
     lv.setUint32(18, dataBytes.length, true);
     lv.setUint32(22, dataBytes.length, true);
     lv.setUint16(26, nameBytes.length, true);
-    lv.setUint16(28, 0, true); // 扩展字段长度
+    lv.setUint16(28, 0, true);
     local.set(nameBytes, 30);
     local.set(dataBytes, 30 + nameBytes.length);
     locals.push(local);
@@ -65,8 +63,8 @@ export function buildZip(entries: ZipEntry[], options: { date?: Date } = {}): Ui
     const central = new Uint8Array(46 + nameBytes.length);
     const cv = new DataView(central.buffer);
     cv.setUint32(0, 0x02014b50, true); // 中央目录签名
-    cv.setUint16(4, 20, true); // 创建版本
-    cv.setUint16(6, 20, true); // 所需版本
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
     cv.setUint16(8, 0x0800, true);
     cv.setUint16(10, 0, true);
     cv.setUint16(12, time, true);
@@ -75,12 +73,12 @@ export function buildZip(entries: ZipEntry[], options: { date?: Date } = {}): Ui
     cv.setUint32(20, dataBytes.length, true);
     cv.setUint32(24, dataBytes.length, true);
     cv.setUint16(28, nameBytes.length, true);
-    cv.setUint16(30, 0, true); // 扩展字段
-    cv.setUint16(32, 0, true); // 注释长度
-    cv.setUint16(34, 0, true); // 磁盘号
-    cv.setUint16(36, 0, true); // 内部属性
-    cv.setUint32(38, 0, true); // 外部属性
-    cv.setUint32(42, offset, true); // 本地头偏移
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
     central.set(nameBytes, 46);
     centrals.push(central);
 

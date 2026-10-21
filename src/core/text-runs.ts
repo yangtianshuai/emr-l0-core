@@ -1,8 +1,5 @@
-// 文本节点的 run 级区间替换（`WriteSession.replaceRange` 的纯函数内核）。
-
 import type { DataElementTag, RunProvenance, TextMark, TextRun } from '../model/types.ts';
 
-/** 区间非法的错误。`code` 与 `WRITE_ERRORS.E_OFFSET_RANGE` 同值：`commit()` 的 catch 按 `code` 归类 */
 export class TextRangeError extends Error {
   readonly code = 'E_OFFSET_RANGE';
 
@@ -19,13 +16,6 @@ export function textOfRuns(runs: TextRun[]): string {
   return runs.map((run) => run.text).join('');
 }
 
-/**
- * 两段格式是否完全相同（marks / tags / run 级 provenance 逐项相等；顺序也认定为格式的一部分）。
- *
- * provenance 必须参与比较：合并两个来源不同的相邻 run，会把"这一句是 AI 起草的"
- * 抹成"整段都是那个来源"。而合并是不可见的（结果里看不出曾经有过两个 run），
- * 所以这个错误不会当场暴露，只会在逐句回溯时表现为"AI 写的多了几句"或"少了"。
-  */
 function sameFormat(a: TextRun, b: TextRun): boolean {
   return (
     JSON.stringify(a.marks ?? []) === JSON.stringify(b.marks ?? []) &&
@@ -34,13 +24,6 @@ function sameFormat(a: TextRun, b: TextRun): boolean {
   );
 }
 
-/**
- * 合并相邻且格式相同的 run，并丢弃空文本 run。
- *
- * 空 run 一律不留：它不承载任何内容，却在序列化里占位、在 diff 里制造噪声；
- * 若合并后一个都不剩（整段被删空），返回一个空文本 run —— 文本节点的 `runs` 不该是空数组
- * （`insertText` 也是这么规范化的）。
- */
 export function mergeAdjacentRuns(runs: TextRun[]): TextRun[] {
   const merged: TextRun[] = [];
   for (const run of runs) {
@@ -76,7 +59,6 @@ export function splitRunsAt(runs: TextRun[], offset: number): { before: TextRun[
   return { before, after };
 }
 
-/** `offset` 落在哪个 run 上（`offset` 等于总长度时取最后一个 run） */
 function runIndexAt(runs: TextRun[], offset: number): number {
   let cursor = 0;
   for (let index = 0; index < runs.length; index += 1) {
@@ -119,14 +101,6 @@ function assertRange(text: string, start: number, end: number): void {
   }
 }
 
-/**
- * 区间替换的纯函数实现：返回新的 run 序列，不修改入参。
- *
- * 不变量（由 `session-self-test` 守着）：
- *   - `textOfRuns(结果)` === 原文删掉 `[start,end)` 再插入 payload 后的文本；
- *   - 区间外的 run 文本与其 marks/tags 逐项不变；
- *   - 结果里不存在相邻且格式相同的 run（已合并），也没有空文本 run。
-  */
 export function minimalEditSpan(before: string, after: string): { start: number; end: number; text: string } | null {
   if (before === after) return null;
   const max = Math.min(before.length, after.length);
@@ -142,7 +116,6 @@ export function minimalEditSpan(before: string, after: string): { start: number;
     const current = text.charCodeAt(offset);
     return previous >= 0xd800 && previous <= 0xdbff && current >= 0xdc00 && current <= 0xdfff;
   };
-  /* 只有可能向左扩（公共前缀/后缀的字符在两段文本里完全相同，所以扩到哪里都仍然成立） */
   while (start > 0 && splitsPair(before, start)) start -= 1;
   while (end > start && splitsPair(before, end)) end -= 1;
 
@@ -163,11 +136,7 @@ export function applyTextRange(runs: TextRun[], start: number, end: number, payl
     const inherited: Partial<TextRun> = {};
     if (context?.marks && context.marks.length > 0) inherited.marks = [...context.marks] as TextMark[];
     if (context?.tags && context.tags.length > 0) inherited.tags = [...context.tags] as DataElementTag[];
-    /*  `provenance` 刻意不继承，这与 marks / tags 相反，且是这里最要紧的一条：
-       医生在 AI 起草的那句话中间打字，新插入的字符是医生写的（没有 provenance = 继承节点级，
-       而节点级会随这次写入变成 human/derivedFrom）。若把来源一起继承，
-       医生写的字会被标成 AI 写的 —— 逐句回溯会反着骗人，而这正是它要防的失败方向。
-       反过来，AI 落笔走的是 `payload.kind === 'runs'`（来源由调用方显式给出），不经过这里。  */
+    // `provenance` 刻意不继承：医生在 AI 起草的句子里插字，插进去的必须算人写
     inserted = [{ ...inherited, text: payload.text }];
   }
 

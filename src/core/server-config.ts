@@ -1,24 +1,12 @@
-// 服务端文件配置：打开数据库之前就必须知道的那几件事。
-// - `stateSalt` 决定同一把口令派生出的是哪一代快照密钥，与口令同源，跟着一起走；
-// 而一个路径固定、权限显式的文件是可审计的；口令换过要重新密封哪些数据，也才有地方记。
-
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-/** 文件名固定（不支持环境变量改路径：改路径等于又回到"配置散在环境里"） */
 export const SERVER_CONFIG_FILE = 'server-config.json';
 
-/**
- * 内置演示口令。与旧口径逐字一致：库里现有的密文就是它密封的，
- * 改了它等于把已入库的数据全部变成解不开的（真实代价，不是保守说法）。
-  */
 export const DEMO_STATE_KEY = 'demo-state-passphrase-生产必须替换';
 
-/** 装机凭据：库空时用它证明"是运维本人在初始化"，并（可选）播种第一个管理员 */
 export interface ServerBootstrap {
-  /** 对应原先的 `L0_ADMIN_TOKEN` */
   token?: string;
-  /** 对应原先的 `L0_ADMIN_USER`：与 `token` 成对出现才播种 */
   user?: string;
 }
 
@@ -27,20 +15,11 @@ export interface ServerImports {
 }
 
 export interface ServerConfig {
-  /** 密封口令。空/缺省 → 内置演示口令（并在日志里警告） */
   stateKey?: string;
-  /** 32 位十六进制盐；缺省 → 按口令派生 */
   stateSalt?: string;
-  /**
-   * 环境标识（原先的 `L0_ENV`）：只是标注，不改变任何行为。
-   * 它放在这里而不入库，是因为它描述的是"这个进程跑在哪套环境"——
-   * 与库内容无关（同一份库可以被两套环境分别打开），所以它属于进程的启动信息。
-    */
   envName?: string;
   bootstrap?: ServerBootstrap;
-  /** 一次性搬运的来源（不是运行期配置） */
   imports?: ServerImports;
-  /** 模板里给人看的说明字段，读的时候原样忽略（不是配置） */
   _note?: string;
 }
 
@@ -49,7 +28,6 @@ export type ServerConfigSource = 'file' | 'generated' | 'missing';
 export interface LoadedServerConfig {
   path: string;
   config: ServerConfig;
-  /** `file` = 本来就在；`generated` = 本次写下模板；`missing` = 想写但没写成（只读盘等） */
   source: ServerConfigSource;
   problem: string | null;
 }
@@ -59,14 +37,6 @@ export function serverConfigPath(runtimeDir: string): string {
 }
 
 function templateText(): string {
-  /*
-   * 模板里 `stateKey` 留空（不写内置演示口令的值）。这一条踩过一次：
-   * 写上值之后，`stateKeyOf()` 只能报"口令来自文件"—— 而文件里那份恰恰是演示口令，
-   * 于是启动日志里那句" 口令用的是内置演示值"永远不会出现。
-   * 留空之后语义干净：填了就是你的，没填就是演示的，两者一眼分得开。
-   *
-   * 其余字段用 `null` 而不是省略：模板是给人照着填的，"这一格存在但现在是空的"比"没有这一格"清楚。
-    */
   const template = {
     stateKey: null,
     stateSalt: null,
@@ -146,16 +116,12 @@ export function loadServerConfig(path: string): LoadedServerConfig {
   } catch (err) {
     const code = (err as { code?: string }).code;
     if (code === 'EEXIST') {
-      /* 有别人抢先写了：读他的那一份，别覆盖 */
       const text = readFileSync(path, 'utf8').replace(/^\uFEFF/, '');
       return { path, config: parse(text, path), source: 'file', problem: null };
     }
     return { path, config: {}, source: 'missing', problem: (err as Error).message };
   }
 }
-
-// 生效的口令：文件给了就用文件的，没给就用内置演示值（来源必须如实报出去）。
-// 值恰好等于内置演示口令时仍报 `demo`，哪怕它是写在文件里的。
 
 export function stateKeyOf(loaded: LoadedServerConfig): { key: string; source: 'file' | 'demo' } {
   const value = loaded.config.stateKey?.trim();
@@ -164,7 +130,6 @@ export function stateKeyOf(loaded: LoadedServerConfig): { key: string; source: '
   return { key: value, source: 'file' };
 }
 
-/** 生效的盐（32 位十六进制）；没配就 `undefined`（由 `core/store.ts` 按口令派生） */
 export function stateSaltHexOf(loaded: LoadedServerConfig): string | undefined {
   const value = loaded.config.stateSalt?.trim();
   return value !== undefined && value !== '' ? value : undefined;
@@ -180,16 +145,11 @@ export function importsOf(loaded: LoadedServerConfig): { qcRulesFile: string } {
   return { qcRulesFile: loaded.config.imports?.qcRulesFile?.trim() ?? '' };
 }
 
-/** 环境标识（原先的 `L0_ENV`）：没有就是 `null`，界面如实显示"未标注" */
 export function envNameOf(loaded: LoadedServerConfig): string | null {
   const value = loaded.config.envName?.trim();
   return value !== undefined && value !== '' ? value : null;
 }
 
-/**
- * 启动日志要说的那一句。它存在的意义就是让人看见：
- * 用了演示口令 / 用了派生盐这两件事，如果没人说，现场只能从"一切正常"里猜。
-  */
 export function describeServerConfig(loaded: LoadedServerConfig, key: ReturnType<typeof stateKeyOf>, saltSource: 'file' | 'derived'): string {
   const where =
     loaded.source === 'file'

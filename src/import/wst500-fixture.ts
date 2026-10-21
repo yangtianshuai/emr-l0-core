@@ -1,5 +1,3 @@
-// WS/T 500 导入的黄金样例。
-
 export const WST500_SAMPLE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3" xmlns:cd="urn:hl7-org:v3">
   <id root="2.16.156.10011.2.1.1.3" extension="DOC_OPD_20261008_001"/>
@@ -120,7 +118,6 @@ export const WST500_SAMPLE_XML = `<?xml version="1.0" encoding="UTF-8"?>
 </ClinicalDocument>
 `;
 
-/** 只有文档头、没有结构化正文的样例（用于"不假装有正文"的用例） */
 export const WST500_HEADER_ONLY_XML = `<?xml version="1.0" encoding="UTF-8"?>
 <ClinicalDocument xmlns="urn:hl7-org:v3">
   <id root="2.16.156.10011.2.1.1.3" extension="DOC_HEADER_ONLY"/>
@@ -148,10 +145,6 @@ export const WST500_GBK_DECLARED_XML = `<?xml version="1.0" encoding="GBK"?>
 </ClinicalDocument>
 `;
 
-/**
- * 黄金期望：人工逐项核对的结果。
- * 任何一项对不上都说明映射规则变了（而不是"测试太严"）——这正是黄金样例的价值。
-  */
 export const WST500_SAMPLE_EXPECT = {
   documentId: 'DOC_OPD_20261008_001',
   docTypeCode: 'WST500.01.001',
@@ -165,21 +158,17 @@ export const WST500_SAMPLE_EXPECT = {
   nameMasked: '王**',
   gender: 'M' as const,
   birthDate: '1990-03-12',
-  /** 顶层 5 个章节 + 1 个嵌套子章节 */
   sectionCount: 6,
   topLevelTitles: ['主诉', '现病史', '体格检查', '辅助检查', '初步诊断'],
   nestedChildTitle: '诊断明细',
   paragraphCount: 5,
   fieldCount: 4,
   skippedEntries: 2,
-  /** 本样例的数据元都在 entry 的直接子层级（depth=0），故不算"深层嵌套" */
   nestedFields: 0,
-  /** 样例里的取值都是 PQ/ST，没有编码型（CD/CE）取值 */
   codedValues: 0,
   depthTruncated: 0,
   temperature: { code: 'DE04.01.068', display: '体温', valueText: '38.5', unit: '℃', system: 'WST500' as const },
   /** 非 WS/T 500 根 OID 的 codeSystem：归类为 local，且必须保留源 OID 供人工核对 */
   wbc: { code: 'WBC', valueText: '12.6', unit: '10^9/L', system: 'local' as const, sourceCodeSystem: '2.16.840.1.113883.6.1' },
-  /** 源文件里出现过的 codeSystem（去重） */
   codeSystems: ['2.16.156.10011.2.1.1.4', '2.16.840.1.113883.6.1', '2.16.840.1.113883.6.3'],
 };

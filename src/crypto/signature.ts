@@ -1,7 +1,3 @@
-// T18 签名容器：SignedInfo 构造、签名与独立验签。
-// 与算法层同样的边界：本容器用于原型与演示；生产须换成经认证的密码模块，
-// 并且私钥必须由设备保管（本仓库的演示私钥可由种子推导，绝不可用于生产）。
-
 import type { DocumentModel } from '../model/types.ts';
 import { SIGNATURE_ALGORITHM, softwareVerifier, type Signer, type Verifier } from './provider.ts';
 import { fromHex, sm3Hex, toHex, utf8 } from './sm3.ts';
@@ -25,18 +21,14 @@ export interface SignatureMeta {
 
 export interface ReferenceEntry {
   path: string;
-  /** SM3（十六进制小写） */
   digest: string;
 }
 
 export interface SignatureBlock {
   meta: SignatureMeta;
-  /** 公钥 SPKI 的 base64（第三方验签只需它） */
   publicKeyBase64: string;
   publicKeyFingerprint: string;
-  /** 按 path 排序的摘要清单 */
   references: ReferenceEntry[];
-  /** SM3(SignedInfo) —— 签名实际签的是它 */
   signedInfoDigest: string;
   /** SM2 签名（DER）的 base64 */
   signatureValue: string;
@@ -50,11 +42,6 @@ export function fromBase64(text: string): Uint8Array {
   return Buffer.from(text, 'base64');
 }
 
-/**
- * 规范化 SignedInfo。
- * 字段顺序、分隔符、排序规则都是协议的一部分：改动其中任何一项，
- * 都会让"旧签名验不过、而双方都觉得自己没改"——所以有专门用例锁死这个字节序列。
-  */
 export function canonicalSignedInfo(meta: SignatureMeta, references: ReferenceEntry[], publicKeyFingerprintHex: string): Uint8Array {
   const sorted = [...references].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const lines = [
@@ -73,14 +60,6 @@ export function canonicalSignedInfo(meta: SignatureMeta, references: ReferenceEn
   return utf8(lines.join('\n'));
 }
 
-/**
- * 对一组文件签名（文件内容先各自 SM3，再签摘要清单）。
- *
- *  异步：签名后端可能是网络服务或密码设备（`Signer.sign` 允许返回 Promise）。
- * 这里是内核里唯一 await 签名值的地方 —— 其余调用方只需把 async 沿调用链传出去。
- * 先算 references 与 SignedInfo（同步、纯函数），再 await 签名值：这样"待签什么"与"谁来签"
- * 两件事保持分离，第三方也能用 `canonicalSignedInfo()` 独立复算。
-  */
 /** 摘要清单：按路径排序后各自 SM3（排序保证"文件顺序无关"，改顺序不会改签名） */
 function referencesOf(targets: SignatureTarget[]): ReferenceEntry[] {
   return [...targets]
@@ -122,7 +101,6 @@ export interface VerifySignatureResult {
   ok: boolean;
   /** 失败原因逐条列出（"改了哪个文件"必须能说清，不能只报"验签失败"） */
   reasons: string[];
-  /** 诊断信息，便于审计与排错 */
   details: { algorithm: string; provider: string; publicKeyFingerprint: string; referenceCount: number };
 }
 
@@ -132,14 +110,6 @@ export function verifierFor(algorithm: string, publicKey: Sm2Point): Verifier | 
   return null;
 }
 
-/**
- * 独立验签：重新计算文件摘要 → 重建 SignedInfo → 用公钥验签名。
- *
- * `requireAllCovered`（默认 true）：是否要求"传入的文件必须全部被签名覆盖"。
- *   - 文档级验签（内存文档）用 true：多出的内容必须报出来；
- *   - 容器级验签（OFD 容器）必须用 false：容器里天然有大量未被签名覆盖的文件
- *     （OFD.xml、DocumentRes.xml…），要求全覆盖会把正常文件判成失败。
-  */
 export function verifyTargets(
   block: SignatureBlock,
   targets: SignatureTarget[],
@@ -193,9 +163,6 @@ export function verifyTargets(
   return { ok: reasons.length === 0, reasons, details };
 }
 
-/* ------------------------- 文档级目标（内存态签章用） ------------------------- */
-
-/** 文档快照：只包含"内容"，不含签章动作自身会改动的字段（status/revisions/signatureRefs/updatedAt）  */
 export function documentSnapshot(doc: DocumentModel): Uint8Array {
   const patient = doc.patient;
   const encounter = doc.encounter;
@@ -221,7 +188,6 @@ export function documentSnapshot(doc: DocumentModel): Uint8Array {
 /** 文档级签名的覆盖清单：文件名沿用 OFD 容器内路径，导出时一一对应 */
 export const DOCUMENT_COVERS = ['Document.xml', 'Pages/Page_0/Content.xml', 'MachineReadable.xml'] as const;
 
-/** 由文档构造"待签名文件"（文档元数据快照 → Document.xml；节点树摘要 → Content.xml；机读块 → MachineReadable.xml） */
 export function documentSignatureTargets(doc: DocumentModel, nodesDigest: string): SignatureTarget[] {
   return [
     { path: 'Document.xml', bytes: documentSnapshot(doc) },

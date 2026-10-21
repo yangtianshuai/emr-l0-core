@@ -44,7 +44,6 @@ function runtimeDirOf(flags: Flags): string {
   return layout.dir;
 }
 
-/** 密钥来源，按可信度排序：命令行 > 密钥文件 > 运行时目录里的密钥文件 */
 function keyOf(flags: Flags): string | null {
   if (flags.key !== null && flags.key.trim() !== '') return flags.key.trim();
   if (flags.keyFile !== null) {

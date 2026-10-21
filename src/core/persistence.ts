@@ -1,15 +1,7 @@
-// 持久化：快照文件的原子写与严格读。
-
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-/**
- *  本仓库所在环境的 `node:fs` 类型声明不完整（缺少 `open/close/fsync/rename/unlink`
- * 等同步 API 的声明，运行时它们是存在的）。这里做一次局部断言，而不是改用
- * "写文件 + 直接覆盖" —— 原子写正是本模块存在的理由，为了迁就类型声明放弃它，
- * 等于把"崩溃时不会留下半个文件"这个唯一保证丢掉。
-  */
 interface FsSyncExtras {
   openSync: (path: string, flags: string) => number;
   writeSync: (fd: number, data: string, encoding: string) => void;
@@ -58,21 +50,7 @@ export interface SnapshotOptions {
   /** 格式标识：防止把别的文件误当成快照读进来 */
   format?: string;
   version?: number;
-  /** 保存时刻（测试可注入，保证可复现） */
   at?: string;
-  /**
-   * 落盘前置条件（做 compare-and-swap 用）：
-   *   - `{ digest }`：盘上快照的摘要必须正好等于它（"我是在这一版上改的"）；
-   *   - `{ missing: true }`：文件必须不存在（首次落盘，只允许一个赢家）。
-   *
-   * 不满足 → 抛 `SnapshotConflictError`，一个字节都不写。
-   * 不传 = 无条件覆盖（旧行为，保留它是为了"首次播种""显式重建"这类确实要覆盖的场合）。
-   *
-   *  它缩小而不消除竞态窗口：这里是"读摘要 → 比较 → 写"，两步之间有极小的空隙，
-   * 理论上两个进程可能同时通过。它拦的是人的时间尺度上的交错（两个终端轮流改同一份病历）。
-   * 真正的原子 CRUD 要么文件锁、要么数据库 —— 那正是"落库"那条线要解决的事，
-   * 在拿到它之前，先用这一层把"静默丢更新"变成"显式拒绝"。
-    */
   expect?: { digest: string } | { missing: true };
 }
 
@@ -93,12 +71,6 @@ function digestOf(payload: unknown): string {
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
 
-/**
- * 盘上这一版快照的摘要（用于落盘前置条件）。
- *
- * 摘要重算而不是信任信封里那一个：信封里的 `digest` 是写的时候留下的，
- * 文件若被截断，它反而会"证明"一份残缺内容是对的。
-  */
 function currentDigest(file: string, format: string, version: number): { exists: boolean; digest: string | null; reason?: string } {
   if (!existsSync(file)) return { exists: false, digest: null };
   try {
@@ -108,12 +80,10 @@ function currentDigest(file: string, format: string, version: number): { exists:
     if (envelope.version !== version) return { exists: true, digest: null, reason: `格式版本不同（${String(envelope.version)}）` };
     return { exists: true, digest: digestOf(envelope.payload) };
   } catch (err) {
-    /* 盘上那份读不出来时不能当成"就是我要写的那一版"：那等于拿一次解析失败当通行证  */
     return { exists: true, digest: null, reason: `盘上快照无法解析：${(err as Error).message}` };
   }
 }
 
-/** 原子写快照；返回写入元信息。目录不存在会自动创建。 */
 export function writeSnapshot<T>(file: string, payload: T, options: SnapshotOptions = {}): SnapshotMeta {
   const format = options.format ?? DEFAULT_FORMAT;
   const version = options.version ?? DEFAULT_VERSION;
@@ -158,7 +128,6 @@ export function readSnapshot<T>(file: string, options: SnapshotOptions = {}): Sn
   } catch (err) {
     return { ok: false, code: 'E_SNAPSHOT_CORRUPT', message: `无法读取快照：${(err as Error).message}` };
   }
-  /* 去掉 BOM：Windows 工具链产出的文件常带 BOM，JSON.parse 会直接失败 */
   const text = raw.replace(/^\uFEFF/, '');
   let envelope: { format?: string; version?: number; savedAt?: string; digest?: string; payload?: T };
   try {
@@ -189,12 +158,10 @@ export function readSnapshot<T>(file: string, options: SnapshotOptions = {}): Sn
   };
 }
 
-/** 存在性检查（供调用方区分"首次启动"与"数据丢失"—— 两者处置完全不同） */
 export function snapshotExists(file: string): boolean {
   return existsSync(file);
 }
 
-/** 清理临时文件残留（崩在写一半时留下的 `.tmp`）；返回是否清理过 */
 export function cleanupTemp(file: string): boolean {
   const tmp = `${file}.tmp`;
   if (!existsSync(tmp)) return false;

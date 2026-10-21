@@ -1,5 +1,3 @@
-// 医学表达式求值（K4 的"表达式"那一半）。
-
 import type { ExprNode, ExprValue, TemplateContext } from './types.ts';
 
 export const MAX_EXPR_DEPTH = 8;
@@ -7,18 +5,11 @@ export const MAX_EXPR_DEPTH = 8;
 export interface ExprFunction {
   name: string;
   minArgs: number;
-  /** 变参用 `Number.POSITIVE_INFINITY` */
   maxArgs: number;
-  /** 给人读的说明（界面与文档里展示"这个函数干什么"） */
   doc: string;
-  /**
-   * 计算。输入不足或类型不符一律返回 `null`，不抛错、不兜底。
-   * 参数里的 `null` 表示"上游算不出来" —— 实现可以直接短路返回 null。
-    */
   apply(args: Array<ExprValue | null>): ExprValue | null;
 }
 
-/** 把参数收敛成数字表；任何一个不是数字就返回 null（不求助于隐式转换）  */
 function nums(args: Array<ExprValue | null>): number[] | null {
   const out: number[] = [];
   for (const arg of args) {
@@ -28,7 +19,6 @@ function nums(args: Array<ExprValue | null>): number[] | null {
   return out;
 }
 
-/** ISO8601 → 毫秒；解析不出来返回 null（不用"当前时间"兜底）  */
 function timeOf(value: ExprValue | null): number | null {
   if (typeof value !== 'string' || value.trim() === '') return null;
   const ms = Date.parse(value);
@@ -37,7 +27,6 @@ function timeOf(value: ExprValue | null): number | null {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** 两元数字函数（算术类）  */
 function binary(name: string, doc: string, fn: (a: number, b: number) => number | null): ExprFunction {
   return {
     name,
@@ -153,13 +142,10 @@ export const EXPR_FUNCTIONS: Record<string, ExprFunction> = {
 };
 
 export interface EvalScope {
-  /** 同模板内填写项槽位 key → 值（未填为 null）  */
   slots: Record<string, ExprValue | null>;
-  /** 上下文（患者/就诊/时间） */
   context: TemplateContext;
 }
 
-/** 参数位置上的求值结果：`null` 表示"上游算不出来" */
 function evaluateArgs(args: ExprNode[], scope: EvalScope, depth: number): Array<ExprValue | null> | null {
   if (depth > MAX_EXPR_DEPTH) return null;
   const out: Array<ExprValue | null> = [];
@@ -167,12 +153,6 @@ function evaluateArgs(args: ExprNode[], scope: EvalScope, depth: number): Array<
   return out;
 }
 
-/**
- * 求值。任何一处算不出来（缺输入、类型不符、除零、日期非法）整体返回 `null`。
- *
- * 这条"一处算不出就整体算不出"是刻意的：表达式是复合量（BMI = 体重 ÷ 身高²），
- * 缺任何一项都不存在"部分正确"的答案。返回半成品会被误读成完整结果。
-  */
 export function evaluate(expr: ExprNode, scope: EvalScope, depth = 0): ExprValue | null {
   if (depth > MAX_EXPR_DEPTH) return null;
   if (expr.kind === 'num') return Number.isFinite(expr.value) ? expr.value : null;
@@ -191,7 +171,6 @@ export function evaluate(expr: ExprNode, scope: EvalScope, depth = 0): ExprValue
   return fn.apply(args);
 }
 
-/** 收集引用（用于回答"这个派生值依赖哪些填写项"，以及装载期校验引用是否真实存在） */
 export function collectExpressionRefs(expr: ExprNode): { slots: string[]; context: string[] } {
   const slots = new Set<string>();
   const context = new Set<string>();
@@ -214,12 +193,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * 结构校验：返回问题清单（空数组 = 合法）。
- *
- * 返回清单而不是抛错，是因为装载期要把同一份包里的多处错误一次报全 ——
- * 报一条改一条的体验会让写模板的人放弃。
-  */
 export function validateExpression(expr: unknown, path: string, depth = 0): string[] {
   if (depth > MAX_EXPR_DEPTH) return [`${path}: 表达式嵌套超过 ${MAX_EXPR_DEPTH} 层`];
   if (!isPlainObject(expr)) return [`${path}: 表达式必须是对象`];

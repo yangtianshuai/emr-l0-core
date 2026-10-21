@@ -1,29 +1,5 @@
-/**
- * L0 参考实现（内存版）：把 docs/L0-节点操作API清单.md 的接口与门控规则落成可执行代码。
- *
- * 三个用途：
- *  1) S4 契约测试的被测对象（合规模式 noncompliant=false）；
- *  2) 后端实现的规格参照：字段语义、错误码、留痕结构、门控时机都以此为准；
- *  3) noncompliant=true 生成"故意不合规实现"，用于证明契约用例集有鉴别力（能抓到不合规）。
- *
- * 重要设计约定：
- *  - 乐观锁令牌 = 文档 rev（= revisions.length），不是节点 rev；
- *  - AI 只能通过 suggest → 人 accept 落笔；直接写一律 E_AI_DIRECT_WRITE_FORBIDDEN；
- *  - "采纳 ≠ 确认责任"：accept 后节点 humanConfirmed=false，签名前必须由人 confirmNode；
- *  - 人工在 AI 内容上继续编辑时，origin 变 human，但 provenance.derivedFrom 保留 AI 来源链；
- *  - sign / reject-ai 不改变节点内容，留痕允许空 patch；其余变更类 op 必须带 patch；
- *  - machineReadable 是派生物：导出时重算，state 中保存的是"上次导出快照"，用于陈旧检测。
- */
-
 import { clone, hashNodes, jsonDiff } from './model-utils.mjs';
 
-/**
- * 哪些操作意味着"医生已看过并负责"（编辑即确认）—— 与 TS 实现
- * `src/core/session.ts` 的 EDIT_IMPLIES_CONFIRM 保持**逐字一致**。
- *
- * 刻意不含 `accept-ai`：采纳只表示"同意用这段文字"，不表示"核对了它的正确性"
- * （契约 A12/A13 依赖这条纪律）。也不含 move/delete/import/migrate/sign/reject-ai。
- */
 const EDIT_IMPLIES_CONFIRM = new Set(['create', 'insert', 'update']);
 
 export const ERR = {
@@ -63,10 +39,6 @@ function fail(code, message, extra) {
   throw new ContractError(code, message, extra);
 }
 
-/* ---------------- 三级归因：改动幅度（与 TS 实现逐字一致） ----------------
-   口径必须与 `src/core/suggestions.ts` 的 `editRatioOf` 完全一致：跨实现比对会逐项
-   核对两边的分档结果，任何一处算法漂移都会被用例抓住 —— 这正是双实现交叉验证的意义。 */
-
 const SUGGESTION_EDIT_BANDS = { light: 0.2 };
 
 function editBandOf(ratio) {
@@ -74,7 +46,6 @@ function editBandOf(ratio) {
   return ratio <= SUGGESTION_EDIT_BANDS.light ? 'light' : 'heavy';
 }
 
-/** 编辑距离：滚动数组，空间 O(min(n,m))。按码点比较 */
 function levenshtein(a, b) {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
@@ -95,7 +66,6 @@ function levenshtein(a, b) {
   return prev[short.length];
 }
 
-/** 建议文本 → 落笔文本的改动幅度（编辑距离 / 较长文本长度），0~1 */
 function editRatioOf(suggested, final) {
   if (suggested === final) return 0;
   const a = Array.from(suggested);
@@ -229,20 +199,10 @@ export function createStore(inputDoc, options = {}) {
     if (expectedRev != null && !noncompliant && expectedRev !== state.revisions.length) {
       fail(ERR.E_REV_CONFLICT, `乐观锁冲突：期望 rev=${expectedRev}，当前 rev=${state.revisions.length}`, { currentRev: state.revisions.length });
     }
-    // 数据安全类规则始终强制，不随 noncompliant 开关放宽：
-    //   1) 签名/归档后不可直接改动（须解锁 → 留痕 → 重新签章）
-    //   2) 关键内容节点禁止删除
-    //   3) 导出计划必须声明 textAsPath=false 且机读信息纳入签名
-    // 这三条一旦放宽，产物就失去"可信"意义，因此独立于 AI 门控之外。
     if (state.status === 'signed' || state.status === 'archived') {
       fail(ERR.E_SIGNED_IMMUTABLE, `文档已 ${state.status}，须按"解锁 → 留痕 → 重新签章"流程处理`);
     }
 
-    /* patch 计算策略：
-       local（默认）：只快照受影响节点，写路径复杂度 O(受影响节点)，与文档规模无关；
-       full：快照并 diff 整个节点表，作为等价性参照（用于验证 local 的正确性，勿用于生产）。
-       patch 只记录"节点级变更"（路径以 /nodes 开头）；文档级字段（updatedAt/status/
-       signatureRefs/revisions）由留痕条目自身承载 —— 否则 patch 会自引用 revisions 数组。 */
     const snap = new Map();
     if (patchStrategy === 'local') {
       for (const id of targets) snap.set(id, state.nodes[id] === undefined ? undefined : clone(state.nodes[id]));
@@ -251,11 +211,6 @@ export function createStore(inputDoc, options = {}) {
 
     const ret = mutate() || {};
 
-    /* 编辑即确认：人类的内容类操作，视为对其触及节点的"看过并负责"
-       （与 TS 实现 src/core/session.ts 的 commit 保持逐字一致 —— 双实现漂移是
-       本项目反复踩过的坑，改一边必须改另一边）。
-       关键内容（keyContent）**不适用**：改一个字不等于核对过全部；
-       也不额外递增 rev：同一次提交是原子操作，rev 只递增一次。 */
     if (actor.kind === 'human' && EDIT_IMPLIES_CONFIRM.has(op)) {
       for (const id of targets) {
         if ((ret.created || []).includes(id)) continue;
@@ -300,11 +255,6 @@ export function createStore(inputDoc, options = {}) {
     return result;
   }
 
-  /**
-   * 批量确认的共用实现（confirmNodes 与 confirmSubtree 都走它）。
-   * 写成闭包内函数而不是 `this.xxx`：调用方可能解构方法后再调用，`this` 会丢。
-   * 范围写进留痕的 confirmedNodeIds —— 批量确认必须仍能逐条回答"确认了哪些"。
-   */
   function confirmNodesImpl(params = {}, actor, opts = {}) {
     if (actor?.kind !== 'human' && !noncompliant) {
       fail(ERR.E_AI_NOT_ALLOWED, `仅自然人可确认内容（actor.kind=${actor?.kind}）`);
@@ -323,22 +273,17 @@ export function createStore(inputDoc, options = {}) {
       mutate: () => {
         for (const id of nodeIds) {
           const node = state.nodes[id];
-          /* 已确认过的节点不再递增 rev：嵌套章节会让同一节点落在两个子树里
-             （实测：9 个内容节点被确认 10 次），重复确认不该推高版本号。
-             与 TS 实现 src/core/session.ts 保持一致。 */
           if (node.humanConfirmed !== true) {
             node.humanConfirmed = true;
             node.rev = (node.rev || 1) + 1;
           }
         }
-        /* 留痕记录**请求范围**（不是"本次新确认的几个"）：审计要回答"他确认了哪些" */
         return { targetId: nodeIds[0], extra: { confirmedNodeIds: nodeIds } };
       },
     });
   }
 
   return {
-    /* ------------------------- 读 / 审计 ------------------------- */
     getDoc: () => clone(state),
     getNode: (id) => (state.nodes[id] ? clone(state.nodes[id]) : null),
     getAuditLog: (filter = {}) =>
@@ -362,8 +307,6 @@ export function createStore(inputDoc, options = {}) {
         rejectRate: all.length ? rejected.length / all.length : 0,
       };
     },
-    /* 三级归因：与 TS 实现同口径（见 `src/core/suggestions.ts` 的 `SuggestionAttribution`）。
-       恒等式 `asIs + light + heavy + unknown === accepted`，unknown = 没有改动幅度记录的采纳。 */
     getSuggestionAttribution: () => {
       const accepted = [...suggestions.values()].filter((s) => s.status === 'accepted');
       let asIs = 0;
@@ -393,7 +336,6 @@ export function createStore(inputDoc, options = {}) {
       };
     },
 
-    /* --------------------------- 写接口 --------------------------- */
     createNode(params = {}, actor, opts = {}) {
       const { parentId, type = 'text', props = {}, order } = params;
       return commit({
@@ -528,19 +470,15 @@ export function createStore(inputDoc, options = {}) {
           if (!node) fail(ERR.E_NODE_NOT_FOUND, `节点不存在：${nodeId}`);
           node.humanConfirmed = true;
           node.rev += 1;
-          // 确认动作本身由 patch（humanConfirmed: false→true）与 actorId 表达，
-          // 不额外写入 revision 字段，避免违反 RevisionEntry 的 additionalProperties:false
           return { targetId: nodeId };
         },
       });
     },
 
-    /** 批量确认：一次确认一批内容节点（范围进留痕，仍可逐条追溯） */
     confirmNodes(params = {}, actor, opts = {}) {
       return confirmNodesImpl(params, actor, opts);
     },
 
-    /** 按子树确认（界面"本段确认"用它）：只收 text/field，结构节点不需要确认 */
     confirmSubtree(params = {}, actor, opts = {}) {
       if (actor?.kind !== 'human' && !noncompliant) {
         fail(ERR.E_AI_NOT_ALLOWED, `仅自然人可确认内容（actor.kind=${actor?.kind}）`);
@@ -566,15 +504,12 @@ export function createStore(inputDoc, options = {}) {
       return confirmNodesImpl({ nodeIds: ids }, actor, opts);
     },
 
-    /* --------------------------- AI 建议 --------------------------- */
     suggestText(params = {}, actor) {
       assertActor(actor);
       const { nodeId, text, confidence, modelId, promptId, evidence } = params;
       const node = state.nodes[nodeId];
       if (!node) fail(ERR.E_NODE_NOT_FOUND, `节点不存在：${nodeId}`);
       if (node.type !== 'text') fail(ERR.E_TYPE_MISMATCH, `节点 ${nodeId} 不是文本节点`);
-      /* 必须校验"有限且在 0~1"：只判 typeof 会让 NaN 通过，而 NaN < threshold 恒为 false，
-         低质量建议会绕过置信度门控直接落笔（由 TS/JS 双实现交叉测试发现）。 */
       if (!modelId || typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
         fail(ERR.E_AI_NO_PROVENANCE, 'AI 建议必须携带 modelId 与 0~1 的 confidence（否则无法审计，且 NaN/越界值会绕过门控）');
       }
@@ -636,10 +571,8 @@ export function createStore(inputDoc, options = {}) {
             suggestionId: s.id,
             at,
           };
-          node.humanConfirmed = false; // 采纳 ≠ 确认责任
+          node.humanConfirmed = false;
           s.status = 'accepted';
-          /* 记改动幅度（不是"改没改"）：`modified` 是它的投影，
-             三级归因读的是 `editRatio`（口径与 TS 实现同源） */
           s.editRatio = editRatioOf(s.text, finalText);
           s.modified = s.editRatio > 0;
           s.acceptedBy = actor.id;
@@ -672,7 +605,6 @@ export function createStore(inputDoc, options = {}) {
       });
     },
 
-    /* ---------------------------- 签章 ---------------------------- */
     sign(params = {}, actor, opts = {}) {
       if (actor?.kind !== 'human' && !noncompliant) {
         fail(ERR.E_AI_NOT_ALLOWED, `仅自然人可签名（actor.kind=${actor?.kind}）`);
@@ -683,10 +615,6 @@ export function createStore(inputDoc, options = {}) {
         targetId: state.rootId,
         ...opts,
         mutate: () => {
-          /* 签名门控**按风险分级**（与 TS 实现 src/core/session.ts 一致）：
-             ① 关键内容未确认 → **始终阻断**，不受 acknowledge 影响；
-             ②③ AI / 导入内容未确认 → 默认阻断；医生显式声明 acknowledgeUnconfirmed 后放行，
-                 并把"未逐条确认的清单"写进留痕。 */
           const acknowledge = params.acknowledgeUnconfirmed === true;
           const keyUnconfirmed = Object.values(state.nodes).filter((n) => n.keyContent === true && n.humanConfirmed !== true);
           if (!noncompliant && keyUnconfirmed.length > 0) {
@@ -696,9 +624,6 @@ export function createStore(inputDoc, options = {}) {
           if (!noncompliant && !acknowledge && aiUnconfirmed.length > 0) {
             fail(ERR.E_SIGNED_WITH_UNCONFIRMED_AI, `存在未经人工确认的 AI 内容（${aiUnconfirmed.length} 条）：${aiUnconfirmed.map((n) => n.id).join(', ')}；如已通读并认可，请显式传 acknowledgeUnconfirmed=true（该声明会记入留痕）`, { nodes: aiUnconfirmed.map((n) => n.id) });
           }
-          /* 导入内容与 AI 内容同一条纪律：识别/导入结果不得自动成为"已确认的病历"。
-             只约束承载内容的节点（text/field）：结构节点（document/section/paragraph）不要求确认，
-             否则导入件永远无法签章（界面没有给结构节点的确认入口）。 */
           const importedUnconfirmed = Object.values(state.nodes).filter(
             (n) => n.provenance?.origin === 'imported' && n.humanConfirmed !== true && (n.type === 'text' || n.type === 'field'),
           );
@@ -719,18 +644,11 @@ export function createStore(inputDoc, options = {}) {
               covers: ['Document.xml', 'Pages/Page_0/Content.xml', 'MachineReadable.xml'],
             },
           ];
-          /* 声明放行时把"未逐条确认的清单"写进留痕 —— 分级放行的代价记录。
-             没有它，分级就退化成静默放行。 */
           return { targetId: state.rootId, ...(acknowledgedUnconfirmed ? { extra: { acknowledgedUnconfirmed } } : {}) };
         },
       });
     },
 
-    /**
-     * 系统取数（LIS/HIS 搬运）：与 TS 实现 src/core/session.ts 的 applyExternalData
-     * **语义逐条一致**（双实现纪律）：system 身份 / 必须带 evidence /
-     * 幂等（同 ref 同值跳过，不产生留痕）/ 不覆盖人工内容。
-     */
     applyExternalData(params = {}, actor, opts = {}) {
       assertActor(actor);
       if (actor.kind !== 'system' && !noncompliant) {
@@ -780,9 +698,6 @@ export function createStore(inputDoc, options = {}) {
             node.value = clone(item.value);
             if (item.valueText !== undefined) node.valueText = item.valueText;
             if (item.unit !== undefined) node.unit = item.unit;
-            /* 采样时间与参考范围一起带进来：缺了它们，这个值进不了趋势、
-               也无法判定异常 —— 那这次搬运的价值就只剩"少打几个字"。
-               与 TS 实现 src/core/session.ts 保持一致。 */
             if (item.sampledAt !== undefined) node.sampledAt = item.sampledAt;
             if (item.referenceRange !== undefined) node.referenceRange = clone(item.referenceRange);
             node.provenance = { origin: 'system', actorId: actor.id, at: now(), evidence: clone(item.evidence) };
@@ -795,7 +710,6 @@ export function createStore(inputDoc, options = {}) {
       return { ok: true, applied, skipped, revision: result.revision };
     },
 
-    /* --------------------------- 机读 / 导出 --------------------------- */
     exportMachineReadable() {
       state.machineReadable = buildMachineReadable(state);
       return clone(state.machineReadable);

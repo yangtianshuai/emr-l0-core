@@ -1,5 +1,3 @@
-// schemaVersion 迁移框架。
-
 import { hashNodes } from './hash.ts';
 import { isPlainObject } from './guards.ts';
 import { SCHEMA_VERSION, type DocNode, type NodeId } from './types.ts';
@@ -25,12 +23,6 @@ export class MigrationError extends Error {
   }
 }
 
-/**
- * 迁移登记表。新增版本时必须在此追加一条，并补一条 self-test 用例。
- * 0.9.0 → 1.0.0 为示例迁移（真实项目里 0.9.0 是标准发布前的内部版本）：
- *   - 为机读块补充 sourceHash（内容指纹）；
- *   - 为缺省 provenance 的节点补 origin='imported'（历史数据可能没有来源标记）。
-  */
 export const MIGRATIONS: Migration[] = [
   {
     from: '0.9.0',
@@ -62,7 +54,6 @@ export const MIGRATIONS: Migration[] = [
   },
 ];
 
-/** 计算迁移路径（版本号列表，不含起点）；无路径返回 null */
 export function migrationPath(from: string, to: string = SCHEMA_VERSION): string[] | null {
   if (from === to) return [];
   const byFrom = new Map(MIGRATIONS.map((m) => [m.from, m]));
@@ -70,7 +61,7 @@ export function migrationPath(from: string, to: string = SCHEMA_VERSION): string
   let cursor = from;
   const guard = new Set<string>();
   while (cursor !== to) {
-    if (guard.has(cursor)) return null; // 环
+    if (guard.has(cursor)) return null;
     guard.add(cursor);
     const step = byFrom.get(cursor);
     if (!step) return null;
@@ -85,10 +76,6 @@ export interface MigrateResult {
   applied: string[];
 }
 
-/**
- * 迁移到目标版本（默认当前版本）。
- * 已是目标版本 → 原样返回（applied 为空）；未知起点或无路径 → 抛 MigrationError。
- */
 export function migrate(doc: RawDoc, target: string = SCHEMA_VERSION): MigrateResult {
   const from = typeof doc.schemaVersion === 'string' ? doc.schemaVersion : '';
   if (!from) throw new MigrationError('E_MIGRATION_FAILED', '文档缺少 schemaVersion');
@@ -118,7 +105,6 @@ export function migrate(doc: RawDoc, target: string = SCHEMA_VERSION): MigrateRe
   return { doc: current, applied };
 }
 
-/** 已登记的全部已知版本（含历史版本） */
 export function knownVersions(): string[] {
   return [...new Set([SCHEMA_VERSION, ...MIGRATIONS.map((m) => m.from), ...MIGRATIONS.map((m) => m.to)])].sort();
 }

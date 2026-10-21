@@ -1,16 +1,7 @@
-// 采集源（C3a）：唯一与"音频从哪来"有关的一层。
-
-/**
- * 帧的形状定义在 `capture.ts`（它是"帧 → 段"流水线上的通行形状，不只采集源在用）。
- * 这里重新导出，免得调用方为了一个类型多写一条 import。
- */
 import type { CaptureFrame } from './capture.ts';
 export type { CaptureFrame };
 
-/* ============================== 可用性与失败语义（第六节） ============================== */
-
 export type CaptureSourceFailureCode =
-  /** 非安全上下文：`http://10.x` 下浏览器直接不给麦克风，且没有任何前端办法绕过  */
   | 'E_CAPTURE_INSECURE_CONTEXT'
   | 'E_CAPTURE_PERMISSION_DENIED'
   | 'E_CAPTURE_NO_DEVICE'
@@ -20,9 +11,7 @@ export type CaptureSourceFailureCode =
 
 export interface CaptureSourceProblem {
   code: CaptureSourceFailureCode;
-  /** 现场表现（给人看的一句话） */
   message: string;
-  /** 怎么办 —— 失败必须同时给出可执行的一步，而不是只丢一个错误码  */
   howTo: string;
 }
 
@@ -40,23 +29,12 @@ export class CaptureSourceError extends Error {
 
 export type CaptureProbe = { ok: true; sourceId: string } | ({ ok: false; sourceId: string } & CaptureSourceProblem);
 
-/** 只读环境事实（由调用方从宿主里读出来，便于自测注入） */
 export interface CaptureEnvironment {
-  /** HTTPS 或 localhost */
   isSecureContext: boolean;
-  /** 宿主是否提供 `getUserMedia` */
   hasGetUserMedia: boolean;
-  /** 宿主是否提供 Web Audio（拿 PCM 要靠它） */
   hasAudioContext: boolean;
 }
 
-/**
- * 探测麦克风这条路走不走得通。纯函数、不碰设备。
- *
- * 判定的顺序是有讲究的：先判安全上下文。`http://10.x` 下不仅拿不到麦克风，
- * 连"是不是用户拒绝了权限"这个问题都问不出来（浏览器根本不会弹框）——
- * 把它排在后面，现场就会显示成"未获得麦克风权限"，而医生去设置里点半天也没用。
-  */
 export function probeMicEnvironment(env: CaptureEnvironment, sourceId = 'browser-mic'): CaptureProbe {
   if (!env.isSecureContext) {
     return {
@@ -120,33 +98,18 @@ export function describeSourceFailure(err: unknown): CaptureSourceProblem {
 }
 
 export interface CaptureSource {
-  /** 采集源标识（`browser-mic` / `shell` / `device` / `sample`）—— 留痕与界面要能回答"音频从哪来" */
   readonly id: string;
   /** 可用性自检：不通过时必须给出 why + howTo；不申请权限、不打开设备  */
   probe(): CaptureProbe;
-  /**
-   * 开始采集：帧通过 `onFrame` 回调给出。
-   *
-   * 约定：返回的 Promise 在采集结束时兑现（时间线走完 / 设备停止 / 有人调了 `stop()`）。
-   * 调用方负责"先让录音指示可见，再调它"（设计第八节第 1 条：不允许任何"看不见在录"的路径）。
-    */
   start(onFrame: (frame: CaptureFrame) => void): Promise<void>;
-  /** 停止采集。停止本身不该失败：它被按停时抛错，只会让人以为出了别的问题  */
   stop(): Promise<void>;
 }
 
 export interface SampleCaptureOptions {
-  /**
-   * 脚本时间线：一段一段给出"这段算不算人声"。
-   *
-   * 它不做音量分析（那是真实 VAD 的事）：演示源按脚本判定 `voiced`，
-   * 因此"静音判停"这类行为在演示里也是可复现的 —— 而不是靠对着麦克风说话。
-    */
   timeline: Array<{ seconds: number; voiced: boolean }>;
   /** 帧长（秒），默认 0.5：够细以体现分片规则，又不至于在演示里刷出上千帧 */
   frameSec?: number;
   sampleRate?: number;
-  /** 睡眠可注入：自测用假实现，不真的等 */
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -159,20 +122,12 @@ function synthesizePcm(sampleRate: number, seconds: number, voiced: boolean): Ui
   if (!voiced) return pcm;
   const view = new DataView(pcm.buffer);
   for (let i = 0; i < samples; i += 1) {
-    /* 440Hz、幅度 1/4：只为让"这段有人声"这件事在波形上也不假，不追求像人说话 */
     const value = Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 8192);
     view.setInt16(i * 2, value, true);
   }
   return pcm;
 }
 
-/**
- * 演示采集源：按脚本时间线产出帧，不需要麦克风、不需要 HTTPS。
- *
- * 它存在的理由和"靶子 ASR"完全一样：让"采集 → 分片 → 提交 → 建议"这条链在今天就能被
- * 真的跑一遍与真的测一遍。真实源（浏览器麦克风 / 桌面壳采集）接在同一个槽位上，
- * 因而它验过的编排逻辑，换源之后不用重验。
-  */
 export function createSampleCaptureSource(options: SampleCaptureOptions): CaptureSource {
   const frameSec = options.frameSec ?? 0.5;
   const sampleRate = options.sampleRate ?? 16_000;
@@ -183,7 +138,6 @@ export function createSampleCaptureSource(options: SampleCaptureOptions): Captur
   return {
     id: 'sample',
     probe() {
-      /* 演示源不依赖任何宿主能力 —— 但它必须标明自己是演示源（不是真识别，也不是真录音）  */
       return { ok: true, sourceId: 'sample' };
     },
     async start(onFrame) {

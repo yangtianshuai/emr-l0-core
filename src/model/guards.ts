@@ -1,5 +1,3 @@
-// 类型守卫：把 unknown 收窄为模型类型。
-
 import type { DocNode, DocumentModel, EvidenceRef, MachineReadableBlock, Provenance, RevisionEntry, TextNode, FieldNode, SectionNode, TableNode } from './types.ts';
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -75,7 +73,6 @@ export function isMachineReadableBlock(value: unknown): value is MachineReadable
   return isNonEmptyString(value.generatedAt) && isNonEmptyString(value.modelSchemaVersion) && Array.isArray(value.dataElements);
 }
 
-/** 文档模型守卫：只做"足以安全使用"的最低校验，深度合法性交给 validate.ts */
 export function isDocumentModel(value: unknown): value is DocumentModel {
   if (!isPlainObject(value)) return false;
   if (!isNonEmptyString(value.schemaVersion) || !isNonEmptyString(value.docId)) return false;

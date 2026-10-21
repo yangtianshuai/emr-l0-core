@@ -1,5 +1,3 @@
-// 并发写自测（C1~C6）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,21 +9,11 @@ import { loadSidecarsSealed, saveSidecarsSealed } from './store.ts';
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'concurrency');
 const FILE = join(DIR, 'doc_concurrency.json');
-/** 测试用口令（不是任何真实部署的口令） */
 const PASS = 'selftest-concurrency-passphrase';
-/** 测试用迭代数：只为把 7.6 秒的派生压到几十毫秒，不改变任何并发语义 */
 const ITER = 1000;
 
-/**  本环境 `node:fs` 的类型声明缺 `rmSync` 的 `recursive` 选项（运行时支持），故局部断言  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
-/**
- *  本环境 `node:child_process` 的声明里 `spawnSync` 没有 `env` 选项（运行时支持）。
- *
- * 变通是断言而不是"改用 `spawn` 或改走文件传参"：子进程必须拿到那几个参数，
- * 而"为了迁就类型声明去改测试机制"会让用例偏离它要验证的真实调用方式。
- * 同一个 `process.pid` 也缺声明 —— 那也是断言，不是不记录 pid（pid 是"真的跨进程"这句结论的证据）。
-  */
 interface SpawnSyncWithEnv {
   spawnSync: (
     command: string,
@@ -43,7 +31,6 @@ const suite = new TestSuite('并发写自测', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/** 子进程脚本：以独立的 node 进程写同一个文件（`-e` 里的代码是纯 JS，动态 import 那个 .ts 模块）  */
 const CHILD_SOURCE = `
 const store = await import(process.env.L0C_STORE_URL);
 const payload = {
@@ -72,7 +59,6 @@ interface WriterResult {
   message?: string;
 }
 
-/** 起一个独立进程去写：`expect` 为 `'missing'` / 摘要串 / 省略（= 裸写）  */
 function writeFromAnotherProcess(tag: string, expect?: string): WriterResult {
   const result = childProcess.spawnSync(process.execPath, ['--input-type=module', '-e', CHILD_SOURCE], {
     cwd: ROOT,
@@ -92,14 +78,12 @@ function writeFromAnotherProcess(tag: string, expect?: string): WriterResult {
   return JSON.parse(line) as WriterResult;
 }
 
-/** 父进程侧落盘（同时用掉一次真实写入，返回这一版的摘要） */
 function writeHere(tag: string, expect?: { digest: string } | { missing: true }): string {
   const payload = { suggestions: { writer: tag, items: [] }, annotations: { writer: tag, items: [] } };
   const meta = saveSidecarsSealed(FILE, payload as never, PASS, { iterations: ITER, ...(expect ? { expect } : {}) });
   return meta.digest;
 }
 
-/** 读回"盘上是谁写的那一版" */
 function writerOnDisk(): { writer: string | null; digest?: string } {
   const loaded = loadSidecarsSealed(FILE, PASS);
   /* `firstRun`（文件不存在）与"读写失败"都必须给 null，而不是"看起来有一版" */
@@ -117,7 +101,6 @@ async function main(): Promise<void> {
     const base = writeHere('base');
     assert(base.length === 64, '前置：拿到基线摘要');
 
-    /* 两个独立进程各自读盘、各自写 —— 它们都认为自己是在"当前这一版"上写的  */
     const a = writeFromAnotherProcess('A');
     const b = writeFromAnotherProcess('B');
     assert(a.ok && b.ok, `裸写两次都该"成功"（这正是问题所在）：${JSON.stringify({ a, b })}`);
@@ -126,7 +109,6 @@ async function main(): Promise<void> {
 
     const onDisk = writerOnDisk();
     assertEqual(onDisk.writer, 'B', 'A 的内容已经没了');
-    /* 这条断言的意义："没有报错"不等于"没丢东西"。它证明后面那层前置条件不是多余的。  */
     assertEqual(a.ok, true, 'A 的那次写入当时是"成功"的 —— 丢失发生时没有任何信号');
   });
 
@@ -142,8 +124,6 @@ async function main(): Promise<void> {
     assertEqual(b.ok, false, '陈旧基线的写入必须被拒绝');
     assertEqual(b.code, SNAPSHOT_CONFLICT_CODE, '应给出可定位的错误码');
     assert(String(b.message ?? '').includes('未写入'), `错误信息要说清"本次未写入"，实际：${b.message ?? ''}`);
-    /* 这条信息会出现在医生的操作日志里（不是只躺在服务端），
-       所以不许夹带 markdown 标记 —— 与 A14 对界面字面量的要求同一条纪律。  */
     assert(!String(b.message ?? '').includes('**'), `错误信息不得夹带 markdown 标记，实际：${b.message ?? ''}`);
 
     const onDisk = writerOnDisk();
@@ -183,8 +163,6 @@ async function main(): Promise<void> {
     const written = writeHere('base');
     assertEqual(writerOnDisk().digest, written, '写入返回的 digest 必须等于随后读到的 digest，否则基线永远对不上');
 
-    /* 同样的内容再写一遍，摘要必须不同：信封里有随机 IV，
-       于是任何一次写入都会换掉基线 —— "陈旧"因此总能被检出。  */
     const again = writeHere('base');
     assert(again !== written, '内容相同也应得到不同摘要（否则两次写入之间的"陈旧"检测不出来）');
   });
@@ -192,7 +170,6 @@ async function main(): Promise<void> {
   await test('C6 崩溃残留：截断的 .tmp 不影响读取，也不影响带基线的写入', () => {
     rmSync(FILE, { force: true });
     const d0 = writeHere('base');
-    /* 模拟"写到一半断电"：临时文件留下了、但没 rename 成正式文件 */
     writeFileSync(`${FILE}.tmp`, '{"format":"l0-sidecars","version":1,"savedAt":"2026-10-12T00:00:00.000Z","digest":"dead', 'utf8');
     assert(existsSync(`${FILE}.tmp`), '前置：临时文件在');
 
@@ -202,7 +179,6 @@ async function main(): Promise<void> {
     assertEqual(writerOnDisk().writer, 'next', '写入生效');
   });
 
-  /* 收尾：把测试目录清掉，免得留成下一轮的"外部改动" */
   fsRemove.rmSync(DIR, { recursive: true, force: true });
 
   process.exit(suite.report());

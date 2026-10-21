@@ -1,6 +1,3 @@
-// 发布前隐私与密钥排查脚本自测（P1~P5）。
-// P5 私钥归因：只有确能由公开种子推导的才允许降级，降级错了就是放过一把真私钥。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { demoKeyPair } from '../crypto/provider.ts';
 import {
@@ -32,9 +29,6 @@ function hitsOfRule(text: string, rule: string): Finding[] {
 }
 
 await test('P1 身份证号：校验位通过才叫命中，生日段不是日期的不报', () => {
-  /* 两个号都是合成的：前 17 位固定为 `11010119810312001`（地区码 + 1981-03-12，虚构人员），
-     末位分别填"按国标算法算出的正确校验位 `8`"与"错误的 `1`"。
-     这能验证实现照不照国标算 —— 但它替代不了"与外部权威样例比对"（那正是密码学那边用国标向量的做法）。  */
   const passed = hitsOfRule('证件号：110101198103120018', '身份证号');
   assertEqual(passed.length, 1, '校验位通过的号必须报出来（那几乎一定是按真实规则编制的）');
   assert(passed[0]?.detail.includes('校验位通过') === true, '必须写明依据是"校验位通过"，否则它只是"18 位数字"');
@@ -43,12 +37,10 @@ await test('P1 身份证号：校验位通过才叫命中，生日段不是日�
   assertEqual(failed.length, 1, '形似身份证号也要报（但不能断言它是真的）');
   assert(failed[0]?.detail.includes('校验位不通过') === true, '校验位不符要如实说出，供人判断是不是编号');
 
-  /* 生日段不是日期：多半是别的编号（订单号/时间戳拼接），不报 —— 宁可不报，不可误报 */
   assertEqual(hitsOfRule('流水号：110101198199990011', '身份证号').length, 0, '生日段非法的不应报');
 });
 
 await test('P2 措辞不误报：提示文案不是数据', () => {
-  /* 这三条都来自仓库真实文本（自测标题 / 代码注释 / 文档表格），首轮全被误报过 */
   assertEqual(hitsOf('await test("A3 患者：病历号 / 性别 / 出生日期识别")').length, 0, '测试标题里的"患者：病历号"不得报');
   assertEqual(hitsOf('/** 是否隐藏患者身份（姓名/就诊号以外的一切标识不进入视图） */').length, 0, '注释里的措辞不得报');
   assertEqual(hitsOf('| 身份证/电话/住址替换为等长假值 | 删除整段/整节点 |').length, 0, '文档表格里的措辞不得报');
@@ -59,7 +51,6 @@ await test('P3 值形态：人名后面跟着科室（守住那次静默漏报�
   assertEqual(hits.length, 1, '真实数据里人名后面常跟着科室，规则必须容得下');
   assert(hits[0]?.detail.includes('张**') === true, '姓名应脱敏展示（保留姓氏便于人工核对）');
 
-  /* 反例：值不是中文人名的字段不应报 */
   assertEqual(hitsOfRule('{"label": "internal-medicine"}', 'JSON 里的姓名 / 标签字段').length, 0, '英文标签不应报');
 });
 
@@ -118,8 +109,6 @@ await test('P6 .gitignore 判据：父目录规则算覆盖，注释不算规则
   assertEqual(isIgnored(text, 'artifacts/recipient-keys.json'), false, '没写进规则的路径不得算已覆盖');
   assertEqual(isIgnored('# /logs/', 'logs'), false, '注释行不是规则（否则"提一句就以为挡住了"）');
 
-  /* 已知限度：本判据不处理 `!` 取反，于是会保守地说"已覆盖"。
-     真要精确判断应交给 `git check-ignore`，但那要求仓库已 init —— 这一步不该由排查脚本替使用者决定。  */
   assertEqual(isIgnored(text, 'artifacts/state/keep.json'), true, '取反的情形按"已覆盖"处理（保守方向已知）');
 });
 
@@ -129,7 +118,6 @@ await test('P7 复核记录：按指纹降级、理由必须带出来、失效�
   assert(!!fresh, '前置：该文本应命中身份证号规则');
   assertEqual(fresh.fingerprint, fingerprintOf('身份证号', '110101198103120011'), '指纹 = 规则名 + 原值的哈希');
 
-  /* 指纹不含路径与行号：同一段合成数据出现在别处、或行号变了，复核记录不该失效  */
   const moved = hitsOf(`\n\n\n${raw}`).find((item) => item.rule === '身份证号') as Finding;
   assertEqual(moved.where === fresh.where, false, '前置：两处位置不同（行号不同）');
   assertEqual(moved.fingerprint, fresh.fingerprint, '位置变了，指纹必须不变（否则复核记录会被行号变化反复作废）');
@@ -157,8 +145,6 @@ await test('P7 复核记录：按指纹降级、理由必须带出来、失效�
 });
 
 await test('P8 密钥文件分级：空壳降为"需人工确认"，有内容仍是"必须处置"', () => {
-  /* 这条是被一次假警报逼出来的：清除密钥时"把文件写空"的旧实现留下 0 字节的空壳，
-     于是每次发布前排查都为它报一次"必须处置"。假警报的代价不是噪声，是报告被跳读。  */
   const empty = keyFileVerdict('.key', 0);
   assertEqual(empty.level, 'review', '0 字节的密钥文件不含材料，不该报最高级别');
   assert(empty.detail.includes('空'), '降级必须写明理由（"它是空的"），否则看起来像放水');

@@ -1,5 +1,3 @@
-// 内涵类质控的配置落库层：规则清单 + 引擎形态 + 引擎凭据。
-
 import { existsSync, readFileSync } from 'node:fs';
 import { CONFIG_KEY_PREFIX, type ConfigKv } from '../storage/config-kv.ts';
 import { parseContentRules, type ContentQcRuleBrief } from './content-engine.ts';
@@ -24,9 +22,7 @@ export class QcContentConfigError extends Error {
 
 export interface QcContentEngineSetting {
   kind: QcContentEngineKind;
-  /** `http` 必有；`none` / `model` 不接受（`model` 用的是管理后台「能力配置」里那一个） */
   url?: string;
-  /** 期望引擎自报的 id：给定时，产出对不上就整份拒收 */
   expectEngineId?: string;
 }
 
@@ -50,16 +46,8 @@ export interface LoadedQcContentConfig {
   token?: string;
   tokenPresent: boolean;
   rules: ContentQcRuleBrief[];
-  /**
-   * 规则清单的原始数组（原样存下来的那一份）。
-   *
-   * 界面要能核对它：判定标准是临床共识，不是秘密，而且"现在判的是哪一份"
-   * 必须能被逐条看、被 diff（同知识资产包"不加密以便审查"的取舍）。
-   * 回显的边界：它不含引擎凭据（那一条单独一行、永不回显）。
-    */
   rulesRaw: unknown[] | null;
   rulesRejected: Array<{ index: number; message: string }>;
-  /** 清单本身的问题（读不出来 / 结构不符）；`null` = 没问题 */
   rulesProblem: string | null;
   source: 'store' | 'default';
   updatedAt?: string;
@@ -115,8 +103,6 @@ export function validateQcEngineSetting(input: Partial<QcContentEngineSetting>):
     );
   }
   if (kind !== 'http' && url !== '') {
-    /* `model` 用的是管理后台「能力配置」里那一个模型（同一个地址、同一份凭据），
-       再存一个地址就等于有两处"病历发往哪儿"的答案。 */
     throw new QcContentConfigError('E_QC_CONFIG_INVALID', `引擎形态是 ${kind} 时不该再给地址（实际 ${JSON.stringify(url)}）：地址只在 http 形态下有意义`);
   }
   const setting: QcContentEngineSetting = { kind };
@@ -125,7 +111,6 @@ export function validateQcEngineSetting(input: Partial<QcContentEngineSetting>):
   return setting;
 }
 
-/** 读规则清单（原始数组 → 逐条校验）。空清单是合法状态，不是错误  */
 function readRules(kv: ConfigKv): { raw: unknown[] | null; rules: ContentQcRuleBrief[]; rejected: Array<{ index: number; message: string }>; problem: string | null } {
   let stored: StoredQcContentRules | null;
   try {
@@ -139,7 +124,6 @@ function readRules(kv: ConfigKv): { raw: unknown[] | null; rules: ContentQcRuleB
   return { raw: stored.rules, rules: parsed.rules, rejected: parsed.rejected, problem: null };
 }
 
-/** 读取生效中的质控配置（库里有就用库里的，没有就是"未接入 + 无规则"） */
 export function loadQcContentConfig(kv: ConfigKv): LoadedQcContentConfig {
   const storedEngine = readEngine(kv);
   const rules = readRules(kv);
@@ -172,23 +156,16 @@ export function loadQcContentConfig(kv: ConfigKv): LoadedQcContentConfig {
 
 export interface QcContentConfigInput {
   engine: Partial<QcContentEngineSetting>;
-  /** `undefined` 不改 / `null` 清除 / 字符串 设新值（同模型密钥的三态） */
   token?: string | null;
-  /** 给了就整体替换规则清单（原始数组）；不给则不动 */
   rules?: unknown[];
 }
 
 export interface SaveQcContentConfigResult {
   loaded: LoadedQcContentConfig;
   tokenAction: 'set' | 'cleared' | 'unchanged';
-  /** 本次写入的清单里被丢弃的条目（如实回报，不静默丢）  */
   rulesRejected: Array<{ index: number; message: string }>;
 }
 
-/**
- * 保存质控配置。顺序与 `saveModelConfig` 一致：先写非敏感的（引擎形态、规则），
- * 最后动凭据那一行 —— 凭据失败时不会留下"凭据换了但配置还是旧的"这种半截状态。
- */
 export function saveQcContentConfig(kv: ConfigKv, input: QcContentConfigInput, by: string, options: { at?: string } = {}): SaveQcContentConfigResult {
   const engine = validateQcEngineSetting(input.engine);
   const at = options.at ?? new Date().toISOString();
@@ -217,7 +194,6 @@ export function saveQcContentConfig(kv: ConfigKv, input: QcContentConfigInput, b
 
   const storedEngine: StoredQcContentEngine = { version: 1, ...engine, tokenStored, updatedAt: at, updatedBy: by };
   kv.write(QC_CONTENT_ENGINE_KEY, storedEngine);
-  /* 清除要真删那一行（同 `saveModelConfig`）：留着密文而报"已清除"，这句话是假的  */
   if (tokenAction === 'cleared') kv.remove(QC_CONTENT_TOKEN_KEY);
 
   const loaded = loadQcContentConfig(kv);
@@ -238,7 +214,6 @@ export function describeQcContentConfig(loaded: LoadedQcContentConfig): Record<s
   };
 }
 
-/** `import_ledger` 里的记账 id：记了它，就再也不看旧规则文件 */
 export const QC_RULES_LEDGER_ID = 'qc-rules-file-import';
 
 export interface QcRulesImportResult {
@@ -247,14 +222,6 @@ export interface QcRulesImportResult {
   reason: string;
 }
 
-/**
- * 把旧规则文件搬进库（一次性，带记账闸门）。
- *
- * 三条与 `config-files-import.ts` 完全相同的规则：
- *   - 库里已有（`has`，不解内容）→ 不覆盖；
- *   - 真导入了才记账；有失败不记账（下次启动再试）；
- *   - 旧文件不删（回滚凭据）。
-  */
 export function importQcRulesOnce(deps: {
   workStore: { ledgerHas(id: string): boolean; ledgerMark(id: string, note: string): void };
   kv: ConfigKv;
@@ -265,7 +232,6 @@ export function importQcRulesOnce(deps: {
     return { ran: false, imported: 0, reason: '已经搬过一次（记账在库里）：不再看旧规则文件' };
   }
   if (deps.file === '' || !existsSync(deps.file)) {
-    /* 没有旧文件 → 不记账：部署时把旧文件放进来是常见动作，记早了就把那条路堵死了  */
     return { ran: true, imported: 0, reason: deps.file === '' ? '未指定旧规则文件（服务端配置 imports.qcRulesFile）' : `旧规则文件不存在：${deps.file}` };
   }
   if (deps.kv.has(QC_CONTENT_RULES_KEY)) {
@@ -281,7 +247,6 @@ export function importQcRulesOnce(deps: {
   if (!parsed.ok) {
     return { ran: true, imported: 0, reason: `旧规则文件结构不符，不记账（下次启动会再试）：${parsed.message}` };
   }
-  /* `parseContentRules` 已确认它是数组（`parsed.ok`），这里断言回数组是安全的 */
   deps.kv.write(QC_CONTENT_RULES_KEY, {
     version: 1,
     rules: raw as unknown[],

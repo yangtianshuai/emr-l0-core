@@ -1,5 +1,3 @@
-// 语音采集客户端（Windows exe）的验收自测。
-
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -23,7 +21,6 @@ interface TimelineStep {
   voiced: boolean;
 }
 
-/** 与 exe 的 `--selftest-segments` 用同一组帧：0.5s 一帧、16k/单声道/16-bit。 */
 function runJsTimeline(steps: TimelineStep[], config: SegmentConfig): {
   segments: { index: number; startSec: number; endSec: number; reason: string; wavBytes: number }[];
   droppedShort: number;
@@ -313,7 +310,6 @@ async function main(): Promise<void> {
   });
 
   await suite.test('VC4 多块录音卡：能列设备、能按编号/名字选，选不到就拒绝启动（不回落默认）', async () => {
-    /* 枚举是只读的：不打开设备、不占麦克风 —— 所以这台机器有没有麦都能跑 */
     const listed = spawnExeSync(['--list-devices']);
     const parsed = JSON.parse(listed) as { ok?: boolean; devices?: unknown };
     assert(parsed.ok === true, `--list-devices 应返回 ok：${listed}`);
@@ -332,7 +328,6 @@ async function main(): Promise<void> {
       `选设备失败也要给"怎么办"（可用设备 / 换编号），否则运维只能猜：${denied.stderr ?? ''}`,
     );
 
-    /* 名字片段匹配不到，走同一条拒绝路径 */
     const bogusName = spawnSync(EXE, ['--device', '不存在的卡', '--source', 'mic', '--port', String(port + 1)], { encoding: 'utf8' });
     assertEqual(bogusName.status, 2, '名字匹配不到时也必须拒绝启动');
 
@@ -372,7 +367,6 @@ async function main(): Promise<void> {
       assertEqual(saved.ok, true, '--set-device default 应成功');
       assert(existsSync(cfg), '--set-device 要真的落盘（否则"改完就记住"是空话）');
 
-      /* 不存在的设备不能写进配置：写进去下次启动才发现，等于埋一个雷  */
       const bad = spawnSync(EXE, ['--set-device', '999999', '--config-file', cfg], { encoding: 'utf8' });
       assertEqual(bad.status, 2, '不存在的设备不得写进配置');
       const after = JSON.parse(spawnExeSync(['--print-config', '--config-file', cfg])) as Record<string, unknown>;

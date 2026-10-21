@@ -1,19 +1,4 @@
 #!/usr/bin/env node
-/**
- * 编辑器骨架本地服务（零依赖）
- *
- * 作用：把 editor.html 用 HTTP 提供出去，并接收页面回传的输入延迟报告，
- *      写入 tools/editor-check/samples/latency-report.json，供 perf-check 作为 P11 的实测输入。
- *
- * 为什么必须走 HTTP：file:// 下 fetch 会被浏览器拦截，报告无法回传；
- * 且真实的复制/粘贴、打印行为在 HTTP 下才接近生产环境。
- *
- * 用法：
- *   node editor-latency-server.mjs [--port 8787] [--doc <doc.json>]
- *   然后浏览器打开 http://127.0.0.1:8787/  → 点击"运行输入延迟测试"
- *
- * 退出：Ctrl+C
- */
 
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

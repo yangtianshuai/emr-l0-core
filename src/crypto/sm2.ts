@@ -1,7 +1,3 @@
-// SM2 椭圆曲线公钥密码算法（GB/T 32918）—— 自研纯 TS 实现，零依赖。
-// 定位与 SM3 相同：原型与交叉验证用，未经第三方审计，不得直接用于生产签名。
-// 生产必须换成经认证的密码模块（商用密码产品 / HSM / UKey）。
-
 import { fromHex, sm3, toHex, utf8 } from './sm3.ts';
 
 export const SM2_P = BigInt('0xfffffffeffffffffffffffffffffffffffffffff00000000ffffffffffffffff');
@@ -24,7 +20,6 @@ export interface Sm2Signature {
   s: bigint;
 }
 
-/** 无穷远点用 null 表示（仿射坐标无法表示） */
 type MaybePoint = Sm2Point | null;
 
 const BASE: Sm2Point = { x: SM2_GX, y: SM2_GY };
@@ -34,7 +29,6 @@ function mod(value: bigint, m: bigint): bigint {
   return r < 0n ? r + m : r;
 }
 
-/** 模逆（扩展欧几里得），零依赖且对 256 位足够快 */
 function invMod(value: bigint, m: bigint): bigint {
   let oldR = mod(value, m);
   let r = m;
@@ -53,7 +47,7 @@ function addPoints(p1: MaybePoint, p2: MaybePoint): MaybePoint {
   if (!p1) return p2;
   if (!p2) return p1;
   if (p1.x === p2.x) {
-    if (mod(p1.y + p2.y, SM2_P) === 0n) return null; // 互为逆元 → 无穷远
+    if (mod(p1.y + p2.y, SM2_P) === 0n) return null;
     const lambda = mod(3n * p1.x * p1.x + SM2_A, SM2_P) * invMod(2n * p1.y, SM2_P) % SM2_P;
     const x = mod(lambda * lambda - 2n * p1.x, SM2_P);
     return { x, y: mod(lambda * (p1.x - x) - p1.y, SM2_P) };
@@ -79,11 +73,9 @@ export function isOnCurve(point: Sm2Point): boolean {
   return mod(point.y * point.y, SM2_P) === mod(point.x * point.x * point.x + SM2_A * point.x + SM2_B, SM2_P);
 }
 
-/** 随机标量（拒绝采样）。导出给 ECDSA 交叉验证桥复用，不重复实现随机源处理 */
 function randomScalar(): bigint {
   const source = (globalThis as unknown as { crypto?: { getRandomValues(array: Uint8Array): Uint8Array } }).crypto;
   if (!source) throw new Error('SM2：当前环境没有安全随机源（crypto.getRandomValues 不可用）');
-  /* 拒绝采样：直接取模会带来极小的偏向，密码学实现里不接受"极小" */
   for (let attempt = 0; attempt < 128; attempt += 1) {
     const bytes = source.getRandomValues(new Uint8Array(32));
     const value = BigInt(`0x${toHex(bytes)}`);
@@ -121,10 +113,6 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/**
- * 待签名摘要 e = SM3(Z ‖ M)，其中 Z = SM3(ENTL ‖ ID ‖ a ‖ b ‖ xG ‖ yG ‖ xA ‖ yA)。
- * 这一层不做就等于签了另一个算法：OpenSSL/国密设备的验签会直接失败。
-  */
 export function sm2Digest(message: Uint8Array, publicKey: Sm2Point, id: string = SM2_DEFAULT_ID): bigint {
   const idBytes = utf8(id);
   const bitLength = idBytes.length * 8;
@@ -144,8 +132,6 @@ export function sm2Digest(message: Uint8Array, publicKey: Sm2Point, id: string =
   return BigInt(`0x${toHex(sm3(concat([z, message])))}`);
 }
 
-// 安全性：k 的取值依赖私钥 d（秘密），外部无法预测，因此不构成"k 可猜"的经典漏洞；
-
 function deterministicK(privateKey: bigint, e: bigint, attempt: number): bigint {
   const seed = concat([intToBytes32(privateKey), intToBytes32(e), intToBytes32(BigInt(attempt))]);
   const digest = sm3(concat([utf8('SM2-DETERMINISTIC-K/V1'), seed]));
@@ -153,7 +139,6 @@ function deterministicK(privateKey: bigint, e: bigint, attempt: number): bigint 
 }
 
 export interface SignOptions {
-  /** 注入固定 k（测试用；与 deterministic 互斥，优先使用它） */
   k?: bigint;
   /**
    * 确定性 k 派生（默认 true）：产物可复现是验收硬要求。
@@ -211,7 +196,6 @@ function encodeInteger(value: bigint): Uint8Array {
   return concat([new Uint8Array([0x02, bytes.length]), bytes]);
 }
 
-/** DER：SEQUENCE { INTEGER r, INTEGER s }（与 OpenSSL 输出一致，便于互操作） */
 export function encodeDerSignature(signature: Sm2Signature): Uint8Array {
   const body = concat([encodeInteger(signature.r), encodeInteger(signature.s)]);
   if (body.length < 128) return concat([new Uint8Array([0x30, body.length]), body]);
@@ -244,12 +228,6 @@ export function decodeDerSignature(bytes: Uint8Array): Sm2Signature {
   return { r: r.value, s: s.value };
 }
 
-/**
- * SM2 公钥 SPKI 的固定前缀（26 字节）：
- *   SEQUENCE / AlgorithmIdentifier(id-ecPublicKey + sm2p256v1) / BIT STRING 头
- * 之后紧跟 04 ‖ X(32) ‖ Y(32)。自测里用 OpenSSL 导出的 SPKI 做逐字节比对，
- * 证明这个前缀不是"抄错了也不会有人发现"的魔法常量。
- */
 const SM2_SPKI_HEAD = fromHex('3059301306072a8648ce3d020106082a811ccf5501822d034200');
 
 export function publicKeyToSpki(publicKey: Sm2Point): Uint8Array {
@@ -275,14 +253,12 @@ export function parseSm2Spki(der: Uint8Array): SpkiParseResult {
   return { ok: true, publicKey: point };
 }
 
-/** 便捷形式：解析失败即抛错（既有调用点保持不变） */
 export function publicKeyFromSpki(der: Uint8Array): Sm2Point {
   const result = parseSm2Spki(der);
   if (!result.ok) throw new Error(`SM2：${result.reason}`);
   return result.publicKey;
 }
 
-/** 公钥指纹：SPKI 的 SM3 摘要（十六进制），用于"这把钥匙是不是同一把"的展示与比对 */
 export function publicKeyFingerprint(publicKey: Sm2Point): string {
   return toHex(sm3(publicKeyToSpki(publicKey)));
 }
@@ -290,7 +266,6 @@ export function publicKeyFingerprint(publicKey: Sm2Point): string {
 export {
   concat as concatBytes,
   intToBytes32,
-  /* 点运算导出给自测用：`nG = 无穷远` 是曲线参数正确性的最强检查（抄错一个参数就过不了） */
   addPoints as pointAdd,
   multiply as scalarMultiply,
   /* 数学工具导出给 ECDSA 交叉验证桥复用（同一套模运算，避免"两处各写一份"埋下不一致） */

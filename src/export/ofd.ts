@@ -1,6 +1,3 @@
-// T17 · OFD / OFD-H 导出（零依赖）。
-// 且演示私钥可由种子推导 —— 生产必须换成经认证的密码模块（见 src/crypto/provider.ts）。
-
 import { DOCUMENT_COVERS, signTargets, verifyTargets, type SignatureBlock, type SignatureTarget, type VerifySignatureResult } from '../crypto/signature.ts';
 import { utf8 } from '../crypto/sm3.ts';
 import type { Signer } from '../crypto/provider.ts';
@@ -19,32 +16,14 @@ export interface OfdLayoutPlan {
   marginPt?: number;
   fontSizePt?: number;
   lineHeightPt?: number;
-  /**
-   * 段前间距（pt）。
-   * 这不是排版美观问题，而是"段落边界能否被还原"的信息载体：
-   * 若所有行等距且同缩进，版式文件里段落边界在原理上不可恢复（实测踩到），
-   * 导出端必须把边界"画"出来（段前间距 + 首行缩进），导入端才可能聚回段落。
-    */
   paragraphGapPt?: number;
-  /** 正文段首行缩进（pt）：中文排版习惯，也是段落边界的第二重线索 */
   firstLineIndentPt?: number;
-  /**
-   * 装订边（pt）：只加在左侧的额外留白，供纸质病历左侧装订。
-   * 默认 0（不改动既有版式）；启用后正文左边界与可用宽度同时收窄，
-   * 装订孔不会压到文字 —— 这是纸质归档的实际要求，不是排版美观问题。
-    */
   bindingMarginPt?: number;
-  /** 页眉区高度（pt）。未指定且启用页眉时按行高 × 1.5 推导 */
   headerHeightPt?: number;
-  /** 页脚区高度（pt）。未指定且启用页脚时按行高 × 1.5 推导 */
   footerHeightPt?: number;
 }
 
 export interface OfdFurniturePlan {
-  /**
-   * 页眉模板。占位符：`{docType}` `{patient}` `{visitId}` `{page}` `{pages}` `{docId}`。
-   * 空串表示不出页眉。
-   */
   header?: string;
   footer?: string;
 }
@@ -78,26 +57,14 @@ export const DEFAULT_FURNITURE: Required<OfdFurniturePlan> = {
   footer: '第 {page} 页 共 {pages} 页 · 文书号 {docId}',
 };
 
-/**
- * 装饰层（页眉/页脚/水印）的 Layer ID 前缀 —— 导出与导入两侧的共同契约。
- * 导入端据此把页码从正文行流中分出来（而不是混进正文，也不是静默丢弃）。
-  */
 export const FURNITURE_LAYER_PREFIX = 'layer-furniture';
 export const HEADER_LAYER_ID = `${FURNITURE_LAYER_PREFIX}-header`;
 export const FOOTER_LAYER_ID = `${FURNITURE_LAYER_PREFIX}-footer`;
 
-/** 版式块的种类：导入侧据此判断"这一段该不该缩进/是否标题" */
 export type BlockKind = 'title' | 'body' | 'list' | 'table' | 'signature' | 'other';
 
-/**
- * 版面里的一块图（pt）。`resourceId` 是容器内 `DocumentRes.xml` 的 `MultiMedia` ID ——
- * 图片不是文本对象，它在 Content.xml 里是 `ImageObject` + `ResourceID`，
- * 字节本体在 `Res/MultiMedia/` 下。三者（对象 / 资源清单 / 字节）必须同进同出，
- * 少任何一个，归档件里的图就是一张空框。
-  */
 export interface RenderImage {
   resRef: string;
-  /** 指向容器内资源（`MM_1`）。导出前由 `buildOfdPackage` 分配好 */
   resourceId: string;
   altText?: string;
   widthPt: number;
@@ -109,27 +76,11 @@ export interface RenderLine {
   fontSize: number;
   bold: boolean;
   nodeId: NodeId;
-  /**
-   * 该行属于哪个版式块（= 来源节点 id）。
-   * 同一节点被折行拆出的多行共享同一个 nodeId —— 导入侧正是靠"同块续行"把它们合回一段。
-    */
   blockKind?: BlockKind;
-  /**
-   * 这一行是一张图：`text` 为空（纸面上不产文字对象，否则会与图重叠），
-   * 由 `contentXml` 改产 `ImageObject`。`y` 对图片行是图框顶部，
-   * 对文字行是基线 —— 两处用法各自明确，别把 `y - fontSize` 套到图上。
-    */
   image?: RenderImage;
 }
 
-/** 图片排版的输入：一张图在版面上占多大（已按正文可用宽度封顶） */
 export interface RenderLinePlan {
-  /**
-   * 由调用方按正文可用宽度封顶后给出尺寸 —— `renderLines` 既不知道版心宽度，
-   * 也拿不到图片字节（它必须保持纯函数、可单测）。
-   * 返回 null = 这个地址取不到可用的图（文件缺失 / 不是图片）：此时画一行占位文字，
-   * 而不是静默跳过 —— 归档件少一块而没人知道，是最难查的一类缺页。
-    */
   imageBoxOf?: (resRef: string, altText: string) => { widthPt: number; heightPt: number; resourceId: string } | null;
 }
 
@@ -145,25 +96,10 @@ export interface OfdPackage {
 
 export interface OfdExportOptions {
   date?: Date;
-  /**
-   * 签名后端。文档已签章时必须提供：否则会导出一份"已签章但没有签名值"的文件，
-   * 那是最糟的产物（看起来已签、实际无签名）。
-    */
   signer?: Signer;
-  /**
-   * 取一张图的字节。由调用方注入：`export/ofd.ts` 是纯函数层，
-   * 不认识"图存在哪儿"（demo 存在 `state/resources`，用例用内存夹具）。
-   * 返回 null = 取不到：纸面画一行 `[图片缺失：…]` 并记进 `warnings`，
-   * 不静默跳过 —— 归档件少一块而没人知道，比导出失败更难查。
-    */
   resolveImage?: (resRef: string) => Uint8Array | null;
 }
 
-/**
- * 独立验签：从容器 entries 里解析 Signatures.xml，按 SignedInfo 里的 Reference 清单
- * 重新计算每个文件的 SM3，再用内嵌公钥验 SM2 签名。
- * 完全不依赖签名时的内存状态 —— 这正是"第三方可验证"的含义。
-  */
 export function verifyOfdEntries(entries: ZipEntry[]): VerifySignatureResult | null {
   const signatureEntry = entries.find((entry) => /Signatures\.xml$/.test(entry.path));
   if (!signatureEntry) return null;
@@ -185,7 +121,6 @@ function esc(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
-/** 估算文本宽度（pt）：CJK/全角按 1 em，其余按 0.5 em；用于换行与分页估算 */
 export function estimateWidth(text: string, fontSizePt: number): number {
   let width = 0;
   for (const char of text) {
@@ -236,21 +171,12 @@ function inlinePart(node: DocNode): string | null {
   return null;
 }
 
-/** 把文档渲染为有序"逻辑行"（与页面无关，便于单测） */
 export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): RenderLine[] {
   const nodes = doc.nodes;
   const base = DEFAULT_LAYOUT.fontSizePt;
   const lines: RenderLine[] = [];
   const consumed = new Set<NodeId>();
 
-  /**
-   * 预建"父 → 有序子"映射（一次遍历）。
-   *
-   *  早期实现在每个节点上都做 `Object.values(nodes).filter(item => item.parentId === id)`，
-   * 那是 O(n²)：1000 页（32k 节点）实测导出耗时 169 秒（约 10 亿次比较）。
-   * 阴险之处是 100 页时只表现为"有点慢"（0.85s），完全看不出结构性缺陷 ——
-   * 只有把规模推上去才会暴露。任何"在循环里扫全表"的写法都会长成这样。
-    */
   const childMap: Record<string, DocNode[]> = {};
   for (const item of Object.values(nodes)) {
     if (item.parentId === null || item.parentId === undefined) continue;
@@ -280,7 +206,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
     const controlName = (node.provenance.evidence ?? [])
       .find((evidence) => evidence.field === 'control')?.valueText;
     push(controlName ?? node.definitionId ?? '专科控件', node.id);
-    /* 空格不导出（"没填"与"填了个空"在纸面上都是空着，但纸面只关心有没有内容） */
     const cellByKey = new Map(controlCellsOf(node).map((cell) => [cell.key, cell]));
     const isImageShape = node.shape === 'image';
     for (const [cellKey, cellValue] of Object.entries(node.payload ?? {})) {
@@ -297,9 +222,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
 
   const pushImage = (node: Extract<DocNode, { type: 'image' }>): void => {
     const altText = node.altText ?? '';
-    /* 空槽（`resRef` 是空串）不是"图丢了"，是"还没贴"。
-       纸面上必须把这两件事分开：都写成「图片缺失」的话，审计会去追一起
-       根本没发生过的资源事故，而真正该催的是"这一格还没填"。 */
     if (node.resRef === '') {
       push(`[待贴图${altText ? `：${altText}` : ''}]`, node.id);
       return;
@@ -322,8 +244,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
         heightPt: box.heightPt,
       },
     });
-    /* 图注排在图下方、字号小一号：它是这张图的说明而不是正文。
-       同 nodeId ⇒ 紧贴图不空行（`paginatePages` 只在不同 nodeId 之间加段前间距）。 */
     if (node.caption) push(node.caption, node.id, { fontSize: Math.max(7, base - 1) });
   };
 
@@ -348,8 +268,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
       case 'paragraph': {
         const parts: string[] = [];
         for (const child of kidsOf(node.id)) {
-          /* 控件是块级内容：先把它前面那截句子成行，再让它整块自成几行。
-             不这样做，`inlinePart` 会把它压成 `[控件：kind]` 一行内部标识。  */
           if (child.type === 'control') {
             consumed.add(child.id);
             push(parts.join(''), node.id);
@@ -357,9 +275,6 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
             pushControl(child);
             continue;
           }
-          /* 图同样是块级内容：贴图挂在段落下面（`parentId` 就是段落），
-             不在这里单独成块，`inlinePart` 只会吐一句 `[图像：地址]`，
-             而图本身一个字都不会进归档件。 */
           if (child.type === 'image') {
             consumed.add(child.id);
             push(parts.join(''), node.id);
@@ -435,14 +350,10 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
         break;
       }
       case 'image': {
-        /* 直接挂在章节（而非段落）下的图走这一支：与段落里的那一种共用 `pushImage`
-           —— 两处各写一遍的结果是"同一张图换个挂法就变成一行文字"。 */
         pushImage(node);
         break;
       }
       case 'control': {
-        /* 直接挂在章节（而非段落）下的控件走这一支：与段落里那一种共用同一份纸面画法
-           （`pushControl`）—— 两处各写一遍的结果是"同一个控件换个挂法就少几行"。 */
         pushControl(node);
         break;
       }
@@ -463,9 +374,7 @@ export interface PlacedLine extends RenderLine {
   page: number;
 }
 
-/** 正文可用区：页眉、页脚、装订边都会压缩它 */
 export interface ContentBox {
-  /** 首行基线 */
   top: number;
   /** 末行基线上限 */
   bottom: number;
@@ -504,16 +413,11 @@ export function paginatePages(
   for (const line of lines) {
     const atPageTop = y <= area.top + 0.01;
     const blockChanged = previousBlock !== null && previousBlock !== line.nodeId;
-    /* 段前间距：把段落边界"画"出来，导入端才有线索可依（见 OfdLayoutPlan 注释）。
-       标题前留更大空隙，标题因此也能被导入端按间距识别。 */
     if (blockChanged && !atPageTop) {
       y += line.blockKind === 'title' ? layout.paragraphGapPt * 1.5 : layout.paragraphGapPt;
     }
     const indent = line.blockKind === 'body' && blockChanged && !atPageTop ? layout.firstLineIndentPt : 0;
 
-    /* 图：不可拆、不折行。放不下就整块换页；比一页还高时按比例缩到一页高 ——
-       宁可缩小，也不要被页边裁掉半张（裁掉的正是"结论在哪"那一半）。
-       `y` 在这里是图框顶部，不是基线。  */
     if (line.image) {
       const usable = area.bottom - area.top;
       const height = Math.min(line.image.heightPt, usable);
@@ -564,12 +468,6 @@ export interface FurnitureVars {
   pages: number;
 }
 
-/**
- * 页眉/页脚模板渲染。
- *
- * `{patient}` 由调用方传入脱敏姓名（`nameMasked`）；调用方在缺失时传"（未脱敏）"，
- * 而不是回落到 `patientId` —— 页眉是纸质件上最容易泄露身份的位置。
-  */
 export function renderFurniture(template: string, vars: FurnitureVars): string {
   return template
     .replace(/\{docType\}/g, vars.docType)
@@ -581,7 +479,6 @@ export function renderFurniture(template: string, vars: FurnitureVars): string {
     .trim();
 }
 
-/** 单行 → TextObject 片段。idPrefix 让"正文/页眉/页脚"三类对象在容器内也可区分 */
 function textObjectXml(text: string, x: number, y: number, size: number, bold: boolean, idPrefix: string, index: number): string {
   const width = Math.max(1, estimateWidth(text, size));
   const height = size * 1.6;
@@ -714,13 +611,6 @@ function mediaFormatOf(mime: ImageMime): string {
   return 'PNG';
 }
 
-/**
- * 文档里用到的图片地址，按文档顺序去重。
- *
- * 顺序必须是文档顺序（而不是"谁先被访问"）：导出是可重放的，同一份病历两次导出的
- * 资源编号与容器布局应当逐字节一致 —— 否则"同一份病历的两个归档件指纹不同"，
- * 而指纹正是用来判断"有没有被人动过"的。
-  */
 function imageRefsOf(doc: DocumentModel): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -742,14 +632,7 @@ async function containerSignature(doc: DocumentModel, entries: ZipEntry[], optio
   }
 
   const covers = ref.covers && ref.covers.length > 0 ? ref.covers : [...DOCUMENT_COVERS];
-  /* covers 里写的是逻辑名（Document.xml / Pages/Page_0/Content.xml / MachineReadable.xml），
-     容器内的真实路径统一加 Doc_0/ 前缀 */
   const paths = new Set(covers.map((name) => (name.startsWith('Doc_0/') ? name : `Doc_0/${name}`)));
-  /* 资源类文件必须一并覆盖：字体清单与图片字节由导出过程生成，
-     文档签章那一刻不可能把它们写进 covers。漏签的后果很实在：
-     把 Res/MultiMedia/1.png 换成一另一张图、ResourceID 仍指同一个文件名，
-     签名照样验得过 —— 那等于"图可以换而病历没被改过"。
-     只补容器里真实存在的 Res/* 文件（不凭空要求）。  */
   for (const entry of entries) {
     if (entry.path.startsWith('Doc_0/Res/')) paths.add(entry.path);
   }
@@ -794,7 +677,6 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
     header: plan.furniture?.header ?? DEFAULT_FURNITURE.header,
     footer: plan.furniture?.footer ?? DEFAULT_FURNITURE.footer,
   };
-  /* 页眉/页脚区高度：未显式指定时按行高 × 1.5 推导 —— 否则正文会与页码重叠 */
   const headerHeightPt = furniture.header === '' ? 0 : layout.headerHeightPt > 0 ? layout.headerHeightPt : layout.lineHeightPt * 1.5;
   const footerHeightPt = furniture.footer === '' ? 0 : layout.footerHeightPt > 0 ? layout.footerHeightPt : layout.lineHeightPt * 1.5;
   const furnitureVars = {
@@ -805,10 +687,6 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
     docId: doc.docId,
   };
 
-  /* ---------- 图片资源：先收齐、再排版 ----------
-     顺序不能反：排版要知道"这张图占多宽多高"，而尺寸只能从图片字节本身来（像素 ÷ DPI）。
-     反过来"让界面把宽高报上来"是不行的 —— 同一张图从剪贴板贴、从文件拖、从 PACS 取，
-     三条路的宽高来源各不相同，归档件就会因为"图是怎么进来的"而长得不一样。  */
   const imageResources = new Map<string, ImageResource>();
   const warnings: string[] = [];
   for (const resRef of imageRefsOf(doc)) {
@@ -891,7 +769,6 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
       .join('\n'),
   });
 
-  /* 逐页生成：pages 已按页分桶，这里不再对全量行做 filter（见 paginatePages 注释） */
   for (let index = 0; index < pageCount; index += 1) {
     entries.push({
       path: `Doc_0/Pages/Page_${index}/Content.xml`,
@@ -917,9 +794,6 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
       '    <ofd:Font ID="F1" FontName="SimSun" FamilyName="宋体"/>',
       '    <ofd:Font ID="F2" FontName="SimHei" FamilyName="黑体"/>',
       '  </ofd:Fonts>',
-      /* 图片资源清单：`MediaFile` 相对 `BaseLoc="Res"`，所以写 `MultiMedia/1.png`。
-         少了这一段，Content.xml 里的 `ResourceID` 就是指向空气的引用 ——
-         阅读器画不出图，而文件"看起来是完整的"。 */
       ...(imageResources.size === 0 ? [] : [
         '  <ofd:MultiMedias>',
         ...[...imageResources.values()].map((item) => [
@@ -946,8 +820,6 @@ export async function buildOfdPackage(doc: DocumentModel, plan: OfdExportPlan, o
   if (signature) entries.push({ path: 'Doc_0/Signatures/Signatures.xml', data: signaturesXml(signature) });
 
   const bytes = buildZip(entries, { date: options.date ?? new Date(doc.updatedAt) });
-  /* 图片行不是文本对象（它们各自是一个 `ImageObject`）。把它算进 `textObjects`，
-     统计就会说"这份病历有 42 个文本对象"，而实际读回来少一行 —— 排查时会绕远路。 */
   const textLines = placed.filter((line) => line.image === undefined);
   const textChars = textLines.reduce((sum, line) => sum + line.text.length, 0);
   return {

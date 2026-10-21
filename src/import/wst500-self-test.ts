@@ -1,5 +1,3 @@
-// T25b 验收自测：WS/T 500（电子病历共享文档）XML 映射导入。
-
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

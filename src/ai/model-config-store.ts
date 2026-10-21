@@ -9,14 +9,11 @@ import {
   type AiModelFormat,
 } from './model-config.ts';
 
-/** 库里的两个键名：配置一条、密钥一条（分开，免得"改地址"顺手动了密钥那一行）  */
 export const MODEL_CONFIG_KEY = `${CONFIG_KEY_PREFIX}ai-model`;
 export const MODEL_KEY_KEY = `${CONFIG_KEY_PREFIX}ai-model.apiKey`;
-/** 旧位置（`<状态目录>/ai-model.json` 与 `ai-model.key`）：只用于一次性导入，不再写  */
 export const MODEL_CONFIG_FILE = 'ai-model.json';
 export const MODEL_KEY_FILE = 'ai-model.key';
 
-/** 界面上能改的东西（没有环境变量名：界面配置的是密钥本身，不是"去哪个变量里找"）  */
 export interface ModelConfigInput {
   format: AiModelFormat;
   model: string;
@@ -33,7 +30,6 @@ interface StoredModelConfig {
   endpoint?: string;
   timeoutMs: number;
   maxItems: number;
-  /** 是否有密钥被加密落盘（不存密钥本身，密钥在 `ai-model.key`）  */
   apiKeyStored: boolean;
   updatedAt: string;
   updatedBy: string;
@@ -45,7 +41,6 @@ export interface LoadedModelConfig {
   apiKey?: string;
   /** 这份配置从哪来（`store` = 库里配过；`default` = 从没配过、走离线默认） */
   source: 'store' | 'default';
-  /** 密钥是否就位（真值来源，界面只显示这个） */
   apiKeyPresent: boolean;
   updatedAt?: string;
   updatedBy?: string;
@@ -56,8 +51,6 @@ function readStored(kv: ConfigKv): StoredModelConfig | null {
     try {
       return kv.read<StoredModelConfig>(MODEL_CONFIG_KEY);
     } catch (err) {
-      /* 读坏了不静默当没有：那会让"我配的模型没了"表现为"退回了离线模板"。
-         裹回本模块的错误码：调用方依赖的是 `E_AI_CONFIG_INVALID`。  */
       throw new AiConfigError('E_AI_CONFIG_INVALID', `模型配置读不出来，拒绝按"未配置"继续：${(err as Error).message}`);
     }
   })();
@@ -66,7 +59,6 @@ function readStored(kv: ConfigKv): StoredModelConfig | null {
   return parsed;
 }
 
-/** 取密钥。解不开 → 抛错（`config-kv` 已保证不把"解不开"混成"没有"）  */
 function readStoredKey(kv: ConfigKv): string | undefined {
   const value = ((): string | null => {
     try {
@@ -80,7 +72,6 @@ function readStoredKey(kv: ConfigKv): string | undefined {
   })();
   if (value === null) return undefined;
   if (typeof value !== 'string' || value === '') {
-    /* 存着一个非字符串/空值：那是数据坏了，不是"没有密钥"。宁可报出来。 */
     throw new AiConfigError('E_AI_CONFIG_INVALID', `库里的模型密钥不会是它该有的样子：${JSON.stringify(value)?.slice(0, 40)}`);
   }
   return value;
@@ -99,7 +90,6 @@ export function loadModelConfig(kv: ConfigKv): LoadedModelConfig {
       maxItems: stored.maxItems,
     };
     if (stored.endpoint) config.endpoint = stored.endpoint;
-    /* 只在"配置说密钥就位"时才去读密钥那一行：避免每次读配置都解一个用不到的信封 */
     const apiKey = stored.apiKeyStored ? readStoredKey(kv) : undefined;
     return {
       config,
@@ -117,13 +107,6 @@ export function loadModelConfig(kv: ConfigKv): LoadedModelConfig {
   };
 }
 
-/**
- * 校验界面提交的配置。
- *
- * 规则与 `resolveModelConfig` 完全一致（fail-closed、非法数值不取默认）——
- * 两条配置路径若校验口径不同，就会出现"界面能存进去、环境变量却拒绝"的配置，
- * 而那种配置的失败现场极难复现。
-  */
 export function validateModelConfigInput(input: Partial<ModelConfigInput>): ModelConfigInput {
   const format = input.format;
   if (format !== 'offline' && format !== 'openai-compatible') {
@@ -163,16 +146,9 @@ export function validateModelConfigInput(input: Partial<ModelConfigInput>): Mode
 
 export interface SaveModelConfigResult {
   loaded: LoadedModelConfig;
-  /** 密钥发生了什么（只记动作，不记值）  */
   apiKeyAction: 'set' | 'cleared' | 'unchanged';
 }
 
-/**
- * 保存配置并返回生效后的配置。
- *
- * 先写非敏感配置、再处理密钥：若密钥这一步失败（比如口令缺失），
- * 至少不会出现"密钥已更新但配置还是旧的"这种半截状态 —— 反过来的半截状态更难解释。
-  */
 export function saveModelConfig(
   kv: ConfigKv,
   rawInput: Partial<ModelConfigInput>,
@@ -184,7 +160,6 @@ export function saveModelConfig(
     try {
       return loadModelConfig(kv);
     } catch {
-      /* 旧配置读坏了不该阻止修复：管理界面正是用来修它的地方 */
       return null;
     }
   })();
@@ -196,9 +171,6 @@ export function saveModelConfig(
     apiKeyStored = false;
     apiKeyAction = 'cleared';
   } else if (typeof input.apiKey === 'string' && input.apiKey !== '') {
-    /* 这里原先守一句"没有口令就拒绝存密钥"。现在这条由构造期保证：
-       `WorkStore` 没有口令直接抛（"不做没口令就存明文的兜底"），
-       而 `config-kv` 不自己加密、只走它的 `putSealed` —— 所以走到这里就一定是有口令的。  */
     kv.write(MODEL_KEY_KEY, input.apiKey);
     apiKeyStored = true;
     apiKeyAction = 'set';
@@ -217,14 +189,6 @@ export function saveModelConfig(
   if (input.endpoint) stored.endpoint = input.endpoint;
   kv.write(MODEL_CONFIG_KEY, stored);
 
-  /* 清除时要真删那一行：只把 apiKeyStored 置 false 而留着密文，
-     等于"我清掉了"这句话是假的（密文还在库里，只是没人读它）。
-
-     这里曾经写成"把文件写空"—— 注释说真删，实现却留下一个 0 字节的空壳：
-     对注释读代码的人以为它删了，看磁盘的人以为密钥还在。实测代价很具体：
-     发布前排查（`npm run scan:phi`）每次都为这个空壳报一次"必须处置"，
-     而它是我们自己造出来的假警报 —— 一道天天红的门禁等于没有门禁。
-     现在是 `removeSealed`：一条 `delete`，没有"空壳"这种中间状态。  */
   if (apiKeyAction === 'cleared') kv.remove(MODEL_KEY_KEY);
 
   return { loaded: loadModelConfig(kv), apiKeyAction };

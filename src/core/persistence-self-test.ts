@@ -1,11 +1,8 @@
-// 持久化自测。
-
 import { mkdirSync, readdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { cleanupTemp, readSnapshot, snapshotExists, writeSnapshot } from './persistence.ts';
 
-/* 与 persistence.ts 同因：本环境的 node:fs 类型声明不完整，局部断言 */
 const fsx = (await import('node:fs')) as unknown as {
   rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void;
 };
@@ -59,7 +56,6 @@ async function main(): Promise<void> {
       [],
       '正常写完后不应有 .tmp 残留（否则每次崩溃都会攒一个）',
     );
-    /* 模拟"崩在写一半"：留下一个临时文件 */
     const leftover = `${target}.tmp`;
     writeFileSync(leftover, '{"format":"l0-snapshot"', 'utf8');
     assertEqual(cleanupTemp(target), true, '应能清理残留');
@@ -103,7 +99,6 @@ async function main(): Promise<void> {
       assertEqual(result.code, 'E_SNAPSHOT_VERSION', '应报版本问题');
       assert(result.message.includes('迁移'), '错误信息应指出需要显式迁移');
     }
-    /* 反过来：用正确版本读，仍然能读出来（说明拒绝的是"猜"而不是"旧数据"） */
     assertEqual(readSnapshot<{ legacyField: string }>(target, { version: 1 }).ok, true, '版本匹配时应可读');
   });
 

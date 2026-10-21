@@ -1,6 +1,3 @@
-// 后台账号（用户名 + 口令 + 角色）自测（U1~U13）。
-// 1) 口令只以哈希存在：库文件里搜不到口令明文，且同一个口令在两个账号上哈希不同
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,7 +15,6 @@ import {
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIR = join(ROOT, 'artifacts', 'state-selftest', 'user-store-selftest');
 
-/**  本环境 node:fs 类型声明缺 rmSync 的 recursive 选项（运行时支持），同 storage-self-test  */
 const fsRemove = (await import('node:fs')) as unknown as { rmSync: (path: string, options: { recursive: boolean; force: boolean }) => void };
 
 const suite = new TestSuite('后台账号自测', [
@@ -29,7 +25,6 @@ const suite = new TestSuite('后台账号自测', [
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
 let dbSeq = 0;
-/** 每个用例一个独立的库文件：本环境的"安全删除"垫片删含 WAL 的目录会偶发失败（同 storage-self-test） */
 function openStore(): { store: UserStore; db: ReturnType<typeof openDatabase>['db'] } {
   dbSeq += 1;
   const opened = openDatabase(join(DIR, `case-${dbSeq}.db`), {
@@ -42,13 +37,6 @@ function openStore(): { store: UserStore; db: ReturnType<typeof openDatabase>['d
 
 const PASSWORD = 'correct-horse-battery';
 
-/**
- * U10 需要自己算一条参数不同的哈希，所以这里也得直接调 scrypt。
- *
- * 不复用 `user-store.ts` 内部那份断言（那里是按用到的形状局部断言 node:crypto）：
- * 测试若借了实现内部的绕行方式，"实现换了绕法、测试跟着换"就会变成一条迟早会被做错的维护动作。
- *  本环境 `@types/node` 里 `node:crypto` 类型不完整，故用变量说明符 + 局部断言。
-  */
 const cryptoSpecifier = 'node:crypto';
 const nodeCrypto = (await import(cryptoSpecifier)) as unknown as {
   randomBytes: (size: number) => Uint8Array;
@@ -70,21 +58,15 @@ function assertThrows(fn: () => unknown, expected: string, message = '应当以�
   assertEqual(codeOf(fn), expected, message);
 }
 
-/** 库文件里能不能搜到这段明文（这是本套件最重要的一条断言：哈希不是加密）  */
 function dbContainsPlaintext(db: { prepare: (sql: string) => { all: (...p: unknown[]) => Array<Record<string, unknown>> } }, needle: string): boolean {
   const rows = db.prepare('select username, role, password_hash, updated_by from admin_users').all();
   return JSON.stringify(rows).includes(needle);
 }
 
 async function main(): Promise<void> {
-  /* 开头清一次。不清就会撞上上一轮留下的同名库文件 ——
-     实测：第二次运行时 U1 读到"已有 1 个管理员"（那是上一轮 run 建的），
-     于是 11 条用例一起红，而它们指向的是一个测试卫生问题、不是产品缺陷。
-     容忍失败的理由同 `storage-self-test`：本环境的 rmSync 被"安全删除"垫片接管。  */
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch {
-    /* 残留的旧库文件不会与本次的 `case-N.db` 撞名（下面先递增再拼名） */
   }
   mkdirSync(DIR, { recursive: true });
 
@@ -118,7 +100,6 @@ async function main(): Promise<void> {
     store.create({ username: 'qc1', password: PASSWORD, role: 'qc', by: 'installer' });
     const rows = db.prepare('select username, password_hash from admin_users order by username').all();
     assertEqual(String(rows[0].password_hash) === String(rows[1].password_hash), false, '两条哈希必须不同（盐独立）');
-    /* 哈希不同但验证都通过 —— 这才说明差异来自盐而不是"存错了"  */
     assertEqual(verifyPassword(PASSWORD, String(rows[0].password_hash)), true, '第一条仍能验证通过');
     assertEqual(verifyPassword(PASSWORD, String(rows[1].password_hash)), true, '第二条仍能验证通过');
   });
@@ -183,14 +164,12 @@ async function main(): Promise<void> {
     assertThrows(() => store.setDisabled({ username: 'admin', disabled: true, by: 'cli' }), 'E_USER_LAST_ADMIN');
     assertThrows(() => store.setRole({ username: 'admin', role: 'viewer', by: 'cli' }), 'E_USER_LAST_ADMIN');
 
-    /* 有第二个管理员之后，第一个就可以被降级（现实里正是"换人接班"这个动作） */
     store.create({ username: 'admin2', password: PASSWORD, role: 'admin', by: 'cli' });
     const demoted = store.setRole({ username: 'admin', role: 'qc', by: 'cli' });
     assertEqual(demoted.roleLabel, '质控员', '有两个管理员时，降级一个应当被允许');
     assertEqual(store.enabledAdminCount(), 1, '此时只剩 admin2 一个可用管理员');
     assertThrows(() => store.remove({ username: 'admin2', by: 'cli' }), 'E_USER_LAST_ADMIN', '最后一个仍然不能被删');
 
-    /* 被停用的管理员不算"可用"：只剩一个"停用的管理员"与一个都没有是同一件事  */
     store.create({ username: 'admin3', password: PASSWORD, role: 'admin', by: 'cli' });
     assertEqual(store.enabledAdminCount(), 2, '现在有 2 个可用管理员');
     store.setDisabled({ username: 'admin2', disabled: true, by: 'cli' });
@@ -211,9 +190,6 @@ async function main(): Promise<void> {
     assertEqual(store.verify('admin', next).ok, true, '改自己的口令是该让人能自己做的事');
     assertEqual(store.verify('admin', PASSWORD).ok, false, '旧口令必须立刻失效');
 
-    /* 空的操作者要拒绝：`updated_by` 如实地记下"是谁做的"是本表存在的理由之一。
-       这一条的每一条写路径都要成立 —— 初版只写在"改角色/停用"的分支里，
-       于是"改口令"成了唯一一条可以不留操作者的路径（被本条抓住）。  */
     for (const act of [
       () => store.setPassword({ username: 'admin2', password: next, by: '' }),
       () => store.setPassword({ username: 'admin2', password: next, by: '   ' }),
@@ -248,8 +224,6 @@ async function main(): Promise<void> {
   });
 
   await test('U10 参数自描述：换一组 scrypt 参数写下的哈希仍能验证（提高参数不会让口令一起失效）', () => {
-    /* 手写一条参数不同的哈希（N=1024）：模拟"将来把 N 抬上去之后，库里还留着旧口令"。
-       若实现是"按当前常量重算再比"，这条用例会失败 —— 那正是要挡住的行为。  */
     const salt = nodeCrypto.randomBytes(16);
     const legacyN = 1024;
     const derived = nodeCrypto.scryptSync(PASSWORD, salt, 32, { N: legacyN, r: 8, p: 1 });
@@ -288,28 +262,23 @@ async function main(): Promise<void> {
     const { store, db } = openStore();
     store.create({ username: 'admin', password: PASSWORD, role: 'admin', by: 'installer' });
     db.prepare("update admin_users set role = 'superuser' where username = 'admin'").run();
-    /* 把"库被人改坏了"静默变成"这个人现在是只读"，会让一个越权问题看起来像一个功能问题 */
     assertThrows(() => store.list(), 'E_USER_INVALID');
     assertThrows(() => store.get('admin'), 'E_USER_INVALID');
     assertThrows(() => store.verify('admin', PASSWORD), 'E_USER_INVALID');
   });
 
-  /* hashPassword 与 verifyPassword 是一对：这里单独钉一次"往返保真"，
-     免得上面那些用例都建立在"错的哈希恰好在某个环节没被发现"之上。 */
   await test('U14 hashPassword / verifyPassword 往返保真', () => {
     const encoded = hashPassword(PASSWORD);
     assertEqual(verifyPassword(PASSWORD, encoded), true, '正确口令应当通过');
     assertEqual(verifyPassword(`${PASSWORD} `, encoded), false, '多余空格是另一个口令（不做 trim）');
     assertEqual(verifyPassword('', encoded), false, '空口令不通过');
     assertEqual(encoded.split('$').length, 6, '格式是 scrypt$N$r$p$salt$hash');
-    /* 口令里可以有空格与特殊字符：不做 trim、不做规范化 —— 那会在校验时静默改掉它 */
     const odd = 'pass word@#123';
     assertEqual(verifyPassword(odd, hashPassword(odd)), true, '含空格的口令必须原样可用');
     assertThrows(() => hashPassword('short'), 'E_USER_INVALID');
   });
 
 const code = suite.report();
-  /* 收尾清理不影响结论（同 `storage-self-test`：对含 WAL 的目录偶发失败）  */
   try {
     fsRemove.rmSync(DIR, { recursive: true, force: true });
   } catch (err) {

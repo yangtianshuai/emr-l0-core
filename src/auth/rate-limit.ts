@@ -1,15 +1,8 @@
-// 限流：滑动窗口计数。
-// 管理员登录完全没有失败次数限制：口令是单一口令（`L0_ADMIN_TOKEN`），
-// 口令本身的强度与轮换才是根；
-
 import { AUTH_ERRORS } from './principal.ts';
 
 export interface RateRule {
-  /** 窗口内最多几次 */
   limit: number;
-  /** 窗口长度（毫秒） */
   windowMs: number;
-  /** 这个桶是干什么的（只进拒绝信息，方便运维定位） */
   label: string;
 }
 
@@ -19,7 +12,6 @@ export type RateDecision =
       ok: false;
       code: typeof AUTH_ERRORS.E_RATE_LIMITED;
       message: string;
-      /** 建议的重试间隔（秒，至少 1）：直接用于 `Retry-After` */
       retryAfterSec: number;
       limit: number;
     };
@@ -27,7 +19,6 @@ export type RateDecision =
 export interface RateLimiterOptions {
   /** 注入时钟（测试用）。默认 `Date.now` */
   now?: () => number;
-  /** 最多记多少个键（超出淘汰最久没命中的） */
   maxKeys?: number;
 }
 
@@ -43,7 +34,6 @@ export class SlidingWindowLimiter {
     this.maxKeys = options.maxKeys ?? 4096;
   }
 
-  /** 键数量（测试与运维观察用） */
   get keyCount(): number {
     return this.hits.size;
   }
@@ -54,7 +44,6 @@ export class SlidingWindowLimiter {
     const now = this.now();
     const stamps = this.prune(key, rule, now);
     if (stamps.length >= rule.limit) {
-      /* 把裁剪后的数组写回去：不写回的话，被拒期间旧时刻会一直留着 */
       this.hits.set(key, stamps);
       return this.deny(rule, stamps, now);
     }
@@ -64,7 +53,6 @@ export class SlidingWindowLimiter {
     return { ok: true, limit: rule.limit, remaining: rule.limit - stamps.length };
   }
 
-  /** 只判定、不记录（界面可以据此提示"快到了"，而提示不该消耗额度） */
   peek(key: string, rule: RateRule): RateDecision {
     this.assertRule(rule);
     const now = this.now();
@@ -73,17 +61,14 @@ export class SlidingWindowLimiter {
     return { ok: true, limit: rule.limit, remaining: rule.limit - stamps.length };
   }
 
-  /** 清掉一个键（例如登录成功后把该身份的失败计数清零：成功不该继续背着失败）  */
   reset(key: string): boolean {
     return this.hits.delete(key);
   }
 
-  /** 清掉全部键（测试与"全部解锁"处置用） */
   resetAll(): void {
     this.hits.clear();
   }
 
-  /** 清理所有键里已出窗口的时刻；没有任何时刻的键整个删掉。返回处理的键数 */
   sweep(): number {
     const now = this.now();
     let touched = 0;
@@ -108,7 +93,6 @@ export class SlidingWindowLimiter {
     };
   }
 
-  /** 保留窗口内的命中时刻（升序，最长 `limit` 条） */
   private prune(key: string, rule: RateRule, now: number): number[] {
     const stamps = this.hits.get(key) ?? [];
     const windowMs = Math.min(rule.windowMs, MAX_WINDOW_MS);

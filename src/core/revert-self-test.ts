@@ -1,14 +1,3 @@
-// 回到历史版本（revertTo）自测（V1~V8）。
-//
-// 之前只有 `undoLast`（撤销最近一次）：它能省掉一次误操作，却答不出
-// "三小时前的那一版写了什么"。这两件不是一回事 —— 撤销是撤回最近一笔，
-// 回到历史版本是跨过一整段，而且**回滚自己也要留痕**：
-// 病历里没有"悄悄回到过去"这回事，谁在什么时候把文档退回到哪一版，必须答得出来。
-//
-// 回滚靠的是"反放留痕"：每条留痕都带着改前的值（`oldValue`），所以不需要额外存快照。
-// 代价是"能不能回到那一版"取决于那条链上的 patch 是否完整 ——
-// 反不了就整体失败，绝不反到一半（半途回滚造出的是一份从未存在过的病历）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WRITE_ERRORS, WriteSession, type Actor } from './session.ts';
 import { summarizeRevision } from './revision-summary.ts';
@@ -17,7 +6,6 @@ import type { DocNode, NodeId } from '../model/types.ts';
 
 const HUMAN: Actor = { id: 'DR_A', kind: 'human' };
 const REVIEWER: Actor = { id: 'DR_R', kind: 'human' };
-/** 另一位书写者（与 HUMAN 同一份病历里的第二个人） */
 const OTHER: Actor = { id: 'DR_B', kind: 'human' };
 
 const suite = new TestSuite('K21 回到历史版本自测', [
@@ -27,7 +15,6 @@ const suite = new TestSuite('K21 回到历史版本自测', [
 
 const test = (name: string, fn: () => void | Promise<void>): Promise<void> => suite.test(name, fn);
 
-/** 会话 + 一个文本节点 id（合成文档自带 1 条"创建根节点"的留痕） */
 function open(): { session: WriteSession; textId: NodeId; paragraphId: NodeId } {
   const { doc, ids } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 2, fieldsPerParagraph: 1, withTables: false });
   return {
@@ -142,7 +129,6 @@ async function main(): Promise<void> {
     assertEqual(session.docRev, before + 1, '解锁之后可以回滚（解锁本身就留了痕）');
     assertEqual(session.verifySignature().ok, false, '回滚改了内容，原签名自然验不过');
 
-    /* 审核中：不许回滚（那样"审核人看的"与"要签的"就不是同一份） */
     const second = open();
     second.session.submitForReview({}, HUMAN);
     assertEqual(codeOf(() => second.session.revertTo({ rev: 1 }, HUMAN)), WRITE_ERRORS.E_REVIEWING_IMMUTABLE, '审核中不得回滚');
@@ -156,7 +142,6 @@ async function main(): Promise<void> {
     session.revertTo({ rev: 1 }, HUMAN);
     const afterRevert = textOf(session, textId);
 
-    /* `insertText` 是追加到末尾：这里只给新增的那几个字 */
     session.insertText({ nodeId: textId, text: '·重新写' }, HUMAN);
     assertEqual(textOf(session, textId), `${afterRevert}·重新写`, '回滚之后仍可正常书写');
     session.undoLast(HUMAN);
@@ -173,7 +158,6 @@ async function main(): Promise<void> {
 
     session.revertTo({ rev: 1 }, HUMAN);
     assertEqual(textOf(session, textId), snapshots[0], '第一次回滚');
-    /* 第二次回到 rev 3（即"二改之后"）：这次要跨过的是刚才那条回滚留痕本身 */
     session.revertTo({ rev: 3 }, HUMAN);
     assertEqual(textOf(session, textId), snapshots[2], '回滚不是单程票：回滚本身也要能被回滚回去');
     session.revertTo({ rev: 2 }, HUMAN);
@@ -187,7 +171,6 @@ async function main(): Promise<void> {
     await session.review({ decision: 'approve' }, REVIEWER);
     session.archiveDoc({}, HUMAN);
 
-    /* 归档是终态：连回滚也不行（回滚改的是内容，归档件的内容不许再动） */
     assertEqual(codeOf(() => session.revertTo({ rev: 1 }, HUMAN)), WRITE_ERRORS.E_SIGNED_IMMUTABLE, '归档件不得回滚');
     assertEqual(session.document.status, 'archived', '被拒后状态不变');
     assertEqual(session.document.nodes[textId] !== undefined, true, '内容当然也不能变');
@@ -195,33 +178,28 @@ async function main(): Promise<void> {
 
   await test('V9 留痕摘要：一条留痕说得出"大概改了什么"，说不清就说实话', () => {
     const { session, textId } = open();
-    /* 文本替换 */
     const before = textOf(session, textId);
     session.insertText({ nodeId: textId, text: '追加一句' }, HUMAN);
     const inserted = summarizeRevision(session.auditLog().at(-1)!);
     assert(inserted.startsWith('插入「'), `插入应说"插入「…」"，实际：${inserted}`);
     assert(inserted.length <= 24, `摘要要短（≤24 字），实际 ${inserted.length}：${inserted}`);
 
-    /* 只动了确认标记：不能笼统说"修改内容"（用系统带出的字段节点 —— 人工写下的本来就是已确认的） */
     const fieldId = Object.values(session.document.nodes).find((node) => node.type === 'field')!.id as NodeId;
     session.confirmNodes({ nodeIds: [fieldId] }, HUMAN);
     const confirmed = summarizeRevision(session.auditLog().at(-1)!);
     assertEqual(confirmed, '标记为已确认', `确认也是留痕，要说清是"确认"而不是"改内容"，实际：${confirmed}`);
 
-    /* 什么都没改的那一笔（重复保存）：别假装"修改了内容" */
     assertEqual(
       summarizeRevision({ rev: 99, at: '2026-10-19T00:00:00.000Z', actorId: 'DR_A', op: 'update', targetId: 'n_1' }),
       '无内容变化（仅推进版本）',
       '空 patch 的 update 必须如实说"没改"，不能说"修改内容"',
     );
 
-    /* 状态迁移：各说各的话 */
     session.submitForReview({ note: '请主任审核' }, HUMAN);
     assertEqual(summarizeRevision(session.auditLog().at(-1)!), '提交审核：请主任审核', '送审要带上说明');
     session.voidDoc({ reason: '患者未到诊' }, HUMAN);
     assertEqual(summarizeRevision(session.auditLog().at(-1)!), '作废：患者未到诊', '作废要带上理由');
 
-    /* 长文本：截断成"一小部分"，但不编造 */
     const long = '无咯血、盗汗，无胸痛、呼吸困难，既往高血压病史十年，长期口服氨氯地平控制良好';
     const longSession = open();
     longSession.session.insertText({ nodeId: longSession.textId, text: long }, HUMAN);
@@ -230,7 +208,6 @@ async function main(): Promise<void> {
     assert(!clipped.includes('控制良好'), '截断就是真截断（别把尾巴也塞进来）');
     assert(clipped.length <= 24, `截断后仍要短，实际 ${clipped.length}：${clipped}`);
 
-    /* 回滚的两条路："回到第 N 版"与"撤销第 N 条"不能混成一句话 */
     assertEqual(
       summarizeRevision({ rev: 98, at: '2026-10-19T00:00:00.000Z', actorId: 'DR_A', op: 'revert', targetId: 'n_1', revertedTo: { toRev: 3, revertedRevs: [4, 5] } }),
       '回到第 3 版',
@@ -245,7 +222,6 @@ async function main(): Promise<void> {
 
   await test('V10 回滚只管自己写的：区间里有别人的内容就不许一键抹掉', () => {
     const { session, textId } = open();
-    /* A 写一笔，B 再写一笔 —— 此刻"A 回到自己那一版"要跨过 B 的内容 */
     session.insertText({ nodeId: textId, text: '·A 写的' }, HUMAN);
     const afterA = session.docRev;
     session.insertText({ nodeId: textId, text: '·B 写的' }, OTHER);
@@ -257,11 +233,9 @@ async function main(): Promise<void> {
     );
     assertEqual(session.docRev, afterA + 1, '被拒的回滚不得留下痕迹');
 
-    /* B 自己可以回到 B 写之前；A 也可以回到"包含 B 内容的那一版"（不跨过 B） */
     assertEqual(codeOf(() => session.revertTo({ rev: afterA + 1 - 1 }, OTHER)), 'OK', '本人可以退回自己的内容');
     assertEqual(codeOf(() => session.revertTo({ rev: afterA }, HUMAN)), WRITE_ERRORS.E_REVERT_FOREIGN_WRITE, '再试仍是拒');
 
-    /* 只有状态类留痕（送审 / 退回）不挡路：它们不改内容，谁做的都无所谓 */
     const clean = open();
     clean.session.insertText({ nodeId: clean.textId, text: '·正文' }, HUMAN);
     clean.session.submitForReview({}, OTHER);

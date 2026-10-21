@@ -1,6 +1,3 @@
-// 系统策略配置的落库层：鉴权模式、会话寿命、限流阈值、审计锚定节奏，以及锚点签名种子。
-// - 抛错：配过但解不开（口令换过 / 那一行被改过）→ 拒绝按"没配过"继续。
-
 import { CONFIG_KEY_PREFIX, type ConfigKv } from './config-kv.ts';
 
 export const SYSTEM_CONFIG_KEY = `${CONFIG_KEY_PREFIX}system`;
@@ -12,21 +9,13 @@ export const DEMO_ANCHOR_SEED = 'l0-admin-audit-anchor-demo';
 export type AuthMode = 'open' | 'strict';
 
 export interface RateConfig {
-  /** 同一身份的登录尝试（每 5 分钟） */
   loginPerActor: number;
-  /** 同一来源的登录尝试（每 5 分钟） */
   loginPerSource: number;
-  /** AI 调用（每分钟） */
   aiPerMinute: number;
-  /** 导出（每分钟） */
   exportPerMinute: number;
 }
 
 export interface SystemConfig {
-  /**
-   * `open`：医生端写操作不要求会话（身份取病历创建人）—— 只在服务只监听回环地址时可接受；
-   * `strict`：写操作要求会话并按角色判定。生产必须 `strict`。
-    */
   authMode: AuthMode;
   /** 会话寿命（分钟）：默认 8 小时，覆盖一个班次 */
   sessionTtlMinutes: number;
@@ -56,7 +45,6 @@ export class SystemConfigError extends Error {
 
 interface StoredSystemConfig extends SystemConfig {
   version: 1;
-  /** 是否有自定义种子被加密落盘（不存种子本身，种子在 `config.system.anchorSeed`）  */
   anchorSeedStored: boolean;
   updatedAt: string;
   updatedBy: string;
@@ -67,7 +55,6 @@ export interface LoadedSystemConfig {
   /** 已解出的锚点种子（内存中）。不得进入任何返回值、日志或留痕  */
   anchorSeed: string;
   source: 'store' | 'default';
-  /** 种子是否被显式配过（界面只显示这个，不显示值） */
   anchorSeedConfigured: boolean;
   updatedAt?: string;
   updatedBy?: string;
@@ -162,16 +149,9 @@ export function loadSystemConfig(kv: ConfigKv): LoadedSystemConfig {
 
 export interface SaveSystemConfigResult {
   loaded: LoadedSystemConfig;
-  /** 种子发生了什么（只记动作，不记值）  */
   anchorSeedAction: 'set' | 'cleared' | 'unchanged';
 }
 
-/**
- * 保存策略并返回生效后的配置。
- *
- * 顺序与 `saveModelConfig` 一致：先写非敏感配置，再动种子那一行 ——
- * 若种子那一步失败，至少不会出现"种子换了但策略还是旧的"这种半截状态。
-  */
 export function saveSystemConfig(
   kv: ConfigKv,
   rawInput: Partial<SystemConfig> & { anchorSeed?: string | null },
@@ -183,7 +163,6 @@ export function saveSystemConfig(
     try {
       return loadSystemConfig(kv);
     } catch {
-      /* 旧配置读坏了不该阻止修复：配置界面正是用来修它的地方 */
       return null;
     }
   })();
@@ -209,13 +188,11 @@ export function saveSystemConfig(
     updatedBy: by,
   };
   kv.write(SYSTEM_CONFIG_KEY, stored);
-  /* 清除要真删那一行：留着密文而报"已清除"，等于"我清掉了"这句话是假的（同 `saveModelConfig`）  */
   if (anchorSeedAction === 'cleared') kv.remove(SYSTEM_ANCHOR_SEED_KEY);
 
   return { loaded: loadSystemConfig(kv), anchorSeedAction };
 }
 
-/** 给界面的策略视图：种子只报"有没有自定义"，值永不回显  */
 export function describeSystemConfig(loaded: LoadedSystemConfig): Record<string, unknown> {
   return {
     authMode: loaded.config.authMode,

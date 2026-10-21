@@ -1,5 +1,3 @@
-// ECDSA-SM3 交叉验证桥 —— 不是产品签名算法，只为建立一条能与 OpenSSL 对上的通道。
-
 import { sm3, toHex, utf8 } from './sm3.ts';
 import {
   SM2_GX,
@@ -21,7 +19,6 @@ export const ECDSA_CROSS_ALGORITHM = 'ECDSA-SM3';
 
 const BASE: Sm2Point = { x: SM2_GX, y: SM2_GY };
 
-/** 与 SM2 侧同思路的确定性 k（保证交叉验证与产物比对都能复现） */
 function ecdsaDeterministicK(privateKey: bigint, e: bigint, attempt: number): bigint {
   const seed = new Uint8Array(32 * 3);
   const d = intToBytes32(privateKey);
@@ -34,7 +31,6 @@ function ecdsaDeterministicK(privateKey: bigint, e: bigint, attempt: number): bi
   return (BigInt(`0x${toHex(digest)}`) % (SM2_N - 1n)) + 1n;
 }
 
-/** ECDSA-SM3 签名（DER 由调用方编码，与 OpenSSL 输出格式一致；k 默认确定性派生以便产物可复现） */
 export function ecdsaSm3Sign(message: Uint8Array, privateKey: bigint, options: { k?: bigint; deterministic?: boolean } = {}): Sm2Signature {
   const e = BigInt(`0x${toHex(sm3(message))}`);
   const d = modOf(privateKey, SM2_N);

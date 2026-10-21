@@ -1,5 +1,3 @@
-// 系统取数（LIS/HIS 搬运）自测。
-
 import { TestSuite, assert, assertEqual, codeOfAsync } from '../testing/harness.ts';
 import { buildTrend } from '../model/trend.ts';
 import { WriteSession } from './session.ts';
@@ -42,7 +40,6 @@ function fixture(): DocumentModel {
     nodes: {
       n_root: { id: 'n_root', type: 'document', parentId: null, order: 0, rev: 1, provenance: prov('system', 'seed') },
       n_p: { id: 'n_p', type: 'paragraph', parentId: 'n_root', order: 10, rev: 1, provenance: prov('human', 'DR_WANG') },
-      /* 空字段：等系统带入 */
       n_wbc: {
         id: 'n_wbc',
         type: 'field',
@@ -147,13 +144,11 @@ async function main(): Promise<void> {
       'E_KEY_CONTENT_UNCONFIRMED',
       '带进来的关键内容仍需显式确认，且声明也不能豁免',
     );
-    /* 人工确认后可签章 —— 证明这条通道不会把文档锁死 */
     session.confirmNode({ nodeId: 'n_wbc' }, HUMAN);
     assertEqual((await session.sign({}, HUMAN)).ok, true, '确认后应可签章');
   });
 
   await test('B7 闭环：LIS 一次推入 3 天 WBC（带采样时间与参考范围）→ 趋势自动成形', async () => {
-    /* 造 3 个空的白细胞字段，模拟 3 天的检验（每个采样值一个节点，独立留痕） */
     const base = fixture();
     const nodes = base.nodes as Record<string, DocNode>;
     for (const day of ['06', '07', '08']) {
@@ -180,7 +175,6 @@ async function main(): Promise<void> {
     assertEqual(result.applied.length, 3, '三天数据应一次带入');
     assertEqual(session.auditLog().slice(-1)[0]?.op, 'external', '一次带入只产生一条留痕（同一次触发）');
 
-    /* 关键：不需要任何额外步骤，趋势自动成形 —— 这就是闭环  */
     const trend = buildTrend(session.document, 'LIS.WBC');
     assert(!!trend, '带入后应自动形成趋势');
     assertEqual(trend!.points.map((point) => point.valueText), ['9.8', '15.2', '18.4'], '趋势应按采样时间升序');

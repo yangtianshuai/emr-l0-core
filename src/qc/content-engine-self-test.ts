@@ -18,10 +18,6 @@ import {
   type NoForbiddenFields,
 } from './content-engine.ts';
 
-/*
- * C1 的编译期断言：一旦有人给产出类型加上 suggestion / patch 之类的字段，
- * 这两行立刻编译失败。运行时断言只是让它在测试输出里也留个痕。
-  */
 const findingHasNoForbidden: NoForbiddenFields<ContentQcFinding> = true;
 const responseHasNoForbidden: NoForbiddenFields<ContentQcResponse> = true;
 
@@ -56,7 +52,6 @@ function sampleRequest(overrides: Partial<ContentQcRequest> = {}): ContentQcRequ
   });
 }
 
-/** 一个合法的最小产出（各用例在此之上做破坏） */
 function baseResponse(): Record<string, unknown> {
   return {
     api: CONTENT_ENGINE_API,
@@ -137,14 +132,12 @@ async function main(): Promise<void> {
     for (const field of FORBIDDEN_CONTENT_FIELDS) {
       assert(result.message.includes(field), `消息里要给出禁用清单（实现方可照着改），缺：${field}`);
     }
-    /* 嵌套（藏在一层对象里）也要被抓到 —— 未知字段本来就会拒，但这条要给专门的理由  */
     const firstFinding = (baseResponse().findings as Array<Record<string, unknown>>)[0]!;
     assertEqual(
       codeOf({ ...baseResponse(), findings: [{ ...firstFinding, meta: { patch: [] } }] }),
       CONTENT_ENGINE_ERRORS.E_QC_ENGINE_FORBIDDEN_FIELD,
       '嵌套的禁用字段同样要拒',
     );
-    /* 换个名字塞进来也拦（patch / ops / newText 都在清单里） */
     for (const field of ['patch', 'ops', 'newText', 'diff'] as const) {
       assertEqual(codeOf(withFinding({ [field]: 'x' })), CONTENT_ENGINE_ERRORS.E_QC_ENGINE_FORBIDDEN_FIELD, `${field} 必须被拒`);
     }
@@ -189,10 +182,6 @@ async function main(): Promise<void> {
     assertEqual(result.findings.length, 0, '引文对不上的必须丢弃');
     assertEqual(result.rejected[0]?.code, CONTENT_ENGINE_ERRORS.E_QC_FINDING_BAD_CITATION, '理由应是"引文找不到"');
     assert(String(result.rejected[0]?.message).includes('找不到'), '消息要说明是"在文本里找不到"');
-    /* 逐字匹配是硬要求：改一个标点就不算同一句（宁可严，也不能放过被改写过的"引文"）。
-       节点原文是「考虑肺部感染，需与肺结核鉴别。」—— 所以：
-         · 「需与肺结核鉴别。」逐字存在 → 应接受；
-         · 「需与肺结核鉴別」（换一个形近字）不存在 → 应丢弃。  */
     const quoted = validateEngineOutput(withFinding({ quote: '需与肺结核鉴别。' }), sampleRequest());
     assertEqual(quoted.ok && quoted.findings.length, 1, '逐字存在的引文应被接受');
     const rewritten = validateEngineOutput(withFinding({ quote: '需与肺结核鉴別' }), sampleRequest());
@@ -241,7 +230,6 @@ async function main(): Promise<void> {
     response.unevaluated = [];
     const result = validateEngineOutput(response, sampleRequest());
     assertEqual(result.ok && result.silentRules, [RULE_IDS.strict], '沉默的规则要点名 —— 它既不是"干净"也不是"判不了"');
-    /* 报了 unevaluated 就不算沉默（走既有的未判定通道） */
     const reported = baseResponse();
     reported.judged = [RULE_IDS.ok];
     reported.unevaluated = [{ ruleId: RULE_IDS.strict, reason: '本次未提供该规则所需上下文' }];
@@ -287,8 +275,6 @@ async function main(): Promise<void> {
   await test('C14 未接入的引擎：**全部规则报未判定**，而不是"没有发现"', async () => {
     const engine = createUnavailableEngine('内涵类质控引擎未接入');
     const request = sampleRequest();
-    /* `run` 的返回类型是 `unknown`（传输层交回未经校验的产出，校验在调用方）——
-       所以这里显式声明"我要按契约形状读它"，而不是让类型系统替我假定它是对的。  */
     const produced = (await engine.run(request)) as ContentQcResponse;
     assertEqual(produced.findings, [], '未接入不产出任何发现（不编数据）');
     assertEqual(produced.judged, [], '也没判过任何规则');
@@ -321,9 +307,6 @@ async function main(): Promise<void> {
   });
 
   await test('C16 规则清单来自业务方：逐条校验（坏的那条报出来，其余仍可用）；空清单合法', () => {
-    /* 清单是临床标准，本程序一条都不发明 —— 所以它只能从外面来，
-       而外面来的东西就要逐条校验。一条写错不该让其余都不能用，
-       但错的那条必须报出来：静默丢弃等于替它美化。  */
     const parsed = parseContentRules([
       { ruleId: 'R-C-01', title: '鉴别诊断依据', severity: 'info', requirement: '是否写明了鉴别诊断的依据' },
       { ruleId: 'R-C-01', title: '重复号', severity: 'info', requirement: 'x' },

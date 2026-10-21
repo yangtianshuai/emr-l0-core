@@ -1,5 +1,3 @@
-// 规则包：把「声明式描述符」编译成「可运行的 QcRule」。
-
 import type { AnnotationSeverity } from '../core/annotations.ts';
 import type { JsonValue } from '../model/types.ts';
 import type { PackItemBase, PackRegistry } from '../knowledge/pack.ts';
@@ -37,19 +35,13 @@ export type RulePackErrorCode =
   | 'E_RULE_PREDICATE_UNKNOWN'
   | 'E_RULE_PARAM_INVALID'
   | 'E_RULE_DETAIL_INVALID'
-  /** 条目级编辑（`rule-edit.ts`）：包里没有这一条 */
   | 'E_RULE_ITEM_NOT_FOUND'
   | 'E_RULE_SEVERITY_EDIT_LIMIT'
-  /** 引用了条件库里没有的条件（或调用方没把条件库给它）：悬空引用在装载期就拒 */
   | 'E_RULE_CONDITION_UNKNOWN'
-  /** 具名条件本身不合法（编码形状 / 名称 / 条件树） */
   | 'E_RULE_CONDITION_INVALID'
-  /** `params.conditionId` 与 `params.when` 同时给或都不给（两选一，不能都填） */
   | 'E_RULE_CONDITION_CHOICE'
-  /** 条目级编辑：包里没有这一条条件 */
   | 'E_RULE_CONDITION_NOT_FOUND'
   | 'E_RULE_CONDITION_IN_USE'
-  /** 引用判定方式时填的实参不合法：未知参数名 / 必填缺失 / 类型或取值域不符 */
   | 'E_RULE_CONDITION_PARAM_INVALID'
   | 'E_RULE_CONDITION_PLACEHOLDER';
 
@@ -86,21 +78,14 @@ function requiredText(source: Record<string, unknown>, key: string, label: strin
   return value;
 }
 
-/* ------------------------------- 包内的两类条目 -------------------------------
-   一个规则包里有两类条目：规则（`QcRuleDescriptor`）与具名条件
-   （`QcConditionDefinition`）。后者靠 `itemType: 'condition'` 认出来 ——
-   规则条目不写这个字段，所以交付方那些老包原样兼容，一个字都不用改。  */
-
 export function isConditionItem(item: PackItemBase): item is QcConditionDefinition {
   return (item as { itemType?: unknown }).itemType === 'condition';
 }
 
-/** 包里的具名条件（原样，未校验）：给"目录"这类只展示、不判定的地方用  */
 export function conditionItemsOf(pack: QcRulePack): QcConditionDefinition[] {
   return pack.items.filter(isConditionItem);
 }
 
-/** 包里的规则条目（原样）：一个包允许只有条件、没有规则（条件可以先建好，规则慢慢写） */
 export function ruleItemsOf(pack: QcRulePack): QcRuleDescriptor[] {
   return pack.items.filter((item) => !isConditionItem(item)) as QcRuleDescriptor[];
 }
@@ -109,13 +94,10 @@ export interface ResolvedCondition {
   itemId: string;
   name: string;
   description?: string;
-  /** 参数规格（缺省 = 不带参数） */
   params: QcConditionParamSpec[];
-  /** 条件树。可能带占位符：它在引用处才被代入实参  */
   when: QcConditionNode;
 }
 
-/** 解析一条具名条件（不合法即抛）。装载期、写库期、编译期走的是同一段 */
 export function resolveCondition(label: string, item: QcConditionDefinition): ResolvedCondition {
   if (typeof item.itemId !== 'string' || !QC_CONDITION_ID_PATTERN.test(item.itemId)) {
     throw new RulePackError(
@@ -139,8 +121,6 @@ export function resolveCondition(label: string, item: QcConditionDefinition): Re
     );
   }
 
-  /* 恒允许占位符：占位符是否可用，由它与 `params` 的对照决定（下面两条），
-     而不是由"有没有声明参数"决定 —— 后者会让一个拼错的占位符被当成普通字面量收下  */
   const when = normalizeCondition(item.when, 0, true);
   if (!when) {
     throw new RulePackError(
@@ -191,11 +171,6 @@ function putCondition(out: Map<string, ResolvedCondition>, label: string, item: 
   out.set(resolved.itemId, resolved);
 }
 
-/**
- * 判定方式库（库级资产）：编码 → 已解析的判定方式。
- *
- * 它是"库里那一份"的形态 —— 不属于任何包。校验与编译都拿它当引用解析的来源。
-  */
 export type ConditionLibrary = Map<string, ResolvedCondition>;
 
 export function resolveConditionLibrary(
@@ -218,10 +193,6 @@ export function resolvedConditionsOf(pack: QcRulePack, library: ConditionLibrary
   return out;
 }
 
-/**
- * 校验并解析一条规则描述符。编译与装载期校验共用这一段 ——
- * 两处各写一遍迟早会漂移，而漂移的表现是"装载时说没问题、扫描时却少了一条"。
-  */
 function resolveRule(
   packId: string,
   raw: unknown,
@@ -258,9 +229,6 @@ function resolveRule(
   }
   const predicate = QC_PREDICATES[kind as QcPredicateKind];
 
-  /* 「引用条件库」与「就地拼一条」两选一。这里先单独拦一次"两格都填"：
-     `normalizeParams` 只能回一个 `null`，报出来的是"参数不合法"那句通用话，
-     而使用者真正需要的是一句"你不能两格都填"。  */
   const rawParams = predicateRef.params === undefined ? {} : asObject(predicateRef.params);
   if (rawParams && rawParams.conditionId !== undefined && rawParams.when !== undefined) {
     throw new RulePackError(
@@ -361,19 +329,6 @@ function withResolvedCondition(
   return { ...params, when: expanded as unknown as JsonValue };
 }
 
-/**
- * 一条规则的"判什么"的人话回读（不是自定义条件 → `null`）。
- *
- * 放在内核里、而且只有这一处：界面上那一列（规则表「参数」）与将来任何一处
- * 要显示"这条规则按什么判"的地方，都读它。界面另编一句的后果是两家说的话
- * 慢慢不一致，而两边看上去都对。
- *
- * 引用具名条件时把条件名一起读出来：光显示编码等于让人去后台再查一次，
- * 而那句话本身就该是自解释的（"引用条件「C-CUSTOM-1 主诉缺少时间」：…"）。
- *
- * 读不出来时不猜：回 `null`，界面上退回显示参数原文，而不是显示一句编出来的话
- * （库里存的是校验过的内容，但"包被手改过"这件事类型层面挡不住）。
-  */
 export function conditionSummaryOf(
   descriptor: QcRuleDescriptor,
   conditions: Map<string, ResolvedCondition> | null = null,
@@ -386,8 +341,6 @@ export function conditionSummaryOf(
   if (typeof conditionId === 'string') {
     const found = conditions?.get(conditionId) ?? null;
     if (!found) return `引用条件「${conditionId}」：库里没有这一条（它被删掉了，或这次没把判定方式库带上）`;
-    /* 实参一起读进去：界面上要看的是"这条规则实际按什么判"，
-       而不是"这条判定方式大致判什么"（后者在有参数时等于少说了一半）  */
     const args = source.args !== undefined && source.args !== null && typeof source.args === 'object' && !Array.isArray(source.args)
       ? (source.args as Record<string, JsonValue>)
       : null;
@@ -411,11 +364,8 @@ export function compileRuleDescriptor(
     check(node, ctx) {
       const result = resolved.predicate.check(node, resolved.params, ctx);
       if (!result) return null;
-      /* "判不了"原样往上传（只补规则号）：它必须走到引擎的 `unevaluated` 通道，
-         不能被当成"命中"或"没命中" —— 两者都会让"没判"看起来像"查过了"。 */
       if ('uncertain' in result) return { uncertain: `规则 ${resolved.itemId}：${result.uncertain}` };
       return {
-        /* 规则号在这里注入：包给的只是"判定依据本身"，身份由引擎补上 */
         detail: `规则 ${resolved.itemId}：${resolved.detail ?? result.detail}`,
         suggestion: resolved.suggestion ?? result.suggestion,
         ...(result.quote !== undefined ? { quote: result.quote } : {}),
@@ -424,22 +374,12 @@ export function compileRuleDescriptor(
   };
 }
 
-/**
- * 编译整包（按包内顺序，保证命中顺序稳定）。
- *
- * 只编译规则那一条条：具名条件不是规则，编译它没有意义 ——
- * 早先这里直接 `pack.items.map(...)`，加了条件条目之后那会把条件当成规则去要
- * `title / severity / predicate`，报错还会说成"这条规则不合法"。条件的问题
- * 必须报在条件上（`resolvedConditionsOf`）。
-  */
 export function compileRulePack(pack: QcRulePack, library: ConditionLibrary | null = null): QcRule[] {
   const conditions = resolvedConditionsOf(pack, library);
   return ruleItemsOf(pack).map((descriptor) => compileRuleDescriptor(pack.packId, descriptor, conditions));
 }
 
-/** 仅校验不编译：供 `PackRegistry.load` 的 `validate` 钩子使用（装包那一刻就报错） */
 export function validateRulePack(pack: QcRulePack, library: ConditionLibrary | null = null): void {
-  /* 先解析判定方式：它不合法时受伤的是引用它的规则，所以报错要报在它那一侧  */
   const conditions = resolvedConditionsOf(pack, library);
   for (const item of pack.items) {
     if (isConditionItem(item)) continue;
@@ -455,16 +395,6 @@ export function assertRuleDescriptor(
   resolveRule(packId, raw, conditions);
 }
 
-/**
- * 从注册表取启用中的规则，编译成可运行集合。
- *
- * 只取 `kind === 'rule'` 的包：模板包与术语包即使装载了也不该进入质控引擎 ——
- * 它们各有各的引擎（尚未实现），混进来会得到"看起来跑了、其实跑的不是这套规则"。
- *
- * 逐个包走（而不是 `activeItemsOf('rule')` 拉平）：包里可能自带私有判定方式，
- * 编译一条规则必须拿到"它自己那个包能引用到的那份表"（库 + 本包）——
- * 拉平之后包的边界就丢了。顺序照 packId 排序，与 `activeItemsOf` 同口径（命中顺序必须稳定）。
-  */
 export function rulesFromRegistry(registry: PackRegistry, library: ConditionLibrary | null = null): QcRule[] {
   const out: QcRule[] = [];
   const summaries = [...registry.list('rule')].sort((left, right) => left.packId.localeCompare(right.packId));

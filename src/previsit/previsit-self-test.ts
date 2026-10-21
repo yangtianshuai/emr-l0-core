@@ -1,5 +1,3 @@
-// 预问诊自测（P1~P6）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
   MAX_ITEMS,
@@ -18,7 +16,6 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 
 const NOW = '2026-10-17T02:00:00.000Z';
 
-/** 造一份合法的入参（各用例按需改一处） */
 function bodyOf(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     patientId: 'P_DEMO_001',
@@ -49,7 +46,6 @@ async function main(): Promise<void> {
     assertEqual(record.items[0]?.reportedAt, NOW, '没给采集时刻就取到达时刻');
     assertEqual(record.submittedAt, NOW, '整份表单的到达时刻');
 
-    /* 来源缺省：写一个明确的占位名，而不是空串 —— 空串在界面上会被读成"来源丢失" */
     const withoutSource = parsePrevisitIntake(bodyOf({ source: undefined }), NOW);
     assert(withoutSource.ok === true, '来源可以不填');
     assertEqual((withoutSource as { ok: true; record: PrevisitRecord }).record.source, 'previsit-api', '缺省来源要写明');
@@ -71,7 +67,6 @@ async function main(): Promise<void> {
       assertEqual(parsed.ok, false, `应被拒：${expected}`);
       assertEqual((parsed as { ok: false; code: string }).code, expected, `拒法码应为 ${expected}`);
     }
-    /* 关键的一条：`diagnosis` 被拒，不是"忽略"。预问诊 collects 的是自述，不是诊断 */
     assertEqual(PREVISIT_KEYS.includes('diagnosis' as never), false, '诊断不在预问诊字段里');
   });
 
@@ -100,7 +95,6 @@ async function main(): Promise<void> {
     assertEqual(present?.nodeId, null, '章节在但还没有文本节点 → null');
     assertEqual(present?.sectionCode, 'presentIllness', '缺落点时仍要说清缺的是哪一章');
 
-    /* 文书里根本没有这一章：同样是 null，但绝不能改成"落到主诉" */
     const onlyChief = planPrevisitDrafts(record, ['presentIllness'], [{ code: 'chiefComplaint', nodeId: 'n_s1_p1_t' }]);
     assertEqual(onlyChief.length, 1, '只产出勾选的那一条');
     assertEqual(onlyChief[0]?.nodeId, null, '不能替它挑一个"看着差不多"的章节');

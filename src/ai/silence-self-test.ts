@@ -1,5 +1,3 @@
-// 沉默的可解释性自测（S1~S12）。
-
 import { DEFAULT_AI_MODEL_CONFIG } from './model-config.ts';
 import { createOfflineAdapter } from './offline-adapter.ts';
 import type { AiContextAudit, AiContextDrop, AiContextItem, AiContextPackage } from '../core/ai-context.ts';
@@ -52,12 +50,6 @@ function request(allowedNodeIds: string[], maxItems = 5): AiSuggestRequest {
   return { context: context(allowedNodeIds.map((id) => targetItem(id, '现病史：'))), mode: 'complete', allowedNodeIds, maxItems };
 }
 
-/**
- * 请求点了名、但上下文里看不见的目标（真实场景：空段被跳过、超预算被裁掉、节点已删除）。
- *
- * 这几种沉默与"产出方没写"不是一回事：模型从来不知道有过这一段，
- * 所以它不可能自述 —— 只有内核能说。
-  */
 function requestWithDrops(input: {
   allowedNodeIds: string[];
   requestedNodeIds: string[];
@@ -168,7 +160,6 @@ async function main(): Promise<void> {
   });
 
   await test('S7 已达产出上限时，补记要指出这个可能：它比"未说明"更有用', () => {
-    /* maxItems=1 且产出正好 1 条：剩下的目标不是"模型没说"，而是"根本没轮到" */
     const report = resolveSilenceReport({
       request: request(['n_1', 'n_2'], 1),
       items: [draft('n_1')],
@@ -195,7 +186,6 @@ async function main(): Promise<void> {
     const report = resolveSilenceReport({
       request: request(['n_1', 'n_2', 'n_3']),
       items: [],
-      /* 自述顺序与范围顺序刻意相反 */
       declared: [
         { nodeId: 'n_3', code: 'other', reason: '丙' },
         { nodeId: 'n_1', code: 'other', reason: '甲' },
@@ -206,7 +196,6 @@ async function main(): Promise<void> {
   });
 
   await test('S10 自述整体不成形时不抛错：退化成"未说明"是安全方向', () => {
-    /* 它不是"产出坏了"，只是"没给理由"。整份拒掉会让范围里其它目标一起失去解释 */
     const notArray = resolveSilenceReport({ request: request(['n_1']), items: [], declared: '不是数组' });
     assertEqual(notArray.skipped[0]?.code, 'unexplained', '应退化为未说明');
     assertEqual(notArray.rejected.length, 0, '整体不成形时不逐条报错（没有"条目"可报）');

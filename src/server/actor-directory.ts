@@ -1,5 +1,3 @@
-// 身份目录（凭证 → actor）：把"身份声明"变成"服务端事实"。
-
 import { sm3Hex } from '../crypto/sm3.ts';
 
 export type ActorKind = 'human' | 'ai' | 'system';
@@ -7,7 +5,6 @@ export type ActorKind = 'human' | 'ai' | 'system';
 export interface VerifiedActor {
   id: string;
   kind: ActorKind;
-  /** 展示用名称（如"门诊医生工作站"），不进正文、不进机读块 */
   label?: string;
 }
 
@@ -24,14 +21,12 @@ export function tokenFingerprint(token: string): string {
 export class ActorDirectory {
   private readonly byFingerprint = new Map<string, VerifiedActor>();
 
-  /** 注册凭证。同一凭证重复注册视为覆盖（便于轮换） */
   register(token: string, actor: VerifiedActor): void {
     if (token.trim() === '') throw new Error('凭证不得为空');
     if (actor.id.trim() === '') throw new Error('actor.id 不得为空');
     this.byFingerprint.set(tokenFingerprint(token), { ...actor });
   }
 
-  /** 撤销凭证：撤销即失效（返回是否确实存在过） */
   revoke(token: string): boolean {
     return this.byFingerprint.delete(tokenFingerprint(token));
   }
@@ -46,7 +41,6 @@ export class ActorDirectory {
     return this.byFingerprint.size;
   }
 
-  /** 展示清单：不含凭证本身，只含指纹  */
   list(): ActorRecord[] {
     return [...this.byFingerprint.entries()].map(([fingerprint, actor]) => ({ ...actor, tokenFingerprint: fingerprint }));
   }

@@ -1,13 +1,7 @@
-// SM3 密码杂凑算法（GB/T 32905-2016），纯 TS 实现。
-//
-// 警告：自研实现未经第三方审计，仅用于原型与交叉验证，不得直接用于生产签名。
-// 生产须换成经认证的密码模块，替换点在 CryptoProvider 接口。
-
 const IV = [0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d, 0xb0fb0e4e];
 
 function rotl(x: number, n: number): number {
   const s = n % 32;
-  // n 为 0 时 (x >>> 32) 在 JS 里等于 (x >>> 0)，会得 0
   return s === 0 ? x >>> 0 : ((x << s) | (x >>> (32 - s))) >>> 0;
 }
 

@@ -1,5 +1,3 @@
-// T26 验收自测：版式段落重建（几何启发式）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { WriteSession } from '../core/session.ts';
 import { buildSyntheticDoc } from '../testing/synthetic.ts';
@@ -26,7 +24,6 @@ function line(text: string, x: number, y: number, size = SIZE, page = 0): Layout
   return { page, text, x, y, size };
 }
 
-/** 构造"一段 N 行"的几何数据（首行缩进，续行回左边界） */
 function paragraphLines(texts: string[], startY: number, options: { indent?: number } = {}): { lines: LayoutLine[]; endY: number } {
   const indent = options.indent ?? INDENT;
   const lines: LayoutLine[] = [];
@@ -106,7 +103,6 @@ async function main(): Promise<void> {
   });
 
   await test('B4 两条独立线索一致 → 置信度 high（间距 + 缩进同时满足）', async () => {
-    /* 每段两行才有"段左边界"（续行回左边界）；单行段没有左边界，缩进线索本就无从谈起 */
     const first = paragraphLines(['第一段首行', '第一段续行'], 100);
     const second = paragraphLines(['第二段首行', '第二段续行'], first.endY + GAP);
     const result = rebuildParagraphs([...first.lines, ...second.lines]);
@@ -120,9 +116,6 @@ async function main(): Promise<void> {
   });
 
   await test('B5 回归：行距与段间距次数相同时，不得因"中位数取到段间距"而漏切', async () => {
-    /* 实测缺陷：gaps = [22,16,22,16,22,16] 的中位数是 22，阈值被抬到 22×1.35≈29.7，
-       真正的段间距 22 反而不触发 → 整页被合并成一段。
-       正确做法：按 0.5pt 分桶统计频次、并列取较小值来估计基准行距。 */
     const lines: LayoutLine[] = [];
     let y = 100;
     for (let index = 0; index < 3; index += 1) {
@@ -136,10 +129,8 @@ async function main(): Promise<void> {
   });
 
   await test('B6 回归：段左边界取段内最左位置（首行缩进不能破坏后续缩进线索）', async () => {
-    /* 实测缺陷：若以"段首行（缩进的 x）"为界，续行变成负缩进，
-       下一段的首行相对它反而没有缩进，缩进线索彻底失效。 */
     const first = paragraphLines(['第一段首行', '第一段续行'], 100);
-    const second = paragraphLines(['第二段首行', '第二段续行'], first.endY); // 不给段前间距，只靠缩进
+    const second = paragraphLines(['第二段首行', '第二段续行'], first.endY);
     const result = rebuildParagraphs([...first.lines, ...second.lines]);
     assertEqual(result.paragraphs.length, 2, '仅靠缩进也必须能切段');
     assertEqual(result.paragraphs[0]!.left, MARGIN, '第一段左边界应为续行的 x');
@@ -233,10 +224,7 @@ async function main(): Promise<void> {
       imported.layout.paragraphs.filter((paragraph) => paragraph.kind === 'body').every((paragraph) => paragraph.confidence !== 'low'),
       '正文段应至少有一条几何线索（置信度不为 low）',
     );
-    /* 字段文本是内联在所属段落里导出的（见 ofd.ts 的 renderLines），
-       所以段落总数 = 标题数 + 正文段数，而不是再加字段行数。  */
     assertEqual(imported.layout.stats.paragraphs, titles.length + fixture.texts.length, '段落总数应等于 标题数 + 正文段数');
-    /* 但要确认内联的字段文本没有在重建中丢失 */
     const joined = imported.layout.paragraphs.map((paragraph) => paragraph.text.replace(/\s+/g, '')).join('');
     const fieldTexts = Object.values(fixture.doc.nodes as Record<string, DocNode>)
       .filter((node) => node.type === 'field')
@@ -262,7 +250,6 @@ async function main(): Promise<void> {
     assertEqual(texts.length, paragraphs.length, '每个段落应配一个 text 节点');
     const withEvidence = paragraphs.filter((node) => (node.provenance?.evidence ?? []).some((item) => (item.field ?? '').includes('段落重建')));
     assertEqual(withEvidence.length, paragraphs.length, '每个段落节点都应带"段落重建依据"来源链（事后可审计）');
-    /* "未确认"标在内容节点上（paragraph 是结构节点，本身不带确认标记）  */
     assertEqual(
       texts.every((node) => node.humanConfirmed === false && node.provenance?.origin === 'imported'),
       true,
@@ -273,7 +260,6 @@ async function main(): Promise<void> {
   process.exit(suite.report());
 }
 
-/** 构造段落文本各不相同的文档（文本相同会让"每段落在一段里"的断言失去意义） */
 function distinctFixture(): { doc: DocumentModel; texts: string[]; sectionCount: number; fieldCount: number } {
   const { doc } = buildSyntheticDoc({ sections: 2, paragraphsPerSection: 3, fieldsPerParagraph: 1 });
   const texts: string[] = [];
@@ -294,7 +280,6 @@ function distinctFixture(): { doc: DocumentModel; texts: string[]; sectionCount:
   };
 }
 
-/** 导出 → 导入（走真实容器与真实解析） */
 async function exportedImport(doc: DocumentModel): Promise<ReturnType<typeof importOfd>> {
   const session = WriteSession.open(doc);
   session.exportMachineReadable();

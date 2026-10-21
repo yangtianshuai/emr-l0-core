@@ -1,6 +1,3 @@
-// 口令轮换自测（`storage/rekey.ts`）。
-// RK2 全量往返：三处密封行（文档 / 旁挂 / 配置）换完新口令都能读回同样的内容，
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { FIXTURE_ITERATIONS, openConfigFixture, type ConfigFixture } from '../testing/config-fixture.ts';
 import { MIGRATIONS, STORAGE_SCHEMA_VERSION } from './schema.ts';
@@ -20,12 +17,10 @@ const OLD_KEY = 'rekey-old-passphrase';
 const NEW_KEY = 'rekey-new-passphrase';
 const AT = '2026-10-14T00:00:00.000Z';
 
-/** 另开一个连接（夹具的 WorkStore 连接是 private 的，而且这里要看的是库里的行本身）  */
 function connect(fixture: ConfigFixture): SqliteDatabase {
   return openDatabase(fixture.dbFile, { schemaVersion: STORAGE_SCHEMA_VERSION, migrations: MIGRATIONS, at: AT }).db;
 }
 
-/** 全部密文的快照：用来证明"中止时一字未动"（比对密文，而不是比对解密后的内容） */
 function sealedSnapshot(db: SqliteDatabase): string {
   const parts: string[] = [];
   for (const sql of [
@@ -38,12 +33,6 @@ function sealedSnapshot(db: SqliteDatabase): string {
   return parts.join('\u0000');
 }
 
-/**
- * 造一份"有内容"的库：1 份文书 + 1 条旁挂数据 + 2 行配置。
- *
- * 走 SQL 而不是走 `WorkStore`：这里要造的是密封行的形状，用产品写入路径反而会掩盖
- * "某一列没被轮换到"这类问题（而 `documents` 那两列正是最容易漏的）。
-  */
 function seed(fixture: ConfigFixture, db: SqliteDatabase): void {
   fixture.workStore.putSealed('config.demo', { hello: 'world' });
   fixture.workStore.putSealed('config.list', [1, 2, 3]);
@@ -61,7 +50,6 @@ function seed(fixture: ConfigFixture, db: SqliteDatabase): void {
   ).run(side.format, side.digest, side.sealed, AT);
 }
 
-/** 用某一把口令把三处都读一遍（证明"能不能打开"）：返回读到的形状字符串 */
 function readAllAs(fixture: ConfigFixture, key: string): { ok: boolean; summary: string } {
   const db = connect(fixture);
   try {
@@ -107,8 +95,6 @@ async function main(): Promise<void> {
       seed(fixture, db);
       const before = readAllAs(fixture, OLD_KEY);
       assertEqual(before.ok, true, '前置：旧口令能读通');
-      /* 时间戳刻意不更新：它回答"这份数据何时被改"，而轮换没有改内容。
-         刷一遍会让审计里那行"配置何时改的"变成假话。  */
       const updatedBefore = String(
         (db.prepare(`select updated_at from sealed_kv where key = 'config.demo'`).get() as { updated_at?: string }).updated_at,
       );
@@ -176,7 +162,6 @@ async function main(): Promise<void> {
     const db = connect(fixture);
     try {
       seed(fixture, db);
-      /* 只弄坏一行（配置那一行的密文），其余三行都是好的 */
       db.prepare(`update sealed_kv set payload_sealed = ? where key = 'config.list'`).run('这不是一个信封');
       const before = sealedSnapshot(db);
 

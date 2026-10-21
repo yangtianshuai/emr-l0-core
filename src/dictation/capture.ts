@@ -1,5 +1,3 @@
-// 语音采集层（C1）：把"麦克风 → 一段段音频 → 带段号与时间区间的转写文本"收成三件可离线验证的纯逻辑。
-
 import type { ISODateTime } from '../model/types.ts';
 import type { DictationInput, TranscriptSegment } from '../core/dictation.ts';
 import { KEY_CONTENT_THRESHOLD } from './placement.ts';
@@ -52,18 +50,12 @@ export {
 export type { CaptureErrorCode } from './capture-transport.ts';
 export type { AsrKind } from './asr-adapters.ts';
 
-/** 界面必须如实标注的一句：ASR 不回置信度，这里是"未知，且按最保守处理" */
 export const ASR_NO_CONFIDENCE_NOTE = 'ASR 未提供置信度，按上限处理';
 
 function writeAscii(target: Uint8Array, offset: number, text: string): void {
   for (let i = 0; i < text.length; i += 1) target[offset + i] = text.charCodeAt(i);
 }
 
-/**
- * WAV（PCM）头：44 字节，格式固定为 {@link CAPTURE_AUDIO}。
- *
- * 不做 MP3：浏览器端做 MP3 等于再引一个编码器，而 WAV 只是"给 PCM 加个头"。
- */
 export function buildWavHeader(dataBytes: number): Uint8Array {
   if (!Number.isInteger(dataBytes) || dataBytes < 0) {
     throw new CaptureError('E_CAPTURE_CONFIG_INVALID', `WAV 数据长度必须是非负整数，实际 ${JSON.stringify(dataBytes)}`);
@@ -76,7 +68,7 @@ export function buildWavHeader(dataBytes: number): Uint8Array {
   writeAscii(header, 8, 'WAVE');
   writeAscii(header, 12, 'fmt ');
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); /* 1 = PCM */
+  view.setUint16(20, 1, true);
   view.setUint16(22, CAPTURE_AUDIO.channels, true);
   view.setUint32(24, CAPTURE_AUDIO.sampleRate, true);
   view.setUint32(28, CAPTURE_AUDIO.sampleRate * blockAlign, true);
@@ -87,12 +79,6 @@ export function buildWavHeader(dataBytes: number): Uint8Array {
   return header;
 }
 
-/**
- * 把 16-bit 小端 PCM 样本组装成可上传的 WAV。
- *
- * 校验字节数为偶数：16-bit 音频出现半字节，说明传进来的根本不是这个格式 ——
- * 与其让服务端收到一个坏文件后"识别出乱码"，不如在这里就报错。
- */
 export function encodeCaptureWav(pcm: Uint8Array): Uint8Array {
   const bytesPerSample = CAPTURE_AUDIO.bitsPerSample / 8;
   if (pcm.byteLength % bytesPerSample !== 0) {
@@ -108,7 +94,6 @@ export function encodeCaptureWav(pcm: Uint8Array): Uint8Array {
   return out;
 }
 
-/** 解头（自测与排障用）：答得出"发出去的到底是不是 16k/单声道/16-bit" */
 export function parseCaptureWav(bytes: Uint8Array): {
   sampleRate: number;
   channels: number;
@@ -134,44 +119,18 @@ export interface AsrConfig {
   kind: AsrKind;
   /** ASR 服务地址；空 = 未配置 → 采集入口不可用（fail-closed）  */
   endpoint: string;
-  /**
-   * 阿里云的 AppKey。它不是密钥（是"门牌号"），所以落在配置行里而不是密钥槽 ——
-   * 混进密钥槽会让界面显示"密钥已就位"而实际一包也发不出去。
-    */
   appKey: string;
-  /** 上传超时（内网 15s 够；外网/公有云必须上调 —— 百度那一次往返要 2~3s，公网抖动更要余量）  */
   submitTimeoutMs: number;
-  /**
-   * 轮询间隔。只对院内那台有意义（`intranet-task` 是"提交 + 轮询"），
-   * 两家公有云都是一次性请求 —— 这个值在它们身上不参与任何事，但界面上仍然要显示，
-   * 因为"换回院内服务"时它就是主参数（藏起来会让人以为它消失了）。
-    */
   pollIntervalMs: number;
-  /** 单段总预算：院内那台接口没有失败态，只能靠它收口；公有云拿它当兜底 —— 哪一家都不允许"无限等"  */
   pollTimeoutMs: number;
   /** 部署方声明的模型标识（三家都不返回模型信息），必须带版本/日期  */
   modelId: string;
-  /**
-   * 显式确认"这份音频会发往院外"。
-   *
-   * 只有公有云 `kind` 需要它，且必须为 true 才允许采集（{@link assertPublicCloudAcknowledged}）。
-   * 它不能被"一个更聪明的默认值"替代：语音里必然含患者信息，
-   * 把音频发到院外公网这件事只能由人显式的一次动作来承担。
-    */
   acknowledgePublicCloud: boolean;
-  /* 这里曾有 `apiKeyEnv`（token 所在的变量名）。本轮取消：
-     需要存储的东西一律入库 —— 密钥值单独一行加密落在 `config.capture.apiKey`，
-     由 `capture-store.ts` 解出来直接交给 `createAsrClient` 的 `apiKey`，
-     本结构里因此没有任何与凭据值有关的字段（它会被写进配置行、会被打印）。
-     `appKey` 能落在配置行里，正是因为它是门牌号而不是凭证。  */
 }
 
 export interface SegmentConfig {
-  /** 静音判停：一句话说完就发。主路径  */
   silenceMs: number;
-  /** 最长时长：长时间不静音（环境噪声、连续口述）不能把一段无限拖大 */
   maxSeconds: number;
-  /** 最短时长：低于它按误触丢弃，不上传（麦克风刚打开那串噪声不该产生一个任务） */
   minSeconds: number;
 }
 
@@ -202,7 +161,6 @@ export const DEFAULT_CAPTURE_CONFIG: CaptureConfig = {
 
 /** `maxSeconds` 的上限：不设上限等于允许"一段装上十分钟"，那会让首条建议要等十分钟才出现 */
 export const MAX_SEGMENT_SECONDS = 120;
-/* `CAPTURE_MAX_ATTEMPTS`（重试上限）已下沉到 `capture-transport.ts`，见文件中部 re-export */
 
 function requirePositive(name: string, value: unknown, fallback: number, integer = true): number {
   if (value === undefined) return fallback;
@@ -215,13 +173,6 @@ function requirePositive(name: string, value: unknown, fallback: number, integer
   return value;
 }
 
-/**
- * 配置的补丁形状：允许逐组给部分字段（界面按组保存、环境变量只给一两项），
- * 未给出的项才取默认 —— 给出了但不合法的一律报错，不做"帮你改成默认值"。
- *
- * 刻意不叫 `CaptureConfigInput`：那是存储层（`capture-store.ts`）用的、给界面提交的
- * 扁平形状。两个不同形状的同名类型放在两个模块里，是排查时最费时间的坑之一。
-  */
 export interface CaptureConfigPatch {
   asr?: Partial<AsrConfig>;
   segment?: Partial<SegmentConfig>;
@@ -229,20 +180,10 @@ export interface CaptureConfigPatch {
   confidenceCeiling?: number;
 }
 
-/**
- * 校验配置。非法值一律报错，不静默取默认 ——
- * "帮你改成默认值"会让运维以为自己配的东西生效了（同 `placement.ts` / `ai/model-config.ts` 同一个病根）。
- *
- * `endpoint` / `modelId` 允许为空：那是尚未配置这一合法状态（界面据此显示"未配置语音识别服务"，
- * 并由 {@link createAsrClient} 在真要转写时 fail-closed）。
-  */
 export function validateCaptureConfig(input: CaptureConfigPatch = {}): CaptureConfig {
   const asrInput = input.asr ?? {};
   const segmentInput = input.segment ?? {};
 
-  /* `kind` 从外部输入来（库里的那一行、旧配置文件导入、HTTP body），
-     所以即使类型上写着 `AsrKind` 也要在运行时核一遍 —— 库里存着上一版没有的名字时，
-     静默取默认会让"我配的那家"悄悄变成院内服务（方向反了：那是音频发去哪的变更）。  */
   const kindRaw: unknown = (asrInput as { kind?: unknown }).kind;
   if (kindRaw !== undefined && !isAsrKind(kindRaw)) {
     throw new CaptureError(
@@ -263,8 +204,6 @@ export function validateCaptureConfig(input: CaptureConfigPatch = {}): CaptureCo
     throw new CaptureError('E_CAPTURE_CONFIG_INVALID', `asr.acknowledgePublicCloud 必须是布尔值，实际 ${typeof ackRaw}`);
   }
   const acknowledgePublicCloud = ackRaw === true;
-  /* 公有云守卫在校验层也拦一次（不只在转写时拦）：保存时就拒绝，
-     才不会出现"库里存着一条配了公有云却没确认的配置"，让人以为它配好了。  */
   assertPublicCloudAcknowledged(vendorOf(kind), acknowledgePublicCloud);
 
   const endpointRaw = asrInput.endpoint ?? '';
@@ -281,8 +220,6 @@ export function validateCaptureConfig(input: CaptureConfigPatch = {}): CaptureCo
     throw new CaptureError('E_CAPTURE_CONFIG_INVALID', `asr.modelId 必须是字符串，实际 ${typeof modelIdRaw}`);
   }
   const modelId = modelIdRaw.trim();
-  /* G3：留痕要回答"哪个模型听写的"，而该接口不返回模型信息 ——
-     一个不带版本/日期的标识答不出这个问题（换模型后旧留痕会指向新模型）。 */
   if (modelId !== '' && !/[:@]/.test(modelId)) {
     throw new CaptureError(
       'E_CAPTURE_CONFIG_INVALID',
@@ -357,12 +294,9 @@ export function validateCaptureConfig(input: CaptureConfigPatch = {}): CaptureCo
   };
 }
 
-/* ============================== 分片（时间区间是采集端唯一来源） ============================== */
-
 export type SegmentEndReason = 'silence' | 'maxSeconds' | 'pause' | 'manual-stop';
 
 export interface ChunkPlan {
-  /** 段号，从 1 起、与时间同序（这里不做重排：重排是 `normalizeSegments` 的职责，两处都排会让"乱序段数如实上报"这个数失去意义）  */
   index: number;
   startSec: number;
   endSec: number;
@@ -370,10 +304,6 @@ export interface ChunkPlan {
   reason: SegmentEndReason;
 }
 
-/**
- * 采集事件流。三件事都由采集端给出，而不是在事后补：
- * 帧（含人声判定）、暂停、停止。
-  */
 export type CaptureInput =
   | {
       kind: 'frame';
@@ -381,25 +311,18 @@ export type CaptureInput =
       endSec: number;
       voiced: boolean;
     }
-  /** 暂停：定稿当前分片。暂停期不存在音频，故允许出现真实间隙（S2 约束的是连续录音内的相邻分片）  */
   | { kind: 'pause'; atSec: number }
-  /** 手动停止 / 录音结束：定稿当前分片（S1：时间轴不重置起点）  */
   | { kind: 'stop'; atSec: number };
 
 export interface PlanResult {
   chunks: ChunkPlan[];
-  /** 短于 `minSeconds` 被丢弃的片数 —— 如实上报，不静默（否则"我说的话被吞了"无从解释）  */
   droppedShort: number;
 }
 
 export interface ChunkPlanner {
-  /** 送入一个事件；返回本次定稿的分片（0 个或多个）  */
   feed(event: CaptureInput): ChunkPlan[];
-  /** 当前是否有尚未定稿的分片（界面"正在录的这一段"用它） */
   readonly open: boolean;
-  /** 当前那一段的起点（秒）；没有正在录的段时为 `null` —— 界面据此算"这一段已录多久" */
   readonly openStartSec: number | null;
-  /** 已被丢弃的过短片数（S4：如实上报，不静默） */
   readonly droppedShort: number;
 }
 
@@ -407,7 +330,6 @@ export function createChunkPlanner(config: SegmentConfig): ChunkPlanner {
   let droppedShort = 0;
   let nextIndex = 1;
   let start: number | null = null;
-  /** 上一分片的结束点：下一个分片从它开始，才谈得上"首尾相接" */
   let carry: number | null = null;
   let silenceSec = 0;
   let previousEnd = -1;
@@ -449,7 +371,7 @@ export function createChunkPlanner(config: SegmentConfig): ChunkPlanner {
       }
       if (event.kind === 'pause') {
         finalize(event.atSec, 'pause', out);
-        carry = null; /* 暂停期没有音频：下一个分片从恢复后的第一帧开始 */
+        carry = null;
         previousEnd = event.atSec;
         return out;
       }
@@ -462,13 +384,12 @@ export function createChunkPlanner(config: SegmentConfig): ChunkPlanner {
       if (start === null) {
         if (!event.voiced) {
           previousEnd = event.endSec;
-          return out; /* 开头那段静音不属于任何分片 */
+          return out;
         }
         start = carry ?? event.startSec;
       }
       silenceSec = event.voiced ? 0 : silenceSec + (event.endSec - event.startSec);
 
-      /* 超长优先于静音：连续口述不能把一段无限拖大 */
       if (event.endSec - start >= config.maxSeconds) {
         finalize(event.endSec, 'maxSeconds', out);
       } else if (!event.voiced && silenceSec * 1000 >= config.silenceMs) {
@@ -480,22 +401,12 @@ export function createChunkPlanner(config: SegmentConfig): ChunkPlanner {
   };
 }
 
-/* ------------------------------ 帧 → 段（含 WAV）：只此一处 ------------------------------ */
-
-/** 浮点比较的容差：段边界由帧边界推出，理论上严格相等，留一点点余量免得被浮点尾数咬到 */
 const TIMELINE_EPS = 1e-9;
 
-/**
- * 一帧音频。时间由采集源给出（S1：暂停恢复不重置起点）。
- *
- * 定义在这一层而不是采集源那一层：它是"帧 → 段"流水线上的通行形状 ——
- * 服务端编排（`runDictationCapture`）、本地客户端桥（`capture-bridge`）、自测都用它。
-  */
 export interface CaptureFrame {
   startSec: number;
   endSec: number;
   voiced: boolean;
-  /** 16-bit 小端 PCM（单声道）；转成 WAV 头由 `encodeCaptureWav` 负责 */
   pcm: Uint8Array;
 }
 
@@ -507,25 +418,16 @@ export interface AssembledChunk {
 
 export interface ChunkAssembler {
   feed(frame: CaptureFrame): AssembledChunk[];
-  /** 采集结束（手动停止 / 时间线走完）：定稿当前那一段 */
   finish(atSec: number): AssembledChunk[];
   readonly openStartSec: number | null;
   readonly droppedShort: number;
 }
 
-/**
- * 把帧流拼成段（含该段的 WAV）。
- *
- * 只有这一处：服务端的演示采集与本地客户端都用它。若各写一遍，
- * "每段上传的音频只含该段区间内的帧"这条（`AU23` 守着的）就守不住了 ——
- * 多带一帧就是把上一段的话又送了一次。
-  */
 export function createChunkAssembler(config: SegmentConfig): ChunkAssembler {
   const planner = createChunkPlanner(config);
   const frames: CaptureFrame[] = [];
 
   const take = (plan: ChunkPlan): AssembledChunk => {
-    /* 属于这一片的帧：先丢掉落在片起点之前的（含被过短丢弃的那一片的残留），再取到片终点为止 */
     while (frames.length > 0 && (frames[0] as CaptureFrame).endSec <= plan.startSec + TIMELINE_EPS) frames.shift();
     const taken: CaptureFrame[] = [];
     while (frames.length > 0 && (frames[0] as CaptureFrame).endSec <= plan.endSec + TIMELINE_EPS) taken.push(frames.shift() as CaptureFrame);
@@ -558,7 +460,6 @@ export function createChunkAssembler(config: SegmentConfig): ChunkAssembler {
   };
 }
 
-/** 批处理入口：把一串事件喂给 {@link createChunkPlanner} 再取结果（语义与流式完全同一份实现） */
 export function planChunks(events: CaptureInput[], config: SegmentConfig): PlanResult {
   const planner = createChunkPlanner(config);
   const chunks: ChunkPlan[] = [];
@@ -568,32 +469,17 @@ export function planChunks(events: CaptureInput[], config: SegmentConfig): PlanR
 
 export interface AsrDeps {
   transport?: CaptureTransport;
-  /** 睡眠（轮询间隔）；自测注入假实现，不真的等。云厂商用不到它（没有轮询）  */
   sleep?: (ms: number) => Promise<void>;
-  /** 时钟；自测注入假时钟，好让"超时"与"token 到期"都可复现 */
   now?: () => number;
-  /**
-   * 主凭据直接给出（由调用方从库里的 `config.capture.apiKey` 解出来）：
-   * 院内服务的 Bearer token / 百度 AK / 阿里云 NLS token。
-   * 它不落在 `AsrConfig` 里，也不进日志：只在协议实现里用一次。
-    */
   apiKey?: string;
   apiSecret?: string;
 }
 
 export interface AsrClient {
-  /**
-   * 提交一段音频并等出文本；空串是合法结果（这段没听到内容）。
-   *
-   * 入参只要"段号 + 音频 + 会话"，不要整个 `ChunkPlan`：服务端转发（C2）只需要段号来命名文件，
-   * 时间区间是采集端的事，服务端手里根本没有它 —— 要它就得编一个出来，那是在伪造证据。
-    */
   transcribe(request: { index: number; audio: Uint8Array; sessionId: string }): Promise<{ text: string; taskId: string }>;
 }
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** `parseJsonObject` 也已下沉到 `capture-transport.ts`（三家协议都要用它解析响应） */
 
 export function createAsrClient(config: AsrConfig, deps: AsrDeps = {}): AsrClient {
   const transport = deps.transport ?? defaultTransport;
@@ -622,9 +508,6 @@ export function createAsrClient(config: AsrConfig, deps: AsrDeps = {}): AsrClien
           '未配置语音识别服务（asr.endpoint / asr.modelId 至少一项为空）：采集入口不可用，且不会退回"模拟一段录音转写"',
         );
       }
-      /* 顺序要紧：先判"能不能发"，再判"允不允许发"，最后判"发得出去吗" ——
-         三件事的处置完全不同（去填地址 / 去勾确认 / 去补凭据）。若顺序反过来，
-         "还没填地址"会被报成"没确认公有云"，把人引到一个已经填好的格子上。  */
       assertPublicCloudAcknowledged(spec, config.acknowledgePublicCloud);
       const missing = missingCredentials(spec, credentials, config.appKey);
       if (missing.length > 0) {
@@ -657,7 +540,6 @@ export interface CaptureChunk {
   index: number;
   startSec: number;
   endSec: number;
-  /** ASR 的 result 原样 */
   text: string;
 }
 
@@ -670,15 +552,11 @@ export interface CaptureFailure {
 }
 
 export interface CaptureResult {
-  /** 采集会话 ID —— 一次"说一段" = 一个会话；不是 `task_id`（一次会话有 N 个任务）  */
   sessionId: string;
   asrModelId: string;
   chunks: CaptureChunk[];
-  /** 失败的分片如实回报，绝不当成"什么都没说"  */
   failures: CaptureFailure[];
-  /** `result` 为空串而被丢弃的段数（合法结果，但要如实回报） */
   emptyDropped: number;
-  /** 短于 `minSeconds` 被丢弃的片数 */
   shortDropped: number;
   audioRetained: boolean;
   warnings: string[];
@@ -689,7 +567,6 @@ export type ChunkOutcome =
   | { status: 'empty'; index: number; startSec: number; endSec: number }
   | { status: 'failed'; failure: CaptureFailure };
 
-/** 临时音频存储（真实实现落运行时目录；`retainAudio=false` 时用它删干净） */
 export interface AudioTempStore {
   write(name: string, bytes: Uint8Array): Promise<string>;
   remove(handle: string): Promise<void>;
@@ -701,7 +578,6 @@ export interface CaptureSessionRequest {
   /** 片 → 音频字节（须为 {@link CAPTURE_AUDIO} 规格的 WAV）；真实实现由采集端给出 */
   audioFor: (chunk: ChunkPlan) => Uint8Array;
   tempStore: AudioTempStore;
-  /** 逐段回显：界面要能显示"转写中 3 段 / 已完成 1 段"，不等全部完成 */
   onChunk?: (outcome: ChunkOutcome) => void;
 }
 
@@ -733,7 +609,6 @@ export async function captureSession(
         chunks.push(chunk);
         request.onChunk?.({ status: 'ok', chunk });
       } catch (err) {
-        /* 非 `CaptureError` = 程序错误（不是"这段没转出来"）：清理后继续抛，不吞 */
         if (!(err instanceof CaptureError)) throw err;
         const failure: CaptureFailure = {
           index: planned.index,
@@ -780,15 +655,6 @@ export async function captureSession(
   };
 }
 
-/**
- * 采集结果 → `dictate` 的入参。中间不加新结构，两处"人为决定"都已论证过：
- *   - `transcriptionId = sessionId` → `evidence.ref` 形如 `session#3@9.1-12.4s`，
- *     可回到音频（若留存）或至少定位到"第几段第几秒"（不留存时）；
- *   - `confidence = confidenceCeiling`（未知）→ 恒 < 0.90，关键内容上照样必须"改后采纳"。
- *
- * 失败段不进入 `segments`：`dictate` 不认识"失败"这个概念，硬塞一条空文本只会
- * 变成"这条建议本来就是空的"。失败由调用方在外部处置（界面提示 + 审计）。
-  */
 export function toDictationInput(result: CaptureResult, at: ISODateTime, options: { confidenceCeiling: number }): DictationInput {
   return {
     transcriptionId: result.sessionId,
@@ -804,10 +670,6 @@ export function toDictationInput(result: CaptureResult, at: ISODateTime, options
   };
 }
 
-/**
- * 采集端提交上来的一个转写段。形状即 `CaptureChunk`，但它是外部输入 ——
- * 服务端只校验，不代编：段号与时间区间是采集端的产物，补一个出来就是伪造证据。
-  */
 export interface SubmittedSegment {
   index: number;
   text: string;

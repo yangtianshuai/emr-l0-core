@@ -1,5 +1,3 @@
-// T25 验收自测：OFD / OFD-H 导入。
-
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,7 +31,6 @@ function ensureArtifacts(): void {
   if (!existsSync(ARTIFACTS)) mkdirSync(ARTIFACTS, { recursive: true });
 }
 
-/** 构造一份"已定稿"的病历：含 AI 采纳内容、数据元标签、关键内容与签章 */
 async function signedSession(): Promise<WriteSession> {
   const { doc, ids } = buildSyntheticDoc({ sections: 3, paragraphsPerSection: 3, fieldsPerParagraph: 1 });
   const session = WriteSession.open(doc);

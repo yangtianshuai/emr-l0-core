@@ -1,12 +1,3 @@
-/**
- * 共用工具库：深比较、人类可读差异、json-patch 子集（diff / apply）、路径指针、随机数
- *
- * jsonDiff / applyPatch 的约定：
- *  - 路径使用 JSON Pointer 风格（/nodes/n_1/value），~0/~1 转义；
- *  - 数组长度不同时，整数组 replace（不做逐项增删），换取实现简单与路径稳定；
- *  - 根路径以 '' 表示（仅支持 replace）。
- */
-
 import { createHash } from 'node:crypto';
 
 export function isPlainObject(v) {
@@ -31,7 +22,6 @@ export function deepEqual(a, b) {
   return true;
 }
 
-/** 人类可读差异列表（用于报告与排错） */
 export function diffPaths(a, b, path = '$', out = [], limit = 500) {
   if (out.length >= limit) return out;
   if (deepEqual(a, b)) return out;
@@ -165,8 +155,6 @@ export function findUnserializable(value) {
   return found;
 }
 
-/** 固定种子随机数（保证回归可复现） */
-/** 递归按键名排序（canonical JSON）；数组保持顺序 */
 export function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value !== null && typeof value === 'object') {
@@ -177,14 +165,6 @@ export function canonicalize(value) {
   return value;
 }
 
-/**
- * 节点内容的指纹（用于机读信息陈旧判定）。
- *
- * 两条必须遵守的规则：
- *  1) 不用时间戳判定：签名、改状态等操作会推进 updatedAt 但内容未变，按时间戳判会误报"刚签完就陈旧"；
- *  2) 必须 canonical（键名排序）：JSON 键序在不同实现下不稳定，直接 stringify 求哈希会让
- *     "同一内容在不同实现下指纹不同"，从而产生跨实现的假警报 —— 实现 TS 版本时实测踩到过。
- */
 export function hashNodes(nodes) {
   return createHash('sha256').update(JSON.stringify(canonicalize(nodes))).digest('hex').slice(0, 32);
 }

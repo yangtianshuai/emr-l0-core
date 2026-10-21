@@ -1,5 +1,3 @@
-// 本地采集客户端（C3b③）：在医生这台机器上跑的小进程 —— 采音频、分片，把段交给页面。
-
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { createCaptureBridge, checkBridgeToken, tokenFromRequest, type CaptureBridge } from './capture-bridge.ts';
@@ -8,12 +6,6 @@ import { CaptureError, validateCaptureConfig, type SegmentConfig } from './captu
 
 const PREFIX = '/dictation-capture';
 
-/**
- * 演示脚本：两段人声各 2s + 中间 1.2s 静音 → 2 段。
- *
- * 与 demo 服务端那份默认脚本同形：它存在的意义是让"客户端这条链"今天就能跑通与被测，
- * 而不是让演示看起来更花哨（时长 5s 左右，计时是真的在走）。
-  */
 const DEFAULT_TIMELINE: Array<{ seconds: number; voiced: boolean }> = [
   { seconds: 2, voiced: true },
   { seconds: 1.2, voiced: false },
@@ -30,7 +22,6 @@ function createClientCaptureSource(): CaptureSource {
   return createSampleCaptureSource({ timeline: DEFAULT_TIMELINE });
 }
 
-/** 页面转交过来的分片参数：值来自服务端配置，这里复用同一份校验（不合法就报错，不取默认）  */
 function parseSegment(raw: unknown): SegmentConfig {
   const input = (raw ?? {}) as { silenceMs?: unknown; maxSeconds?: unknown; minSeconds?: unknown };
   return validateCaptureConfig({
@@ -70,17 +61,13 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
 }
 
 export interface LocalClientRuntime {
-  /** 本次采集的桥；没有正在进行的采集时为 `null` */
   bridge(): CaptureBridge | null;
-  /** 采集源自身的失败（现场表现 + 怎么办），由 `hello` 带给页面 */
   sourceProblem(): { code: string; message: string; howTo: string } | null;
   start(segment: SegmentConfig): { ok: true; sessionId: string } | { ok: false; code: string; message: string };
   stop(): Promise<void>;
-  /** 采集驱动是否已收尾（自测用） */
   settle(): Promise<void>;
 }
 
-/** 采集驱动：把源送来的帧喂给桥，源结束后把桥收尾 */
 export function createLocalClientRuntime(options: { sourceFactory?: () => CaptureSource } = {}): LocalClientRuntime {
   const sourceFactory = options.sourceFactory ?? createClientCaptureSource;
   let bridge: CaptureBridge | null = null;
@@ -109,7 +96,6 @@ export function createLocalClientRuntime(options: { sourceFactory?: () => Captur
             next.feed(frame);
           });
         } catch (err) {
-          /* 源自己的失败：记下来带给页面（不表现成"没有段" —— 那看起来像医生什么都没说）  */
           problem = {
             code: (err as { code?: string }).code ?? 'E_CAPTURE_SOURCE_UNKNOWN',
             message: (err as Error).message,
@@ -119,8 +105,6 @@ export function createLocalClientRuntime(options: { sourceFactory?: () => Captur
           next.finish(elapsed);
         }
       })().finally(() => {
-        /* 收尾后必须放开：不放开的话，第二次采集会被判成"已经在采"
-           （实测踩到：医生点第二次开始，界面报"已经在采集了"，而它其实早就停了）。  */
         collecting = null;
       });
       return { ok: true, sessionId };
@@ -147,7 +131,6 @@ export function createLocalClientServer(options: { token: string; runtime?: Loca
         json(res, 404, { ok: false, code: 'E_BRIDGE_NO_ROUTE', message: `只服务 ${PREFIX}/*：本进程不是 Web 服务，别拿它当服务端用` });
         return;
       }
-      /* 预检不校验令牌：浏览器不会在预检里带自定义头，拦它等于所有跨源请求都失败 */
       if ((req.method ?? 'GET') === 'OPTIONS') {
         json(res, 204, {});
         return;
@@ -219,7 +202,6 @@ export function createLocalClientServer(options: { token: string; runtime?: Loca
           const index = Number(audioMatch[1]);
           const bytes = runtime.bridge()?.audioOf(index) ?? null;
           if (bytes === null) {
-            /* ack 之后音频就释放了（第九之三节第 4 条）：取不到不是错误，是"你已经处理过了" */
             json(res, 404, { ok: false, code: 'E_BRIDGE_AUDIO_RELEASED', message: `第 ${index} 段的音频不在了（可能已经确认过，或段号不对）` });
             return;
           }
@@ -246,7 +228,6 @@ if (process.argv[1]?.includes('local-capture-client')) {
   const port = Number(argOf(process.argv, 'port', '8901'));
   const providedToken = argOf(process.argv, 'token');
   const pageUrl = argOf(process.argv, 'page');
-  /* 令牌没给就拒绝启动：没有令牌的回环端口等于对全机开放（第九之三节）  */
   const token = providedToken === '' ? randomBytes(16).toString('hex') : providedToken;
   const server = createLocalClientServer({ token, pageUrl });
   server.listen(port, '127.0.0.1', () => {

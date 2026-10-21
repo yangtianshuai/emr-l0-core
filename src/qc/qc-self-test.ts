@@ -1,5 +1,3 @@
-// 形式类质控规则包自测（Q1~Q6）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { fileURLToPath } from 'node:url';
 import type { DocNode, NodeId } from '../model/types.ts';
@@ -21,7 +19,6 @@ const test = (name: string, fn: () => void | Promise<void>): Promise<void> => su
 
 const AT = '2026-10-09T10:00:00.000Z';
 
-/** 只构造规则会读的字段；用断言绕过 DocNode 的其余必填项（引擎也确实不读它们） */
 function textNode(id: string, text: string, extra: { tags?: string[]; keyContent?: boolean } = {}): DocNode {
   return {
     id,
@@ -39,10 +36,6 @@ function viewOf(text: string, extra: Partial<QcNodeView> = {}): QcNodeView {
   return { nodeId: 'n_1' as NodeId, type: 'text', text, tags: [], keyContent: false, ...extra };
 }
 
-/**
- * 判定上下文。显式写死一个时刻：形式类这三条规则用不到它，但引擎契约要求传 ——
- * 而"写死"正是重点：判定结果不该随运行时刻变化，否则"同一份病历跑两次结论不同"就无从复核。
-  */
 const TEST_CTX: QcContext = { now: '2026-10-12T00:00:00Z' };
 
 function checkOrNull(rule: QcRule, view: QcNodeView): { detail: string; suggestion: string; quote?: string } | null {
@@ -83,7 +76,6 @@ async function main(): Promise<void> {
     assertEqual(id, 'R-FORM-01', '前置：第一条应是"缺记录时间"');
     const check = (view: QcNodeView) => checkOrNull(rule, view);
 
-    /* 各种时间写法都应被认出来 —— 认得越少，误报越多 */
     for (const text of [
       '2026-10-09 患者诉咳嗽加重，伴咳痰。',
       '2026年10月9日 查体：双肺呼吸音粗。',
@@ -93,13 +85,11 @@ async function main(): Promise<void> {
       assertEqual(check(viewOf(text)), null, `含时间表述不应报：${text.slice(0, 12)}…`);
     }
 
-    /* 真正缺时间的记录类段落才报 */
     const hit = check(viewOf('患者三天前无明显诱因出现咳嗽，咳白色黏痰，伴发热。'));
     assert(hit !== null, '记录类段落完全没有时间表述时应报');
     assert(String(hit?.detail).includes('R-FORM-01'), '依据里应写明规则号');
     assert(String(hit?.detail).length > 20, 'detail 要说清判定依据，不能只给结论');
 
-    /* 过短的文本不判：标题、短标签本来就不需要时间，对它们报就是纯噪声 */
     assertEqual(check(viewOf('现病史：')), null, '短文本（标题类）不应报');
     assertEqual(check(viewOf('现病史：', { type: 'section' })), null, '非文本节点不应报');
   });
@@ -113,7 +103,6 @@ async function main(): Promise<void> {
     assert(hit !== null, '带标签且为空应报');
     assert(String(hit?.detail).includes('DE-001'), '依据里应列出数据元标签，医生才能核对');
 
-    /* 保守方向：没有标签的空白段落可能本就不必填 —— 报它是误伤，而误伤会让医生忽略全部提示 */
     assertEqual(check(viewOf('', { tags: [] })), null, '没有数据元标签的空白段落不应报');
     assertEqual(check(viewOf('内容已填', { tags: ['DE-001'] })), null, '有内容的段落不应报');
     assertEqual(check(viewOf('   ', { tags: [] })), null, '无标签的纯空白不应报');
@@ -126,8 +115,6 @@ async function main(): Promise<void> {
 
     const hit = check(viewOf('患者于待补充入院，主诉胸痛3天。'));
     assert(hit !== null, '含"待补充"应报');
-    /* 关键：quote 若取整段，那么"改了一个字"也会被判成"原文还在"，
-       锚点重定位就失去意义（它本该只在原文确实还在时才重定位） */
     assertEqual(hit?.quote, '待补充', 'quote 应只是命中片段，不是整段');
 
     for (const text of ['患者无药物过敏史。', '（既往史见前次住院记录）', '体格检查：双肺呼吸音清。']) {
@@ -157,12 +144,7 @@ async function main(): Promise<void> {
   });
 
   await test('Q6 只报不阻断：severity 仅是展示级别，引擎没有落笔/拦截能力', () => {
-    /* 结构级证明：引擎的返回值只有命中列表与计数，没有任何写操作通道。
-       它不是"我们承诺不阻断"，而是"它拿不到能阻断的东西" ——
-       一旦让规则间接拥有流程控制权，一条误报就会让病历签不出去，而临床不会等规则。  */
     const result = runFormRules(nodesOf({ n_1: textNode('n_1', '患者三天前出现咳嗽。') }), TEST_CTX, FORM_RULES);
-    /* 产出里仍然没有任何"是否放行/是否阻断"的字段；`unevaluated` 是报告不是闸门 ——
-       它只说明"这几条没判成"，改不了"能不能签、能不能存"（引擎手里没有那样的能力）。  */
     assertEqual(
       Object.keys(result).sort(),
       ['hits', 'rules', 'scannedNodes', 'unevaluated'],

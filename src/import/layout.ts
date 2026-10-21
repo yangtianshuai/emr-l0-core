@@ -1,5 +1,3 @@
-// T26 · 版式段落重建（几何启发式）。
-
 export interface LayoutLine {
   page: number;
   text: string;
@@ -11,32 +9,16 @@ export interface LayoutLine {
 export interface RebuiltParagraph {
   page: number;
   text: string;
-  /** 合并了多少个版式行 */
   lineCount: number;
-  /** 段左边界（pt） */
   left: number;
-  /** 平均字号（pt） */
   fontSize: number;
-  /** 判定依据（人类可读，供审计与界面展示） */
   evidence: string[];
-  /** 段内首行相对段左边界的内缩（pt）：>0 表示"本段以缩进开头"，这也是段落的正向证据 */
   firstLineIndent?: number;
-  /**
-   * 置信度：
-   *   high   —— 至少两条独立线索一致（如"间距变大 + 首行缩进"）
-   *   medium —— 只有一条线索
-   *   low    —— 未发现任何线索（结果只是"按页合并"），必须人工整理
-   */
   confidence: 'high' | 'medium' | 'low';
   kind: 'title' | 'body';
 }
 
 export interface RebuildOptions {
-  /**
-   * 行距阈值倍数：gap > 基准行距 × ratio → 新段落（默认 1.25）。
-   * 阈值不能设太高：段前间距通常只有几个 pt（16 → 22 就是 1.375 倍），
-   * 设成 1.35 时余量极小，字号稍有不同就会漏切。
-   */
   gapRatio?: number;
   /** 缩进阈值倍数：超出段左边界 size × ratio → 新段落（默认 1.5） */
   indentRatio?: number;
@@ -57,27 +39,11 @@ export interface RebuildResult {
 const ASCII_WORD_END = /[A-Za-z0-9]$/;
 const ASCII_WORD_START = /^[A-Za-z0-9]/;
 
-/**
- * 行拼接：中文直接相连，英文折行需补空格。
- * 判据是"上一行末字符与下一行首字符都是 ASCII 字母数字" —— 中文行末是标点或汉字，
- * 补空格会插入不该有的空白（实测：补空格会让"患者3天前"变成"患者 3天前"这类脏数据）。
- */
 export function joinLines(previous: string, next: string): string {
   if (previous === '') return next;
   return ASCII_WORD_END.test(previous) && ASCII_WORD_START.test(next) ? `${previous} ${next}` : `${previous}${next}`;
 }
 
-/**
- * 估计"基准值"：按 0.5pt 分桶统计出现次数最多的值，并列时取较小值。
- *
- *  不能用中位数（实测踩到两次）：
- *   1) 基准行距：当"段间间距"与"段内行距"次数相当时，中位数会取到段间距本身
- *      （`[22,16,22,16,22,16]` 的中位数是 22），阈值被抬到 29.7，真正的段间距 22 反而不触发
- *      —— 整页被合并成一段；
- *   2) 基准字号：标题与正文各占一半时，中位数落在两者之间，
- *      于是"标题字号 > 基准 × 1.15"永远不成立，标题识别不出来。
- * 取"频次最高且更小"的那个值，这两个场景都能稳定命中正文的行距与字号。
-  */
 function estimateBaseline(values: number[]): number {
   const positive = values.filter((value) => value > 0.01);
   if (positive.length === 0) return 0;
@@ -106,14 +72,9 @@ interface VisualLine {
   x: number;
   size: number;
   text: string;
-  /** 该视觉行由几个原始文本片段合成（用于证据展示） */
   fragments: number;
 }
 
-/**
- * 把同一页里 y 接近的文本片段合成"视觉行"（左标签 + 右数值这类同行多片段很常见）。
- * 阈值取 0.6 × 字号：小于半行的偏移属于排版抖动，大于则视为不同行。
- */
 function buildVisualLines(lines: LayoutLine[]): VisualLine[] {
   const withCoords = lines.filter((line) => line.x !== undefined && line.y !== undefined && line.size !== undefined);
   const withoutCoords = lines.filter((line) => !(line.x !== undefined && line.y !== undefined && line.size !== undefined));
@@ -133,7 +94,6 @@ function buildVisualLines(lines: LayoutLine[]): VisualLine[] {
       const size = line.size!;
       const tolerance = size * 0.6;
       if (current && Math.abs(line.y! - current.y) <= tolerance && Math.abs(size - current.size) <= size * 0.35) {
-        /* 同一视觉行：按 x 顺序拼接 */
         const ordered = [{ x: current.x, text: current.text }];
         ordered.push({ x: line.x!, text: line.text });
         ordered.sort((a, b) => a.x - b.x);
@@ -147,7 +107,6 @@ function buildVisualLines(lines: LayoutLine[]): VisualLine[] {
     if (current) out.push(current);
   }
 
-  /* 缺坐标的行无法参与几何聚类：追加到同页末尾（并保持"无坐标"的诚实标注） */
   for (const line of withoutCoords) {
     out.push({ page: line.page, y: Number.NaN, x: Number.NaN, size: 0, text: line.text, fragments: 1 });
   }
@@ -165,7 +124,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
   const usable = lines.filter((line) => line.text.trim() !== '');
   const coordinateCount = usable.filter((line) => line.x !== undefined && line.y !== undefined && line.size !== undefined).length;
 
-  /* ---- 降级：坐标信息不足（少于 2 条有坐标的行，或全部无坐标） ---- */
   if (coordinateCount < 2) {
     if (fallback === 'per-line') {
       const perLine: RebuiltParagraph[] = usable.map((line) => ({
@@ -213,8 +171,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
   let titleCount = 0;
 
   for (const [page, bucket] of [...pageGroups.entries()].sort((a, b) => a[0] - b[0])) {
-    /* 排序必须显式处理 NaN：缺坐标的行（y 为 NaN）要稳定排在页末，
-       否则 `a.y - b.y` 会返回 NaN，排序结果未定义（文本顺序会随机漂移）。 */
     const ordered = [...bucket].sort(
       (a, b) => (Number.isFinite(a.y) ? a.y : Number.POSITIVE_INFINITY) - (Number.isFinite(b.y) ? b.y : Number.POSITIVE_INFINITY),
     );
@@ -229,7 +185,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
 
     let current: RebuiltParagraph | null = null;
     let currentLeft = withY[0]?.x ?? 0;
-    /** 当前段首行的 x：用于计算"段内首行缩进"这一正向证据 */
     let currentFirstX = withY[0]?.x ?? 0;
     let previousLine: VisualLine | null = null;
 
@@ -237,8 +192,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
       const evidence: string[] = [];
       let isTitle = false;
 
-      /* 缺坐标的行无法参与几何判定：独立成段保留文本（丢弃会让正文凭空少一段，
-         而"少了一段"在病历里意味着漏数据，远比"多切一段"严重）。  */
       if (!Number.isFinite(line.y)) {
         if (current) {
           paragraphs.push(current);
@@ -258,8 +211,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
       }
 
       if (!current) {
-        /* 页/文档的第一段没有"切分依据"（它就是开头），但字号大本身是正向证据：
-           标题应当至少记为 medium，否则"第一段标题"永远显示低置信，low 比例失去提示意义。  */
         const looksTitle = line.size >= baselineSize * (1 + sizeRatio) && line.fragments === 1;
         current = {
           page,
@@ -285,7 +236,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
       const indent = line.x - currentLeft;
       const sizeBump = previousLine ? line.size - previousLine.size : 0;
 
-      /* 线索 1：行距明显变大 */
       let gapBreak = false;
       if (referenceGap > 0 && gap > referenceGap * gapRatio) {
         gapBreak = true;
@@ -295,13 +245,11 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
             : `段前间距 ${gap.toFixed(1)}pt ＞ 行距 ${referenceGap.toFixed(1)}pt × ${gapRatio}`,
         );
       }
-      /* 线索 2：首行缩进（相对当前段左边界） */
       let indentBreak = false;
       if (indent >= line.size * indentRatio) {
         indentBreak = true;
         evidence.push(`首行缩进 ${indent.toFixed(1)}pt ≥ 字号 ${line.size.toFixed(1)}pt × ${indentRatio}`);
       }
-      /* 线索 3：字号变大 → 标题（同时也意味着新块） */
       let sizeBreak = false;
       if (sizeBump >= line.size * sizeRatio && line.size >= baselineSize * (1 + sizeRatio)) {
         sizeBreak = true;
@@ -313,9 +261,6 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
       if (shouldBreak) {
         paragraphs.push(current);
         paragraphBreaks += 1;
-        /*  置信度属于新切出的段（它带着刚收集到的 evidence）。
-           早期实现把 `current.confidence = ...` 写在 push 之后，结果设到了被切开的旧段上，
-           新旧两段的置信度完全错位（实测：有两条证据的段显示 low，无证据的段显示 high）。  */
         current = {
           page,
           text: line.text,
@@ -335,21 +280,14 @@ export function rebuildParagraphs(lines: LayoutLine[], options: RebuildOptions =
         current.lineCount += 1;
         current.fontSize = (current.fontSize * (current.lineCount - 1) + line.size) / current.lineCount;
       }
-      /* 段左边界取段内最靠左的位置：正文段首行缩进时，若以首行为界，续行会变成"负缩进"，
-         而下一段的首行相对它反而没有缩进 —— 缩进线索就此失效（实测踩到）。  */
       currentLeft = Math.min(currentLeft, line.x);
       current.left = currentLeft;
-      /* 段内首行相对段左边界的内缩：> 0 说明"本段以缩进开头"，
-         这是对本段成立的正向证据（与"凭什么切在这里"是两件事）。  */
       current.firstLineIndent = Math.max(0, currentFirstX - currentLeft);
       previousLine = line;
     }
     if (current) paragraphs.push(current);
   }
 
-  /* 收尾：给没有"切分依据"的段补上正向证据，并如实定级。
-     "本段以缩进开头"本身就是一条正向线索（medium）——
-     否则每页的第一段都会因为"没有前文可依据"而被判成 low，low 比例虚高就失去提示价值。 */
   for (const paragraph of paragraphs) {
     const indentEvidence =
       paragraph.firstLineIndent !== undefined && paragraph.fontSize > 0 && paragraph.firstLineIndent >= paragraph.fontSize * indentRatio

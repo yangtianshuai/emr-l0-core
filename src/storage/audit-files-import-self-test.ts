@@ -1,5 +1,3 @@
-// 审计与锚点从旧 NDJSON 文件搬家自测（I1~I6）。
-
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
@@ -35,7 +33,6 @@ function chainOf(count: number): ChainedAdminAuditRecord[] {
 
 const ndjson = (items: unknown[]): string => `${items.map((item) => JSON.stringify(item)).join('\n')}\n`;
 
-/** 记账：一个只用到 `ledgerHas/ledgerMark` 的替身（真账本在 `WorkStore` 里，见 I4 注释） */
 function ledgerStub(): { ledgerHas(id: string): boolean; ledgerMark(id: string, note: string): void; marks: string[] } {
   const marks: string[] = [];
   return {
@@ -64,9 +61,7 @@ async function main(): Promise<void> {
 
     await test('I2 旧文件被撕断 → 只导入**验过的那一段**，并如实报问题', () => {
       const chain = chainOf(3);
-      /* 第三条只有半截（崩溃留下的残行） */
       writeFileSync(auditFile, `${ndjson(chain.slice(0, 2))}${JSON.stringify(chain[2]).slice(0, 40)}`, 'utf8');
-      /* 锚点：两条指向导入链上、一条指向"链外"（旧文件时代的污染） */
       writeFileSync(
         anchorFile,
         ndjson([
@@ -97,7 +92,6 @@ async function main(): Promise<void> {
     });
 
     await test('I3 库里已有记录 → **一条都不导**（两套链不能混）', () => {
-      /* 前置：库里已经有链（I2 导入的），且旧文件里是另一条链 */
       const other = chainOf(2);
       writeFileSync(auditFile, ndjson(other), 'utf8');
       const ledger = ledgerStub();

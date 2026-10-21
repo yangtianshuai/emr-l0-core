@@ -1,26 +1,4 @@
 #!/usr/bin/env node
-/**
- * S2 · 序列化往返保真检查（model-fidelity-check，零 npm 依赖）
- *
- * 目的：证明"文档 → 序列化 → 反序列化"不丢任何有语义的东西，尤其是
- *      provenance / tags / rev / keyContent / humanConfirmed / null 语义 / 数字类型 / 时间戳。
- *      这些字段一旦在往返中丢失，G1/G2/G3（门控、来源回溯、AI 参与标记）就全部失效。
- *
- * 用法：
- *   node model-fidelity-check.mjs <doc.json|目录> [...] [选项]
- *   --impl <module.mjs>   加载真实实现（需导出 toJson(doc) 与 fromJson(json)），默认用 JSON 往返
- *   --lossy               使用内置劣化序列化器自测（故意丢字段/改类型），用于验证本探针能抓到问题
- *   --json <file>         输出完整报告
- *   -v, --verbose         打印全部差异
- *
- * 检查项：
- *   F1 往返语义一致（关键）      F2 必填字段未丢失（关键）    F3 AI 来源完整（关键）
- *   F4 null 语义保真（关键）      F5 时间戳稳定（关键）        F6 类型漂移（关键）
- *   F7 键顺序无关（非关键）       F8 不可序列化值（关键）      F9 特殊字符覆盖（非关键）
- *   F10 视觉一致性 —— 需浏览器渲染层，本脚本输出 SKIP 并说明，不做假通过
- *
- * 退出码：0 = 所有关键项通过；1 = 存在关键失败；2 = 参数/读取错误
- */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -53,16 +31,15 @@ function parseArgs(argv) {
   return out;
 }
 
-/** 内置劣化序列化器：模拟常见实现缺陷，用于自测探针灵敏度 */
 function lossyRoundTrip(doc) {
   const back = JSON.parse(JSON.stringify(doc));
   for (const node of Object.values(back.nodes || {})) {
-    if (node.type === 'field' && typeof node.value === 'number') node.value = String(node.value); // 数字被字符串化
+    if (node.type === 'field' && typeof node.value === 'number') node.value = String(node.value);
     if (node.provenance && Array.isArray(node.provenance.evidence)) {
-      node.provenance.evidence = node.provenance.evidence.slice(0, 1).map(({ quote, ...rest }) => rest); // 丢掉部分依据
+      node.provenance.evidence = node.provenance.evidence.slice(0, 1).map(({ quote, ...rest }) => rest);
     }
-    if (node.parentId === null) delete node.parentId; // null 语义丢失
-    if ('humanConfirmed' in node && node.humanConfirmed === true) delete node.humanConfirmed; // 确认状态丢失
+    if (node.parentId === null) delete node.parentId;
+    if ('humanConfirmed' in node && node.humanConfirmed === true) delete node.humanConfirmed;
   }
   return back;
 }
@@ -96,7 +73,6 @@ function main() {
   const results = [];
   const limit = args.verbose ? Number.MAX_SAFE_INTEGER : 6;
 
-  // --impl 需要动态 import，放进 async 壳里
   return (async () => {
     let impl = null;
     if (args.impl) {
@@ -124,7 +100,6 @@ function main() {
         continue;
       }
 
-      /* ---- 执行往返 ---- */
       let back;
       let how;
       try {
@@ -148,7 +123,6 @@ function main() {
       const diffs = diffPaths(doc, back);
       add('F1', '往返语义一致', diffs.length === 0, true, diffs.length === 0 ? `无差异（方式：${how}）` : `发现 ${diffs.length} 处差异`, diffs.length ? '差异明细见下' : undefined);
 
-      /* F2 必填字段未丢失 */
       const missing = [];
       for (const [key, node] of nodeEntries(back)) {
         if (!node || !isPlainObject(node)) {
@@ -164,7 +138,6 @@ function main() {
       }
       add('F2', '必填字段未丢失', missing.length === 0, true, missing.length === 0 ? '全部节点字段完整' : `${missing.length} 处缺失`);
 
-      /* F3 AI 来源完整 */
       const aiLoss = [];
       for (const [key, node] of nodeEntries(doc)) {
         if (!node || node.provenance?.origin !== 'ai') continue;
@@ -181,7 +154,6 @@ function main() {
       }
       add('F3', 'AI 来源完整（modelId/confidence/evidence）', aiLoss.length === 0, true, aiLoss.length === 0 ? '全部 AI 节点来源信息完整' : `${aiLoss.length} 处丢失`);
 
-      /* F4 null 语义保真 */
       const nullLoss = [];
       for (const [key, node] of nodeEntries(doc)) {
         if (node && node.parentId === null) {
@@ -191,7 +163,6 @@ function main() {
       }
       add('F4', 'null 语义保真（parentId）', nullLoss.length === 0, true, nullLoss.length === 0 ? 'null 均保留' : `${nullLoss.length} 处 null 丢失`);
 
-      /* F5 时间戳稳定 */
       const tsLoss = [];
       const collectIso = (obj, path, acc) => {
         if (typeof obj === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(obj)) acc.push([path, obj]);
@@ -211,7 +182,6 @@ function main() {
       }
       add('F5', '时间戳稳定（ISO8601）', tsLoss.length === 0, true, tsLoss.length === 0 ? `检查 ${beforeTs.length} 处时间戳` : `${tsLoss.length} 处异常`);
 
-      /* F6 类型漂移 */
       const typeDrift = [];
       const walkBoth = (a, b, path) => {
         if (a === null || b === null) return;
@@ -228,7 +198,6 @@ function main() {
       walkBoth(doc, back, '$');
       add('F6', '类型漂移（数字/布尔被字符串化等）', typeDrift.length === 0, true, typeDrift.length === 0 ? '无类型漂移' : `${typeDrift.length} 处漂移`);
 
-      /* F7 键顺序无关 */
       const reorder = (v) => {
         if (Array.isArray(v)) return v.map(reorder);
         if (isPlainObject(v)) {
@@ -245,7 +214,6 @@ function main() {
       const bad = findUnserializable(doc);
       add('F8', '不可序列化值', bad.length === 0, true, bad.length === 0 ? '未发现 undefined/NaN/Infinity/BigInt/Date 实例等' : `${bad.length} 处`);
 
-      /* F9 特殊字符覆盖 */
       const textBlob = JSON.stringify(doc);
       const covered = {
         newline: /\\n/.test(textBlob),
@@ -269,7 +237,6 @@ function main() {
       results.push({ file, checks, diffs: diffs.slice(0, 200), verdict: failed.length === 0 ? 'PASS' : 'FAIL', how });
     }
 
-    /* ---- 输出 ---- */
     const out = [];
     const w = (s) => out.push(s);
     for (const r of results) {

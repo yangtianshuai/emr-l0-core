@@ -1,5 +1,3 @@
-// 就诊时间轴 —— 把一次就诊的全部文书摊在一条轴上。
-
 import type { AnnotationSeverity } from '../core/annotations.ts';
 import type { DocumentModel, NodeId } from '../model/types.ts';
 import { buildTrends } from '../model/trend.ts';
@@ -8,23 +6,14 @@ import { visitTimelineOf } from './condition.ts';
 import { compileRuleDescriptor, ruleItemsOf } from './rule-pack.ts';
 import type { QcRule, QcRulePack, QcVisitDoc } from './types.ts';
 
-/** 本模块只认这两种判定方式（它们是唯二"看多份文书"的谓词） */
 export type CrossDocRuleKind = 'visit-doc-interval' | 'visit-doc-required';
 
 export const CROSS_DOC_RULE_KINDS: readonly CrossDocRuleKind[] = ['visit-doc-interval', 'visit-doc-required'];
 
-/**
- * 一条跨文书规则在轴上的用法。
- *
- * `rule` 保持已编译的形态（不是原始 JSON）：报不报由它判，措辞也从它来 ——
- * 时间轴与质控注解因此说的是同一句话，而不是"两处各写一遍、慢慢不一致"。
-  */
 export interface VisitTimelineRuleRef {
   rule: QcRule;
   kind: CrossDocRuleKind;
-  /** 规则盯的文书类型码（如 `WST500.3`） */
   docTypeCode: string;
-  /** `visit-doc-interval` = 允许的最大间隔；`visit-doc-required` = 期限（单位都是小时） */
   hours: number;
 }
 
@@ -43,8 +32,6 @@ export function crossDocRulesOf(registry: PackRegistry): VisitTimelineRuleRef[] 
       const source = params as Record<string, unknown>;
       const docTypeCode = typeof source.docTypeCode === 'string' ? source.docTypeCode : '';
       const hours = kind === 'visit-doc-interval' ? source.maxGapHours : source.withinHours;
-      /* 参数在装包那一刻已被 `normalizeParams` 校验过；这里再判一次形状，是为了让
-         "包被手改过"这件事表现为这条规则不进轴，而不是 NaN 小时的缺口  */
       if (docTypeCode === '' || typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0) continue;
       out.push({
         rule: compileRuleDescriptor(pack.packId, descriptor),
@@ -64,9 +51,7 @@ export interface VisitTimelineDocInput {
   docTypeDisplay?: string;
   createdAt: string;
   status?: string;
-  /** 当前正在看的那一份（轴上要标出来） */
   isCurrent?: boolean;
-  /** 正文。给了才能做"变化有没有写进后面的文书"的对照；不给则该文书不参与对照 */
   doc?: DocumentModel;
 }
 
@@ -79,7 +64,6 @@ export interface VisitTimelineInput {
   admittedAt?: string;
   dischargedAt?: string;
   visitType?: string;
-  /** "病程记录"的类型码：趋势对照只认它（`WST500.3`），别处写的东西不算进过病程  */
   progressDocTypeCode?: string;
 }
 
@@ -91,18 +75,14 @@ export interface VisitTimelineAxisDoc {
   createdAt: string;
   status: string | null;
   isCurrent: boolean;
-  /** 成文时刻能否解析。解析不出来的仍留在轴上（不静默丢掉），但不参与间隔判定  */
   timed: boolean;
-  /** 该文书的正文是否在手上（不在手上时，趋势对照看不到它） */
   hasBody: boolean;
 }
 
-/** 轴上的一段：同类型文书之间（或最后一份到"出院/现在"那一段） */
 export interface VisitTimelineSegment {
   docTypeCode: string;
   fromDocId: string;
   fromAt: string;
-  /** `null` = 右端不是文书，而是出院时刻或判定时刻 */
   toDocId: string | null;
   toAt: string;
   hours: number;
@@ -116,12 +96,9 @@ export interface VisitTimelineGap {
   severity: AnnotationSeverity;
   kind: CrossDocRuleKind;
   docTypeCode: string;
-  /** 与质控注解逐字相同的依据（同一条规则、同一个上下文算出来的）  */
   detail: string;
   suggestion: string;
-  /** 轴上的定位：最宽的那一段（间隔类）或期限（应有而缺类，此时段为 null） */
   segment: VisitTimelineSegment | null;
-  /** `visit-doc-required` 才有：期限时刻 */
   deadlineAt?: string;
 }
 
@@ -131,21 +108,17 @@ export interface VisitTimelineChange {
   unit?: string;
   nodeId: NodeId;
   docId: string;
-  /** 变化发生的时刻（`field.sampledAt`） */
   sampledAt: string;
   valueText: string;
   flag: 'low' | 'high';
-  /** 在哪些后续文书里"写进去了"（再次记录同一编码，或正文提到了它的名字） */
   writtenIn: Array<{ docId: string; how: 'element' | 'text' }>;
   unwritten: boolean;
   detail: string;
 }
 
 export interface VisitTimelineTrend {
-  /** 参与对照的后续文书（病程记录） */
   progressDocIds: string[];
   changes: VisitTimelineChange[];
-  /** 没对照成的：如实报出，不能当成"写进去了"  */
   skipped: Array<{ reason: string; count: number }>;
 }
 
@@ -162,7 +135,6 @@ export interface VisitTimeline {
   gaps: VisitTimelineGap[];
   trend: VisitTimelineTrend;
   unevaluated: Array<{ ruleId: string; title: string; reason: string }>;
-  /** 需要人知道的前提（共几份文书、有没有规则在跑、有没有时间坏掉的文书） */
   notes: string[];
 }
 
@@ -176,7 +148,6 @@ function parseAt(value: string | undefined | null): number | null {
 
 const isoOf = (ms: number): string => new Date(ms).toISOString();
 
-/** 谓词侧只看"是不是一个文档级节点"，其余字段与判定无关 */
 function documentView(): Parameters<QcRule['check']>[0] {
   return { nodeId: 'n_root' as NodeId, type: 'document', text: '', tags: [], keyContent: false };
 }
@@ -189,13 +160,6 @@ function textOf(doc: DocumentModel): string {
   return parts.join('\n');
 }
 
-/**
- * 从规则里挑出"每种文书类型按哪条时限标"。
- *
- * 同一类型被多条间隔规则盯上时（例如全院 24 小时 + 产科 12 小时），轴上只画一条线：
- * 取最严的那条（小时数最小）。不这么做的话同一段会被画两遍，而两条线在界面上
- * 无法分辨，医生会以为"系统算错了"。规则各自仍会照常出注解 —— 这里只决定画哪条。
-  */
 function intervalsByType(rules: readonly VisitTimelineRuleRef[]): Map<string, VisitTimelineRuleRef> {
   const out = new Map<string, VisitTimelineRuleRef>();
   for (const ref of rules) {
@@ -216,12 +180,11 @@ function buildSegments(
   for (const [docTypeCode, ref] of intervals) {
     const timeline = visitTimelineOf(visitDocs, docTypeCode);
     if (!timeline.ok) {
-      /* 时间坏掉的文书不能静默跳过（跳过 = 把"有一份时间坏了"读成"那段时间没文书"） */
       unreadable.push(timeline.reason);
       continue;
     }
     const docs = timeline.docs;
-    if (docs.length === 0) continue; /* 一份都没有：那是"应有而缺"的职责，间隔规则不报 */
+    if (docs.length === 0) continue;
     const push = (from: { docId: string; at: number }, toDocId: string | null, toAt: number): void => {
       const hours = (toAt - from.at) / HOUR_MS;
       segments.push({
@@ -240,7 +203,6 @@ function buildSegments(
       const to = docs[index] as { docId: string; at: number };
       push(from, to.docId, to.at);
     }
-    /* 末尾那一段同样要判：最后一份之后一直没写，正是最常见的缺漏 */
     push(docs[docs.length - 1] as { docId: string; at: number }, null, endAt);
   }
   return { segments, unreadable };
@@ -261,7 +223,6 @@ function toQcVisitDoc(doc: VisitTimelineDocInput): QcVisitDoc {
 
 interface TrendCheckInput {
   docs: readonly VisitTimelineDocInput[];
-  /** 起点的采样点（由 `buildVisitTimeline` 从各文书里聚合出来） */
   changes: Array<{
     key: string;
     label: string;
@@ -274,7 +235,6 @@ interface TrendCheckInput {
     valueText: string;
     flag: 'low' | 'high';
   }>;
-  /** 判不了的计数（缺采样时间 / 后面没有文书） */
   skipped: Map<string, number>;
 }
 
@@ -301,7 +261,6 @@ function compareTrends(input: TrendCheckInput): VisitTimelineChange[] {
         writtenIn.push({ docId: item.doc.docId, how: 'element' });
         continue;
       }
-      /* 正文里提到了名字也算：医生用文字写了这次变化，系统不该说"没写" */
       const names = [...change.tags.map((tag) => tag.display), change.label].filter(
         (name): name is string => typeof name === 'string' && name !== '' && !name.includes(':'),
       );
@@ -335,8 +294,6 @@ export function buildVisitTimeline(input: VisitTimelineInput): VisitTimeline {
   const nowAt = parseAt(input.now) ?? Date.now();
   const admittedAtMs = parseAt(input.admittedAt);
   const dischargedAt = parseAt(input.dischargedAt);
-  /* 右端取 min(now, 出院时刻)：已出院的就诊拿"现在"当右端，会把"出院之后"算成缺漏 ——
-     那是最容易被当成系统坏了的那类假阳性（同 `visitDocInterval`）。 */
   const endAt = dischargedAt !== null && dischargedAt < nowAt ? dischargedAt : nowAt;
 
   const docs: VisitTimelineAxisDoc[] = input.visitDocs
@@ -354,7 +311,6 @@ export function buildVisitTimeline(input: VisitTimelineInput): VisitTimeline {
     .sort((left, right) => {
       const a = parseAt(left.createdAt);
       const b = parseAt(right.createdAt);
-      /* 时间解析不出来的排在最后：不丢，但要让人看出来（同 `trend.ts` 对缺采样点的处置） */
       if (a === null && b === null) return left.docId.localeCompare(right.docId);
       if (a === null) return 1;
       if (b === null) return -1;
@@ -373,14 +329,12 @@ export function buildVisitTimeline(input: VisitTimelineInput): VisitTimeline {
   }
 
   const { segments, unreadable } = buildSegments(input.visitDocs, intervals, endAt);
-  /* 时间坏掉的文书：轴画不出那一段，但结论仍在 —— 说出来，别让"画不出来"看起来像"线是连的" */
   if (unreadable.length > 0) {
     for (const ref of intervals.values()) {
       unevaluated.push({ ruleId: ref.rule.id, title: ref.rule.title, reason: unreadable.join('；') });
     }
   }
 
-  /* 缺口：判定交给已编译的规则（与质控注解同一句话），定位交给轴上的段  */
   const gaps: VisitTimelineGap[] = [];
   const visitDocs = input.visitDocs.map(toQcVisitDoc);
   for (const ref of input.rules) {
@@ -415,7 +369,6 @@ export function buildVisitTimeline(input: VisitTimelineInput): VisitTimeline {
     gaps.push(gap);
   }
 
-  /* 趋势对照：只承认"病程记录"之后的文书 —— 写在别处不算进过病程 */
   const progressCode = input.progressDocTypeCode ?? 'WST500.3';
   const progressDocIds = docs.filter((doc) => doc.docTypeCode === progressCode).map((doc) => doc.docId);
   const skipped = new Map<string, number>();
@@ -466,9 +419,6 @@ export function buildVisitTimeline(input: VisitTimelineInput): VisitTimeline {
   return {
     visitId: input.visitId ?? null,
     visitType: input.visitType ?? null,
-    /* 回显统一成 ISO 形态：`endAt` 是算出来的（必然 ISO），若这两格原样回显，
-       界面上会出现"窗口 15:00 出院，右端 15:00:00.000"这种同一时刻两种写法的对照 ——
-       看起来像两个不同的时间点。解析不出来的原样回显（要看得见它是坏的）。 */
     admittedAt: admittedAtMs === null ? input.admittedAt ?? null : isoOf(admittedAtMs),
     dischargedAt: dischargedAt === null ? input.dischargedAt ?? null : isoOf(dischargedAt),
     now: input.now,

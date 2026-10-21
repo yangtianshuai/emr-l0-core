@@ -1,5 +1,3 @@
-// 具名条件（判定方式库）自测。
-
 import { TestSuite, assert, assertEqual, assertThrows } from '../testing/harness.ts';
 import type { JsonValue, NodeId } from '../model/types.ts';
 import { createEmptyPackRegistry } from '../knowledge/default-registry.ts';
@@ -40,14 +38,12 @@ function ctx(over: Partial<QcContext> = {}): QcContext {
   return { now: '2026-10-16T12:00:00.000Z', ...over };
 }
 
-/** 一条"正文包含某个词"的条件树（返回值就是库里的 JSON 形状：条件是未校验的 JSON）  */
 function contains(words: string[]): JsonValue {
   const tree = normalizeCondition({ kind: 'atom', field: 'text', op: 'contains', value: words });
   if (!tree) throw new Error(`构造样本失败：contains ${words.join('/')}`);
   return tree as unknown as JsonValue;
 }
 
-/** 一个只有规则的包（判定方式在库里） */
 function rulePack(packId: string, items: QcRuleItem[]): QcRulePack {
   return {
     packId,
@@ -62,8 +58,6 @@ function ruleOf(itemId: string, conditionId: string, title = '引用判定方式
   return { itemId, title, severity: 'warn', predicate: { kind: 'field-condition', params: { conditionId } } };
 }
 
-/* 用出厂的空注册表（`createEmptyPackRegistry()`）：它带着本机实现了哪些引擎这一类信息，
-   这里看不出"本机有没有规则引擎"才是对的 —— 引用面要跨包数，所以需要一个真实的注册表  */
 function registryWith(library: ConditionLibrary, ...packs: QcRulePack[]): PackRegistry {
   const registry = createEmptyPackRegistry();
   for (const pack of packs) {
@@ -72,7 +66,6 @@ function registryWith(library: ConditionLibrary, ...packs: QcRulePack[]): PackRe
   return registry;
 }
 
-/** 命中与否（把"判不了"单独标出来，免得把两者混成一个 false） */
 function verdictOf(pack: QcRulePack, library: ConditionLibrary, ruleId: string, text: string): 'hit' | 'miss' | 'uncertain' {
   const rule = compileRulePack(pack, library).find((item) => item.id === ruleId);
   if (!rule) throw new Error(`样本里没有规则 ${ruleId}`);
@@ -81,7 +74,6 @@ function verdictOf(pack: QcRulePack, library: ConditionLibrary, ruleId: string, 
   return 'uncertain' in result ? 'uncertain' : 'hit';
 }
 
-/** 库里那一条（用界面同一条路：新建 → 拿到清单与编码） */
 function libraryWith(input: { name: string; when: unknown; params?: unknown }): {
   items: QcConditionDefinition[];
   itemId: string;
@@ -100,7 +92,6 @@ async function main(): Promise<void> {
 
     const second = addCondition(first.items, { name: '第二条', when: contains(['TODO']) });
     assertEqual(second.itemId, 'C-CUSTOM-2', '编码递增');
-    /* 删掉中间一条之后再建：不能撞上已用过的编码 —— 编码是引用键，撞了等于把引用指到别处 */
     const trimmed = second.items.filter((item) => item.itemId !== 'C-CUSTOM-1');
     assertEqual(addCondition(trimmed, { name: '第三条', when: contains(['X']) }).itemId, 'C-CUSTOM-3', '编码不回收');
 
@@ -153,7 +144,6 @@ async function main(): Promise<void> {
     );
     assertEqual(conditionCatalogOf(items, registry).length, 1, '目录只列判定方式，不列规则');
 
-    /* 停用着的引用方也要列出来：它会因为这条条件的改动而改变行为（只是暂时没跑） */
     const disabled = rulePack('qc.a', [{ ...ruleOf('R-A-1', itemId), enabled: false } as QcRuleItem]);
     const registry2 = registryWith(library, disabled);
     assertEqual(
@@ -227,7 +217,6 @@ async function main(): Promise<void> {
       '被引用的判定方式删除必须被拒',
     );
 
-    /* 把引用改成别的写法（这里直接改指到另一条判定方式），就能删了 —— 拦住之后必须有出路 */
     const another = addCondition(items, { name: '另一条', when: contains(['X']) });
     const repointed = registryWith(
       conditionLibraryOf(another.items),
@@ -254,7 +243,6 @@ async function main(): Promise<void> {
       },
       '悬空引用必须在装载期被拒（等到扫描时，"少跑一条"没人看得出来）',
     );
-    /* 装载走注册表时同样拒：两条路走的是同一段校验 */
     assertThrows(
       () => registryWith(library, dangling),
       (err) => (err as { code?: string }).code === 'E_RULE_CONDITION_UNKNOWN',
@@ -329,14 +317,12 @@ async function main(): Promise<void> {
     const library = conditionLibraryOf(items);
     const registry = registryWith(library, rulePack('qc.a', [ruleOf('R-USE-1', itemId)]));
 
-    /* 规则引用了一条库里已经没有的判定方式：回读如实说，不编一句话 */
     const gone = ruleOf('R-GONE', 'C-GONE');
     assertEqual(
       conditionSummaryOf(gone as never, resolvedConditionsOf(rulePack('qc.a', [gone]), library)),
       '引用条件「C-GONE」：库里没有这一条（它被删掉了，或这次没把判定方式库带上）',
       '读不出来就说读不出来，不编一句话',
     );
-    /* 判定方式本身的条件树坏掉时：目录那一列回 null，让界面退回显示参数原文 */
     const brokenTree = { kind: 'atom', field: 'text', op: 'matches', value: 'x' } as unknown as JsonValue;
     const degraded = items.map((item) => ({ ...item, when: brokenTree }));
     assertEqual(conditionCatalogOf(degraded, registry)[0]?.summary, null, '读不出来的条件：那一列回 null，不编一句人话');

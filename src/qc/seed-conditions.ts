@@ -1,5 +1,3 @@
-// 出厂种子判定方式：把原来写死在代码里的 6 种判法，用"判定方式"的形态交付一次。
-
 import type { QcConditionDefinition } from './types.ts';
 
 export const SEED_CONDITIONS_KEY = 'config.qc-conditions-seeded';
@@ -31,7 +29,6 @@ export const SEED_CONDITIONS: readonly QcConditionDefinition[] = [
       children: [
         TEXT_ONLY,
         { kind: 'atom', field: 'text', op: 'missing-pattern', value: 'time' },
-        /* 且长度不少于阈值：`not(字数少于 N)` = 字数 ≥ N（算子表里只有"少于/多于"两档） */
         { kind: 'not', child: { kind: 'atom', field: 'text', op: 'length-less-than', value: '$minLength' } },
       ],
     },

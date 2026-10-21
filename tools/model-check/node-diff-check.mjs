@@ -1,29 +1,4 @@
 #!/usr/bin/env node
-/**
- * S3 · 节点操作 / 留痕 / 回放一致性检查（node-diff-check，零 npm 依赖）
- *
- * 目的：用固定种子的随机操作压测"节点级 diff + 留痕 + 回放"这条链，覆盖 DoD 2/4/5：
- *   D1 diff → apply 往返一致（patch 引擎自洽，关键）
- *   D2 指定 patch 精确还原状态（手写 patch 是否与真实变更一致，关键）★ 最易出 bug 的一项
- *   D3 留痕链完整（rev 连续、op/targetId 合法、targetId 存在，关键）
- *   D4 全量重放确定性（从初始快照按序重放全部 patch == 最终文档，关键）
- *   D5 来源标记保留（未被操作的节点 provenance 逐字节不变；AI 节点必有 modelId+confidence，关键）
- *   D6 节点 ID 稳定性（id 不重编号；已删除 id 不得复用，关键）
- *
- * 用法：
- *   node node-diff-check.mjs <doc.json|目录> [...] [选项]
- *   --steps <n>            每份文档执行的操作步数（默认 24）
- *   --seed <n>             随机种子（默认 20261008，保证可复现）
- *   --json <file>          输出报告
- *   -v, --verbose          打印每一步操作明细
- *   --inject-drop-patch <k>    从重放序列丢弃第 k 条 patch（自测：D4 必须失败）
-  --inject-corrupt-patch     污染重放序列最后一条 patch（自测：D4 必须失败）
- *   --inject-drop-revision <k> 丢弃第 k 条留痕（自测：D3 必须失败）
- *   --inject-renumber          给最终文档某节点改名（自测：D6 必须失败）
- *   --inject-strip-provenance  抹掉某未操作节点的 provenance（自测：D5 必须失败）
- *
- * 退出码：0 = 全部关键项通过；1 = 存在关键失败；2 = 参数/读取错误
- */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
@@ -75,8 +50,6 @@ function parseArgs(argv) {
   }
   return out;
 }
-
-/* --------------------------- 操作生成器 --------------------------- */
 
 const allNodes = (doc) => Object.values(doc.nodes);
 const isLeaf = (doc, id) => !Object.values(doc.nodes).some((n) => n.parentId === id);
@@ -251,8 +224,6 @@ function weightedPick(rng) {
   return [OPS[0][0], OPS[0][1]];
 }
 
-/* ----------------------------- 检查流程 ----------------------------- */
-
 function runOne(doc, args) {
   const checks = [];
   const add = (id, name, pass, critical, detail, hint) => checks.push({ id, name, pass, critical, detail, hint });
@@ -261,9 +232,9 @@ function runOne(doc, args) {
   aiCounter = 0;
 
   let current = clone(doc);
-  current.status = 'draft'; // 随机操作属于书写态，避免与定版语义冲突
+  current.status = 'draft';
   const snapshots = [clone(current)];
-  const boundaries = []; // 每一步成功操作后的 patch 数量，用于 D4 逐步校验点比对
+  const boundaries = [];
   const replayPatches = [];
   const revisions = [];
   const touched = new Set();
@@ -293,7 +264,6 @@ function runOne(doc, args) {
       stepErrors.D2.push({ step, op: name, reason: `applyPatch 抛错：${err.message}`, patch: r.patch });
     }
 
-    /* 写入时间戳与留痕 */
     const next = clone(r.newDoc);
     next.updatedAt = at;
     if (next.machineReadable) next.machineReadable.generatedAt = at;
@@ -301,7 +271,6 @@ function runOne(doc, args) {
     revisions.push(rev);
     next.revisions = clone(revisions);
 
-    /* D1：diff → apply 往返（patch 引擎自洽） */
     const d = jsonDiff(current, next);
     try {
       const rebuilt = applyPatch(current, d);
@@ -321,7 +290,6 @@ function runOne(doc, args) {
     boundaries.push(replayPatches.length);
   }
 
-  /* 注入故障（自测用） */
   const verifyPatches = replayPatches.map((p) => clone(p));
   if (args.injectDropPatch > 0 && args.injectDropPatch <= verifyPatches.length) verifyPatches.splice(args.injectDropPatch - 1, 1);
   if (args.injectCorruptPatch && verifyPatches.length > 0) {
@@ -341,16 +309,10 @@ function runOne(doc, args) {
     if (untouched) delete verifyFinal.nodes[untouched].provenance;
   }
 
-  /* D1 */
   add('D1', 'diff → apply 往返一致（patch 引擎自洽）', stepErrors.D1.length === 0, true, stepErrors.D1.length === 0 ? `校验 ${replayPatches.length} 条 patch` : `${stepErrors.D1.length} 步失败`, stepErrors.D1[0] ? `首例：step ${stepErrors.D1[0].step} ${stepErrors.D1[0].op} ${stepErrors.D1[0].reason}` : undefined);
 
-  /* D2 */
   add('D2', '手写 patch 精确还原状态', stepErrors.D2.length === 0, true, stepErrors.D2.length === 0 ? '全部操作 patch 与真实变更一致' : `${stepErrors.D2.length} 步不一致`, stepErrors.D2[0] ? `首例：step ${stepErrors.D2[0].step} ${stepErrors.D2[0].op} ${stepErrors.D2[0].reason}` : undefined);
 
-  /* D3 留痕链
-     注意：只有"变更节点"的 op 才必须带非空 patch。
-     sign / reject-ai 不改动节点内容（只改变文档状态或建议状态），允许空 patch。
-     —— 这条区分是写 S4 契约测试时发现的，早期版本会误判。 */
   const revIssues = [];
   const validOps = new Set(['create', 'insert', 'update', 'delete', 'move', 'accept-ai', 'reject-ai', 'sign', 'import', 'migrate', 'external']);
   const mutatingOps = new Set(['create', 'insert', 'update', 'delete', 'move', 'accept-ai', 'import', 'migrate', 'external']);
@@ -365,7 +327,6 @@ function runOne(doc, args) {
   });
   add('D3', '留痕链完整（rev 连续 / op / targetId）', revIssues.length === 0, true, revIssues.length === 0 ? `${verifyRevisions.length} 条留痕全部合法` : `${revIssues.length} 处问题`, revIssues[0]);
 
-  /* D4 全量重放（逐步校验点 + 终态） */
   let replayOk = true;
   let replayDetail = `重放 ${verifyPatches.length} 条 patch，逐步校验 ${boundaries.length} 个检查点`;
   try {
@@ -390,7 +351,6 @@ function runOne(doc, args) {
   }
   add('D4', '全量重放确定性（含逐步校验点）', replayOk, true, replayDetail, replayOk ? undefined : `seed=${args.seed}（用同种子可复现）`);
 
-  /* D5 来源标记保留 */
   const provIssues = [];
   for (const [id, node] of Object.entries(doc.nodes)) {
     if (touched.has(id) || !verifyFinal.nodes[id]) continue;
@@ -407,7 +367,6 @@ function runOne(doc, args) {
   }
   add('D5', '来源标记保留（未操作节点逐字节不变）', provIssues.length === 0, true, provIssues.length === 0 ? `${Object.keys(doc.nodes).length} 个基线节点来源标记稳定` : `${provIssues.length} 处问题`, provIssues[0]);
 
-  /* D6 ID 稳定性 */
   const baseIds = new Set(Object.keys(doc.nodes));
   const finalIds = new Set(Object.keys(verifyFinal.nodes));
   const idIssues = [];

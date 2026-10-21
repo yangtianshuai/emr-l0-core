@@ -24,7 +24,6 @@ export interface WorkspaceScope {
 
 export type WorkspaceLoadResult =
   | { ok: true; scope: WorkspaceScope; meta: SnapshotMeta; firstRun: false }
-  /** 文件不存在 */
   | { ok: true; scope: WorkspaceScope; meta: null; firstRun: true }
   /** 文件在、但读不出来：必须停手，不能当空工作区继续 */
   | { ok: false; code: SnapshotReadError; message: string; firstRun: false };
@@ -35,7 +34,6 @@ export type SidecarData = { suggestions: SuggestionBookSnapshot; annotations: An
 
 export type SidecarLoadResult =
   | { ok: true; firstRun: true; data: null }
-  /** digest 是本版内容摘要，留作下次落盘的基线；saltFingerprint 取自信封头部 */
   | { ok: true; firstRun: false; data: SidecarData; saltFingerprint?: string; digest?: string }
   | { ok: false; code: SnapshotReadError; message: string; firstRun: false };
 
@@ -59,9 +57,6 @@ export function loadSidecars(file: string): SidecarLoadResult {
 }
 
 export const SEALED_FORMAT = 'l0-sidecars-sealed';
-
-// 快照含 nodeId / ruleId，足以指回患者，故一律加密落盘：缺口令时拒绝写入，不退回明文。
-// salt 有意保持稳定以复用派生结果，前提是口令为密钥管理注入的高熵密钥。
 
 function deriveStateSalt(passphrase: string): Uint8Array {
   return sm3(utf8(`l0-sidecar-snapshot-salt-v1:${passphrase}`)).subarray(0, 16);
@@ -98,11 +93,9 @@ export function saveSealedPayload<T>(
   passphrase: string,
   options: {
     at?: string;
-    /** 32 位 hex；缺省时由口令派生 */
     salt?: string;
     /** 仅测试用：显式指定派生迭代数（默认 200_000） */
     iterations?: number;
-    /** 上次读到的 digest；盘上不是那一版则拒写 */
     expect?: SnapshotOptions['expect'];
   } = {},
 ): SnapshotMeta {
@@ -164,11 +157,9 @@ export function saveSidecarsSealed(
   passphrase: string,
   options: {
     at?: string;
-    /** 32 位 hex；缺省时由口令派生 */
     salt?: string;
     /** 仅测试用：显式指定派生迭代数（默认 200_000） */
     iterations?: number;
-    /** 上次读到的 digest；盘上不是那一版则拒写 */
     expect?: SnapshotOptions['expect'];
   } = {},
 ): SnapshotMeta {
@@ -183,7 +174,7 @@ function saltFingerprintOfEnvelope(envelope: Envelope | undefined): string | nul
 }
 
 export type SealedInspectResult =
-  | { ok: true; saltFingerprint: string; iterations: number; /** 未给 currentSalt 时为 undefined（"不知道"不能写成 false） */ usesCurrentSalt?: boolean }
+  | { ok: true; saltFingerprint: string; iterations: number; usesCurrentSalt?: boolean }
   | { ok: false; code: SnapshotReadError | 'E_SEALED_NOT_PASSPHRASE'; message: string };
 
 export function inspectSealedSidecars(file: string, currentSalt?: Uint8Array): SealedInspectResult {

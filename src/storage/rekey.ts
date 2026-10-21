@@ -1,16 +1,10 @@
-// 口令轮换：把库里所有密封行从旧口令换成新口令。
-// 口令从环境变量搬进库之后，多了一个共享口令时代没有的失败模式：
-
 import { inTransaction, type SqliteDatabase } from './sqlite.ts';
 import { sealValue, unsealValue } from './sealed.ts';
 
-/** 新旧口令（且未指定新盐）相同时拒绝：那种"轮换"什么也没换 */
 export const REKEY_SAME_KEY_CODE = 'E_REKEY_SAME_KEY';
-/** 有行读不通（口令错 / 那一行被改过）：整批中止，库一字未动 */
 export const REKEY_UNREADABLE_CODE = 'E_REKEY_UNREADABLE';
 export const REKEY_NO_KEY_CODE = 'E_REKEY_NO_KEY';
 
-/** 三处密封载荷各有多少行 */
 export interface RekeyScope {
   documents: number;
   sidecars: number;
@@ -23,24 +17,17 @@ export interface RekeyPlan {
 }
 
 export type RekeyOutcome =
-  | { ok: true; plan: RekeyPlan; /** true = 真的重写过；false = 只做了检查（试运行） */ applied: boolean }
+  | { ok: true; plan: RekeyPlan; applied: boolean }
   | { ok: false; code: string; message: string };
 
 export interface RekeyOptions {
-  /**
-   * 新盐（32 位 hex）。不传 = 按新口令派生（与 `resolveStateSalt` 同一口径）。
-   * 注意：这与"沿用旧盐"不是一回事 —— 要沿用就把服务端配置里的盐显式传进来。
-    */
   newSalt?: string;
-  /** 写入时刻（测试可注入，保证可复现）；只用于日志与返回值，不写进任何时间戳列 */
   at?: string;
-  /** 测试与复现专用：显式派生迭代数（理由同 `sealValue` 的注释） */
   iterations?: number;
 }
 
 interface SealedRow {
   table: 'documents' | 'sidecars' | 'sealed_kv';
-  /** `documents` / `sidecars` 用 doc_id，`sealed_kv` 用 key */
   id: string;
   digest: string;
   sealed: string;
@@ -56,7 +43,6 @@ function rowOf(raw: unknown, table: SealedRow['table'], idField: string): Sealed
   };
 }
 
-/** 读出三处全部密封行（只读密文，不解密：这一步不该付出派生的代价）  */
 function readSealedRows(db: SqliteDatabase): SealedRow[] {
   const rows: SealedRow[] = [];
   for (const raw of db.prepare('select doc_id, payload_digest, payload_sealed from documents').all()) {
@@ -79,13 +65,6 @@ function scopeOf(rows: readonly SealedRow[]): RekeyScope {
   };
 }
 
-/**
- * 逐行解密。任何一行失败就整体失败（调用方据此中止，不写任何东西）。
- *
- * 报告里带上行号与身份，而不是一句"解密失败"：口令给错与"某一行被改过"是两件事，
- * 而它们的现场表现一模一样 —— 前者是"全部行都失败"，后者是"只有那一行失败"。
- * 把失败行数与位置写清楚，运维才能一眼分出自己踩的是哪一种。
-  */
 function decodeAll(
   rows: readonly SealedRow[],
   key: string,
@@ -109,8 +88,6 @@ function decodeAll(
   return { ok: true, values };
 }
 
-// 恰好是"我拿的这把旧口令对不对"。让它在真正动手前就暴露，代价是零。
-
 export function planRekey(db: SqliteDatabase, oldKey: string): RekeyOutcome {
   if (!oldKey) {
     return { ok: false, code: REKEY_NO_KEY_CODE, message: '缺少旧口令：没有口令就没有"读通"可言（拒绝按明文处理）' };
@@ -121,12 +98,6 @@ export function planRekey(db: SqliteDatabase, oldKey: string): RekeyOutcome {
   return { ok: true, plan: { scope: scopeOf(rows), total: rows.length }, applied: false };
 }
 
-/**
- * 执行轮换：先全部读通，再在一个事务里逐行重密封。
- *
- * `newKey` 与新盐必须由调用方给出；两者都与旧值相同时拒绝 ——
- * 让一次什么都没换的运维动作失败，而不是打印"完成"。
-  */
 export function applyRekey(
   db: SqliteDatabase,
   oldKey: string,
@@ -148,12 +119,10 @@ export function applyRekey(
   }
 
   const rows = readSealedRows(db);
-  /* 阶段一：全部读通。这一步之后才允许写 —— 顺序反了就是"用错口令覆盖唯一一份数据" */
   const decoded = decodeAll(rows, oldKey, options);
   if (!decoded.ok) return { ok: false, code: decoded.code, message: decoded.message };
 
   const values = decoded.values;
-  /* 阶段二：一个事务里全部重密封（信封每次写入都换 IV，于是摘要与密文一起变） */
   try {
     inTransaction(db, () => {
       rows.forEach((row, index) => {
@@ -168,7 +137,6 @@ export function applyRekey(
           db.prepare('update sidecars set payload_digest = ?, payload_sealed = ? where doc_id = ?')
             .run(sealed.digest, sealed.sealed, row.id);
         } else {
-          /* `updated_at` 刻意不更新：它回答"这份配置何时被改"，而轮换没改内容  */
           db.prepare('update sealed_kv set payload_digest = ?, payload_sealed = ? where key = ?')
             .run(sealed.digest, sealed.sealed, row.id);
         }
@@ -185,7 +153,6 @@ export function applyRekey(
   return { ok: true, plan: { scope: scopeOf(rows), total: rows.length }, applied: true };
 }
 
-/** 给运维看的行数与分布（试运行与执行后都用同一句话） */
 export function describeRekeyPlan(plan: RekeyPlan): string {
   if (plan.total === 0) return '库里没有任何密封行（空库：轮换无事可做）';
   return `文档 ${plan.scope.documents} 行 / 旁挂数据 ${plan.scope.sidecars} 行 / 配置与整体式数据 ${plan.scope.kv} 行，合计 ${plan.total} 行`;

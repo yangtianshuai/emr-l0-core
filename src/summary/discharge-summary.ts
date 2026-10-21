@@ -1,5 +1,3 @@
-// 出院汇总（出院小结派生 + 缺口核对）。
-
 import type { NodeId } from '../model/types.ts';
 
 export interface SummaryParagraph {
@@ -13,17 +11,14 @@ export interface SummarySection {
   paragraphs: SummaryParagraph[];
 }
 
-/** 一份参与汇总的文书（调用方从文档模型摊平后传入，本模块不认识文档结构） */
 export interface SummaryDoc {
   docId: string;
   title: string;
-  /** WS/T 500 文档类型码，如 `WST500.1`（入院记录）/ `WST500.3`（病程记录） */
   docTypeCode: string;
   createdAt: string;
   sections: SummarySection[];
 }
 
-/** 来源：这一句原文出自哪份文书的哪个节点（界面据此跳回去） */
 export interface DeriveSource {
   docId: string;
   docTitle: string;
@@ -36,15 +31,12 @@ export interface DeriveSource {
 export type DeriveState = 'new' | 'same' | 'changed';
 
 export interface DeriveItem {
-  /** 目标章节 code（也是批量生成建议时的勾选键） */
   key: string;
   title: string;
-  /** 目标章节下的文本节点；没有这一章时为 null —— 此时不能生成建议  */
   targetNodeId: NodeId | null;
   text: string;
   sources: DeriveSource[];
   state: DeriveState;
-  /** 本次文书这一章现有的文本（供界面并排看） */
   current: string;
 }
 
@@ -70,15 +62,6 @@ export interface DischargeSummaryPlan {
   notes: string[];
 }
 
-/**
- * 目标章节 ← 来源章节。
- *
- * `merge: true` 表示"无条件一并取"（入院情况要同时要主诉与现病史）；
- * 缺省表示"按顺序取第一个有内容的"（出院诊断先看病程记录，没有再退回入院记录的初步诊断）。
- *
- * 这张表是临床口径，不是技术口径：哪一章该复述哪一章，只有写病历的人能定。
- * 因此它放在一处、写得直白，改口径不改算法。
-  */
 const TARGETS: Array<{
   target: string;
   title: string;
@@ -119,12 +102,6 @@ const TARGETS: Array<{
 
 export const PARAGRAPH_JOINER = '；';
 
-/**
- * 合并多段原文。
- *
- * 前一段已经以句末/分号收尾时不再插入连接符：否则会出现「……3天。；患者1年前……」这种
- * 一句话里带两个终止符的样子。插入与省略的判据只看原文最后一个字符 —— 不改动任何原有字符。
-  */
 function joinTexts(texts: string[]): string {
   let out = '';
   for (const text of texts) {
@@ -134,9 +111,6 @@ function joinTexts(texts: string[]): string {
   return out;
 }
 
-/**
- * 生成派生计划。纯函数：不读库、不写文档、不看时钟。
-  */
 export function planDischargeSummary(input: {
   currentDocId: string;
   docs: SummaryDoc[];
@@ -160,25 +134,13 @@ export function planDischargeSummary(input: {
     }
 
     const sources: DeriveSource[] = [];
-    /* 先记账、后判定：优先级更高的来源缺失时，只有最终一条都没取到才算缺口。
-       否则会出现"出院诊断既有内容、又被报缺病程记录诊断章"的自相矛盾 ——
-       那句提示会让医生以为还得去补一份病程诊断，而实际上他已经有可用的原文。  */
     const pending: DeriveGap[] = [];
-    /**
-     * 同一句缺口只说一次。
-     *
-     * 「入院情况」由主诉 + 现病史两个槽位组成，两者都指向入院记录；
-     * 不去重时会连报两遍"本次就诊没有入院记录" —— 看起来像缺了两份文书。
-     */
     const pushPending = (gap: DeriveGap): void => {
       if (pending.some((item) => item.code === gap.code && item.detail === gap.detail)) return;
       pending.push(gap);
     };
     let collected = false;
     for (const pick of rule.picks) {
-      /* merge 的槽位无论前面有没有内容都要取；非 merge 的只在"还没有内容"时取，
-         这样"病程记录有诊断就用病程的，没有才退回入院记录的初步诊断"是规则本身说清的，
-         而不是靠遍历顺序碰巧成立 */
       if (!pick.merge && collected) continue;
 
       const matchedDocs = docs.filter((doc) => doc.docTypeCode === pick.docTypeCode);
@@ -246,8 +208,6 @@ export function planDischargeSummary(input: {
     });
   }
 
-  /* 目标章存在但一个字都没有，同时也没有任何来源 —— 这是两个缺口叠在一起，
-     分开说清：既没有原文可搬，也没有人写过。 */
   for (const item of items) {
     if (item.targetNodeId === null) continue;
     if (item.current.trim() === '' && item.text.trim() === '') {
@@ -280,15 +240,7 @@ export function planDischargeSummary(input: {
 }
 
 export interface ApplicabilityInput {
-  /** 就诊类型（`outpatient` / `inpatient` / `emergency` / `physical-exam`；未知传空串） */
   visitType?: string | null;
-  /**
-   * 这份文书是否来自导入。
-   *
-   * 导入件没有可信的就诊类型：导入时只给了一条 `outpatient` 的占位记录
-   * （见 demo 的 `V_IMPORT_*`）。按它判"门诊"会把一份真实的出院记录挡在门外，
-   * 所以导入件一律视为未知，不做限制。
-    */
   imported?: boolean;
 }
 
@@ -300,17 +252,6 @@ export interface Applicability {
 
 const VISIT_LABEL: Record<string, string> = { outpatient: '门诊', emergency: '急诊', 'physical-exam': '体检' };
 
-/**
- * 「出院汇总」这一栏该不该出现在本次就诊上。
- *
- * 判据只有一条：是不是住院。理由不是"门诊没有出院小结"这种常识，
- * 而是这一栏的全部内容都来自住院过程（入院记录 / 病程记录 / 出院记录）——
- * 在门诊接诊上摆一个永远算不出来的入口，等于让人点进去再被拒一次。
- *
- * 两条"不限制"的边界（与模板的 `templateFitsVisit` 同口径：认不出就不挡）：
- *   · 就诊类型为空 —— 认不出，不能替人断言"这不是住院"；
- *   · 导入件 —— 类型是占位值，不可信。
-  */
 export function dischargeSummaryApplicability(input: ApplicabilityInput): Applicability {
   const type = String(input.visitType ?? '');
   if (input.imported === true || type === '') return { applicable: true, reason: null };

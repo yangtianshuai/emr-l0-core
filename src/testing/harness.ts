@@ -1,5 +1,3 @@
-// 极简测试框架（零依赖）。
-
 export interface TestResult {
   name: string;
   ok: boolean;
@@ -29,7 +27,6 @@ export class TestSuite {
     }
   }
 
-  /** 打印报告并返回退出码（0 = 全部通过） */
   report(): number {
     const failed = this.results.filter((r) => !r.ok);
     const lines: string[] = [];
@@ -95,7 +92,6 @@ export function assertThrows(fn: () => unknown, predicate: (err: unknown) => boo
   if (!threw) throw new Error(`${message}：期望抛出错误，但调用成功`);
 }
 
-/** 确定性随机数（保证回归可复现） */
 export function makeRng(seed: number): () => number {
   let s = seed >>> 0 || 1;
   return () => {

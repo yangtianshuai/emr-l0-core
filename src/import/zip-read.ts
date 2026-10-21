@@ -1,5 +1,3 @@
-// T25 · ZIP 读取器（零依赖，除 node:zlib 外）。
-
 import { inflateRawSync } from 'node:zlib';
 import { crc32 } from '../export/zip.ts';
 
@@ -25,13 +23,11 @@ export class ZipError extends Error {
 
 export interface ZipEntry {
   path: string;
-  /** 0 = store，8 = deflate */
   method: number;
   /** 解压后字节数 */
   size: number;
   /** 压缩后字节数 */
   compressedSize: number;
-  /** CRC32 校验是否通过 */
   crcOk: boolean;
   data: Uint8Array;
 }
@@ -137,7 +133,6 @@ export function openZip(bytes: Uint8Array, options: ReadZipOptions = {}): ZipArc
   };
 }
 
-/** 按驼峰约束查找入口（OFD 的实际文件名大小写与前缀可能各异） */
 export function findEntry(archive: ZipArchive, pattern: RegExp): ZipEntry | undefined {
   return archive.entries.find((entry) => pattern.test(entry.path));
 }

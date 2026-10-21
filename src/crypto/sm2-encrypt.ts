@@ -1,7 +1,3 @@
-// SM2 公钥加密（GB/T 32918.4），密文顺序 C1C3C2。
-// 口令模式要求收发双方共享一个口令（口令怎么安全送达？又回到原点）。
-// 公钥加密把这一步变成：只有持有私钥的人能解出内容密钥，
-
 import { sm3 } from './sm3.ts';
 import { concatBytes, sm3Kdf } from './kdf.ts';
 import {
@@ -18,8 +14,8 @@ import {
 } from './sm2.ts';
 
 export const SM2_CIPHERTEXT_ORDER = 'C1C3C2' as const;
-const C1_LENGTH = 65; // 0x04 ‖ X(32) ‖ Y(32)
-const C3_LENGTH = 32; // SM3 摘要
+const C1_LENGTH = 65;
+const C3_LENGTH = 32;
 
 export type Sm2EncryptErrorCode =
   | 'E_SM2_MALFORMED'
@@ -74,16 +70,11 @@ export function inspectSm2Ciphertext(ciphertext: Uint8Array): { ok: boolean; cod
 }
 
 export interface Sm2EncryptOptions {
-  /** 注入固定随机数 k（测试用）：不允许生产使用 —— k 泄露等于私钥泄露 */
   k?: bigint;
   /** KDF 全 0 时的最大重试次数（标准要求换 k 重来） */
   maxRetries?: number;
 }
 
-/**
- * 加密：C1 = [k]G，t = KDF(x2‖y2, len)，C2 = M ⊕ t，C3 = SM3(x2‖M‖y2)。
- * 输出 C1‖C3‖C2。
- */
 export function sm2Encrypt(plaintext: Uint8Array, publicKey: Sm2Point, options: Sm2EncryptOptions = {}): Uint8Array {
   if (!isOnCurve(publicKey)) throw new Error('SM2 加密：接收方公钥不在曲线上');
   const maxRetries = options.maxRetries ?? 8;
@@ -109,10 +100,6 @@ export function sm2Encrypt(plaintext: Uint8Array, publicKey: Sm2Point, options: 
   throw new Error('SM2 加密：KDF 连续返回异常值，已按标准终止（不使用异常密钥）');
 }
 
-/**
- * 解密：校验 C1 在曲线上 → [d]C1 得共享点 → KDF → M = C2 ⊕ t → 校验 C3。
- * C3 不符时不返回任何明文（哪怕 M 已经在内存里）—— 这是"拒绝而不是纠错"的纪律。
-  */
 export function sm2Decrypt(ciphertext: Uint8Array, privateKey: bigint): Sm2DecryptResult {
   const structure = inspectSm2Ciphertext(ciphertext);
   if (!structure.ok) return { ok: false, code: structure.code!, reason: structure.reason! };
@@ -145,7 +132,6 @@ export function sm2Decrypt(ciphertext: Uint8Array, privateKey: bigint): Sm2Decry
   return { ok: true, plaintext };
 }
 
-/** 由私钥推导公钥（解密后自检"私钥与公钥是否配对"用；配错的表现是"所有密文都解不开"） */
 export function publicKeyOf(privateKey: bigint): Sm2Point {
   return derivePublicKey(privateKey);
 }

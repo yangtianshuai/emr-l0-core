@@ -1,5 +1,3 @@
-// 文档校验：结构校验 + 语义校验（11 条硬规则）。
-
 import { hashNodes } from './hash.ts';
 import { isPlainObject } from './guards.ts';
 import { controlCellsOf, matchesControlCellType, type ControlGridNode } from './control.ts';
@@ -40,13 +38,10 @@ const BASE_NODE_KEYS = ['id', 'type', 'parentId', 'order', 'rev', 'provenance', 
 
 const NODE_EXTRA_KEYS: Record<string, string[]> = {
   document: [],
-  /* `required` 是必备章节：漏登记会让整份文档以 E_UNKNOWN_FIELD 报错（见 checkUnknownKeys） */
   section: ['title', 'sectionCode', 'required'],
   paragraph: ['semantic', 'align'],
   text: ['runs'],
   field: ['dataType', 'value', 'valueText', 'unit', 'required', 'valueSet', 'sourceKey', 'sampledAt', 'referenceRange'],
-  /* 控件的呈现快照随实例抄进节点（形状 / 字段 / 行列 / 排布 / 行数），
-     漏一项的后果是 `E_UNKNOWN_FIELD` —— 而那份文档本来就是本引擎写出来的  */
   control: [
     'controlKind',
     'shape',
@@ -85,14 +80,12 @@ const REVISION_KEYS = [
   'confidence',
   'beforeHash',
   'afterHash',
-  /* 解锁与撤销的载荷：漏登记不会当场报错，只会在下一次全量校验时以 E_UNKNOWN_FIELD 暴露 */
   'unlock',
   'revert',
   'revertedTo',
   'confirmedNodeIds',
   'acknowledgedUnconfirmed',
   'aiSuggestionIds',
-  /* 审签状态机的载荷：结论/理由/作废理由 —— 留痕的载荷字段也是契约的一部分 */
   'review',
   'voided',
 ];
@@ -115,7 +108,6 @@ const SIGNATURE_KEYS = [
   'references',
 ];
 const SIGNATURE_REFERENCE_KEYS = ['path', 'digest'];
-/* run 级来源（`RunProvenance`）：只放最小几个字段，见 types.ts 里那段说明 */
 const RUN_KEYS = ['text', 'marks', 'tags', 'provenance'];
 const RUN_PROVENANCE_KEYS = ['origin', 'modelId', 'confidence', 'suggestionId'];
 
@@ -124,14 +116,8 @@ const ORIGIN_VALUES = ['human', 'ai', 'system', 'imported'];
 const EVIDENCE_KIND_VALUES = ['his', 'lis', 'pacs', 'emr-prior', 'guideline', 'terminology', 'template', 'user-input', 'external-doc', 'dictation', 'patient'];
 const FIELD_TYPE_VALUES = ['text', 'number', 'date', 'code', 'boolean', 'expression'];
 const CONTROL_KIND_VALUES = ['menstrualHistory', 'odontogram', 'vitalSignsChart', 'scaleScore', 'labTrend', 'custom'];
-/* 形状清单只有一处（`types.ts` 的 `CONTROL_SHAPES`）：模板装载校验读同一份，
-   两处各写一份的结果是"包装得进、产出的病历校验不过" */
 const CONTROL_SHAPE_VALUES = CONTROL_SHAPES as unknown as string[];
 
-/* 控件某格的值与 `dataType` 是否相符那份判据只有一处（`model/control.ts` 的
-   `matchesControlCellType`）：写路径与产物校验各写一份的结果是"写得进去、校验不过" */
-/* op 清单必须与 `types.ts` 的 `RevisionOp` 逐字一致：这里漏一个，
-   结果是"内核写得出、产物校验不过"（形态与 `CONTROL_SHAPE_VALUES` 那道教训同类）。 */
 const REVISION_OP_VALUES = [
   'create',
   'insert',
@@ -146,7 +132,6 @@ const REVISION_OP_VALUES = [
   'external',
   'unlock',
   'revert',
-  /* 审签状态机（K12）：四个状态迁移各占一个 op */
   'submit',
   'review',
   'void',
@@ -155,8 +140,6 @@ const REVISION_OP_VALUES = [
 const SIGNER_ROLE_VALUES = ['author', 'reviewer', 'approver', 'patient'];
 const ALIGN_VALUES = ['left', 'center', 'right', 'justify'];
 const DOC_TYPE_SYSTEM_VALUES = ['WST500', 'WS445', 'local', 'custom'];
-/* 标签体系清单只有一处（`types.ts` 的 `TAG_SYSTEMS`）：模板校验也读同一份，
-   两处各写一份的结果是"模板存得进、产物校验不过" */
 const TAG_SYSTEM_VALUES = TAG_SYSTEMS;
 const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
@@ -306,9 +289,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
                 else {
                   checkUnknownKeys(issues, run.provenance, RUN_PROVENANCE_KEYS, at, key);
                   checkEnum(issues, run.provenance.origin, ORIGIN_VALUES, at, 'origin', key);
-                  /* confidence 与节点级同一口径：必须有限且在 0~1。
-                     不校验的话 NaN 会静静躺在数据里，而任何 `confidence < 阈值` 的比较对 NaN 恒为 false ——
-                     与 `suggest` 里那条踩过的坑是同一个（见 session.ts 的 E_AI_NO_PROVENANCE 注释）。 */
                   if (run.provenance.confidence !== undefined) {
                     const value = run.provenance.confidence;
                     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
@@ -327,14 +307,10 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
       }
       if (node.type === 'control') {
         checkEnum(issues, node.controlKind, CONTROL_KIND_VALUES, path, 'controlKind', key);
-        /* 形状：渲染器按它分派。认不出来的形状在界面上是一片空白 ——
-           而"空白"与"这一格还没填"长得一模一样（同 `template/engine.ts` 装载期那条）。  */
         checkEnum(issues, node.shape, CONTROL_SHAPE_VALUES, path, 'shape', key);
         if (!isPlainObject(node.payload)) {
           push(issues, 'E_REQUIRED_FIELD', `${path}.payload`, 'control 节点必须有 payload 对象', key);
         }
-        /* 字段快照是 payload 的说明书（界面上的名字、单位、取值域都从它来）：
-           `label` 缺了不会报错，只会让医生看到一串键名。  */
         if (node.fields !== undefined && !Array.isArray(node.fields)) {
           push(issues, 'E_TYPE_INVALID', `${path}.fields`, 'fields 若是给就得是数组（字段快照）', key);
         } else if (Array.isArray(node.fields)) {
@@ -349,11 +325,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
             checkEnum(issues, field.dataType, FIELD_TYPE_VALUES, fieldPath, 'dataType', key);
           });
         }
-        /* 键必须落在格里：控件的 payload 是一张扁平表，而"哪一格"由形状算出来
-           （`model/control.ts` 的 `controlCellsOf`）。写到一个算不出来的键上，
-           症状是"医生填的值在导出里凭空不见" —— 写路径与渲染器都不会报错。
-           值也要与那一格的 `dataType` 对得上：payload 是机器真值（带 tag 的格会摊成数据元），
-           `"37.2"` 与 `37.2` 在展示上一样、在机器读的时候不是一回事。  */
         if (isPlainObject(node.payload)) {
           const cells = controlCellsOf(node as unknown as ControlGridNode);
           const byKey = new Map(cells.map((cell) => [cell.key, cell]));
@@ -469,9 +440,6 @@ export function validateStructure(doc: unknown): ValidationIssue[] {
       checkEnum(issues, sig.signerRole, SIGNER_ROLE_VALUES, p, 'signerRole');
       checkDateTime(issues, sig.signedAt, p, 'signedAt');
 
-      /* T18：签名材料必须成组齐全。
-         只留元数据、丢掉签名值（或被改写掉）的签名是最危险的产物：
-         界面会显示"已签章"，而它根本不可验证。  */
       const material = ['algorithm', 'publicKeyBase64', 'publicKeyFingerprint', 'signedInfoDigest', 'signatureValue', 'references'] as const;
       const present = material.filter((key) => (sig as Record<string, unknown>)[key] !== undefined);
       if (present.length > 0 && present.length < material.length) {
@@ -501,7 +469,6 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
   const nodes = doc.nodes ?? {};
   const knownIds = new Set(Object.keys(nodes));
 
-  /* E_NODE_ID_DUP */
   const seen = new Set<string>();
   for (const [key, node] of Object.entries(nodes)) {
     if (node.id !== key) push(issues, SEMANTIC_CODES.E_NODE_ID_DUP, `$.nodes.${key}`, `索引键 "${key}" 与 node.id "${node.id}" 不一致`, node.id);
@@ -509,14 +476,12 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
     seen.add(node.id);
   }
 
-  /* E_PARENT_MISSING */
   for (const node of Object.values(nodes)) {
     if (node.parentId !== null && !knownIds.has(node.parentId)) {
       push(issues, SEMANTIC_CODES.E_PARENT_MISSING, `$.nodes.${node.id}.parentId`, `父节点不存在：${node.parentId}`, node.id);
     }
   }
 
-  /* E_ORPHAN_NODE（含循环） */
   const children = new Map<string, string[]>();
   for (const node of Object.values(nodes)) {
     if (node.parentId === null) continue;
@@ -536,7 +501,6 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
     if (!reachable.has(id)) push(issues, SEMANTIC_CODES.E_ORPHAN_NODE, `$.nodes.${id}`, `节点不可从 rootId 到达（孤儿或循环引用）：${id}`, id);
   }
 
-  /* AI 来源与门控 */
   const finalState = doc.status === 'signed' || doc.status === 'archived';
   for (const node of Object.values(nodes)) {
     const p = node.provenance;
@@ -553,8 +517,6 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
     if (finalState && node.keyContent === true && node.humanConfirmed !== true) {
       push(issues, SEMANTIC_CODES.E_KEY_CONTENT_UNCONFIRMED, `$.nodes.${node.id}.humanConfirmed`, `关键内容节点在 ${doc.status} 状态仍未人工确认`, node.id);
     }
-    /* 机器绑的标签：与关键内容同档（不受任何 acknowledge 声明影响）。
-       它不是"内容"而是元数据，会进机读信息被下游直接消费 —— 而医生看正文时看不见它。  */
     if (finalState && (node.unconfirmedTags?.length ?? 0) > 0) {
       push(
         issues,
@@ -569,7 +531,6 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
     }
   }
 
-  /* 机读信息陈旧 */
   const mr = doc.machineReadable;
   if (mr) {
     if (mr.modelSchemaVersion !== doc.schemaVersion) {
@@ -599,7 +560,6 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
     if (rev.rev !== i + 1) push(issues, SEMANTIC_CODES.E_REVISION_GAP, `$.revisions[${i}]`, `留痕 rev 不连续：第 ${i + 1} 条 rev=${rev.rev}（应为 ${i + 1}）`);
   });
 
-  /* schemaVersion 登记：校验器只接受当前版本；旧版本应先经过 migrations.migrate() */
   if (doc.schemaVersion !== SCHEMA_VERSION) {
     push(issues, SEMANTIC_CODES.E_SCHEMA_VERSION_UNKNOWN, '$.schemaVersion', `未登记的 schemaVersion：${doc.schemaVersion}（当前为 ${SCHEMA_VERSION}，旧版本请先调用 migrate()）`);
   }
@@ -607,7 +567,6 @@ export function validateSemantics(doc: DocumentModel, options: ValidateOptions =
   return issues;
 }
 
-/** 结构 + 语义合并校验 */
 export function validateDocument(doc: unknown, options: ValidateOptions = {}): ValidationIssue[] {
   const structural = validateStructure(doc);
   if (structural.length > 0) return structural;

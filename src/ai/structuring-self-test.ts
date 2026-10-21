@@ -1,5 +1,3 @@
-// 即时结构化自测（V4）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import { matchLongest, validatePlacementConfig, type DictationPlacementConfig } from '../dictation/placement.ts';
 import { describePlacementConfig } from '../dictation/placement-store.ts';
@@ -101,8 +99,6 @@ async function main(): Promise<void> {
   });
 
   await test('S4 命中判定与落位共用同一份实现：最长匹配优先', () => {
-    /* 这不是"某处实现正确"，而是"只有一处实现"：落位与结构化各写一份匹配，
-       迟早出现"落位按 A 判、标签按 B 判"的分歧，而那种分歧只有医生能撞见。 */
     const text = '现病史：患者3天前出现咳嗽。';
     const direct = matchLongest(text, [
       { match: '病史', payload: CHIEF, order: 0 },
@@ -113,7 +109,6 @@ async function main(): Promise<void> {
 
     const outcome = proposeStructurings(
       { texts: [text] },
-      /* 词表声明顺序故意把短词放前面：决胜靠"更长优先"，不靠插入顺序 */
       cfg({ strategy: 'section-title', structureMap: { 病史: CHIEF, 现病史: PRESENT } }),
     );
     assertEqual(outcome.items[0]?.matched, direct?.match, '结构化选中的词必须与匹配器一致（同一份实现）');

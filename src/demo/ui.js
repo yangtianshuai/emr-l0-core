@@ -1,38 +1,10 @@
-/**
- * 电子病历编辑器 · Demo 界面脚本（从 ui.html 拆出）。
- *
- * 与 ui-self-test 锁定的交互纪律保持一致（改这里前先读测试）：
- *   · 脏值追踪：input 只记脏值，失焦延迟 250ms 保存；任何按钮动作先取消防抖并统一 flush
- *     （否则保存重绘会替换掉被点的按钮，click 到不了按钮）
- *   · 输入态（textarea/input/select）一律不拦单键；不可逆操作（拒绝/忽略）二次确认
- *   · 页签状态与折叠树持久化；内部标识按 演示/临床 模式条件渲染（不是渲染后隐藏）
- *   · 配置抽屉用 <dialog>.showModal()（top layer），关闭后焦点还给触发按钮
- *   · 宿主接入点**只有一个**（见下方 `hostBridge` / `api`）：只注入 identity / context /
- *     transport 三件事，且**不得出现任何写语义** —— 留痕、门控、签章都属内核
- *
- * 被嵌进医生工作站（iframe）时，宿主注入走 `/host-bridge.js`（`?host=1`，postMessage 协议），
- * 本页对外广播与应答由 `hostEmit` / `registerHostApi` 那一节收口 —— 改嵌入相关行为时读那一节。
- */
 const $ = (id) => document.getElementById(id);
-/* 部署前缀：被工作站反向代理到某个路径下时，由服务端注入在 `<html data-l0-base>` 上。
-   所有 `/api/...` 都要带上它 —— 不加的话请求会打到工作站自己的根上，
-   症状是"页面能开、每个动作都失败"，而排查方向通常跑到服务端去。 */
 const L0_BASE = (document.documentElement && document.documentElement.dataset.l0Base) || '';
 let S = null;
-/* 脏值追踪：先记录编辑、延迟保存（见文件头说明）。 */
 const pendingEdits = new Map();
 let blurTimer = null;
 const TAB_KEY = 'l0demo.activeTab';
 
-/**
- * 视图模式：演示 / 临床。
- *
- * 演示要透明（把 `sg_0003`、`rev 12`、`E_AI_LOW_CONFIDENCE` 都摆出来，让人看见门控与留痕真的在起作用）；
- * 临床要安静（医生不需要看内部标识）。技术信息不会消失，仍完整保留在「门控日志」与「指标与留痕」里。
- *
- * 实现上按模式条件渲染（`isClinical() ? '' : …`），而不是渲染后再用 CSS 藏，
- * 后者会把内容留在 DOM 里，复制、读屏、审查时仍会出现。
- */
 const MODE_KEY = 'l0demo.viewMode';
 let viewMode = (() => {
   try { return localStorage.getItem(MODE_KEY) === 'clinical' ? 'clinical' : 'demo'; } catch { return 'demo'; }
@@ -40,20 +12,6 @@ let viewMode = (() => {
 
 function isClinical() { return viewMode === 'clinical'; }
 
-/* --------------------------- 编辑范式（卡片 / 流式） ---------------------------
- *
- * 与上面的 `viewMode` 是**两个正交维度**，所以是两个开关、不是同一个控件里的两档：
- *   · `viewMode` 管"显示多少内部标识"（演示 / 临床）；
- *   · `editMode` 管"怎么落笔"（卡片 = 一段一张卡片；流式 = 整页连续书写）。
- * 合成一个控件的后果是"我到底在切什么"说不清 —— 而这两个问题的答案是互不替代的。
- *
- * 两者都只是**视图偏好**：不改数据、不改 rev、不进留痕，因此存在 localStorage 即可。
- * 换台机器、换个浏览器打开，看到的编辑方式可能不同，但病历是同一份。
- *
- * 住处与形态都不同：`viewMode` 在顶栏、就是一个下拉（它管整页）；
- * `editMode` 在正文卡的标题行右侧，是分段控件（它管的就是下面那一片纸，
- * 而"现在在哪个"得一眼看见）。位置与形态不表达从属关系，只表达"它作用在哪"。
- */
 const EDIT_MODE_KEY = 'l0demo.editMode';
 let editMode = (() => {
   try { return localStorage.getItem(EDIT_MODE_KEY) === 'flow' ? 'flow' : 'card'; } catch { return 'card'; }
@@ -61,14 +19,12 @@ let editMode = (() => {
 
 function isFlow() { return editMode === 'flow'; }
 
-/* ---------------------------- 主题（深 / 浅） ----------------------------
-   手动选择持久化；未选择时尊重系统偏好。CSS 只认 data-theme 令牌组。 */
 const THEME_KEY = 'l0demo.theme';
 let theme = (() => {
   try {
     const saved = localStorage.getItem(THEME_KEY);
     if (saved === 'light' || saved === 'dark') return saved;
-  } catch { /* 隐私模式忽略 */ }
+  } catch { }
   try { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
   catch { return 'light'; }
 })();
@@ -79,6 +35,90 @@ function applyTheme() {
 }
 applyTheme();
 
+const DOC_FONT_KEY = 'l0demo.docFont';
+const DOC_FONT_STEPS = [14, 16, 18, 20];
+let docFont = (() => {
+  let saved = NaN;
+  try { saved = Number(localStorage.getItem(DOC_FONT_KEY)); } catch { }
+  return DOC_FONT_STEPS.indexOf(saved) >= 0 ? saved : DOC_FONT_STEPS[0];
+})();
+
+function applyDocFont() {
+  document.documentElement.style.setProperty('--fs-doc', `${docFont}px`);
+  const now = $('docFontNow');
+  if (now) now.textContent = String(docFont);
+  const wrap = $('docFont');
+  if (!wrap) return;
+  const at = DOC_FONT_STEPS.indexOf(docFont);
+  wrap.querySelectorAll('[data-font]').forEach((button) => {
+    const delta = Number(button.dataset.font);
+    button.disabled = delta < 0 ? at <= 0 : at >= DOC_FONT_STEPS.length - 1;
+  });
+}
+
+function stepDocFont(delta) {
+  const at = DOC_FONT_STEPS.indexOf(docFont);
+  const next = DOC_FONT_STEPS[Math.min(DOC_FONT_STEPS.length - 1, Math.max(0, at + delta))];
+  if (next === docFont) return;
+  docFont = next;
+  try { localStorage.setItem(DOC_FONT_KEY, String(docFont)); } catch { }
+  applyDocFont();
+}
+
+applyDocFont();
+
+const PAPER_KEY = 'l0demo.paper';
+let paperMode = (() => {
+  try { return localStorage.getItem(PAPER_KEY) === '1'; } catch { return false; }
+})();
+
+function ptToPx(pt) {
+  return `${Math.round(Number(pt || 0) * 96 / 72)}px`;
+}
+
+function applyPaper() {
+  const wrap = document.querySelector('.doc-wrap');
+  const button = $('btnPaper');
+  if (wrap) wrap.classList.toggle('paper', paperMode);
+  if (button) {
+    button.setAttribute('aria-pressed', paperMode ? 'true' : 'false');
+    button.classList.toggle('on', paperMode);
+  }
+  const paper = S && S.paper ? S.paper : null;
+  if (!paper) return;
+  const root = document.documentElement;
+  root.style.setProperty('--paper-w', ptToPx(paper.widthPt));
+  root.style.setProperty('--paper-h', ptToPx(paper.heightPt));
+  root.style.setProperty('--paper-m', ptToPx(paper.marginPt));
+}
+
+function togglePaper() {
+  paperMode = !paperMode;
+  try { localStorage.setItem(PAPER_KEY, paperMode ? '1' : '0'); } catch { }
+  applyPaper();
+  if (paperMode) {
+    toast('纸张视图：按 A4 纸面预览。真正的分页与页码由导出端的排版决定', 'info');
+  }
+}
+
+function ensurePrintPageRule() {
+  const paper = (S && S.paper) || {};
+  const width = Number(paper.widthPt) || 595;
+  const height = Number(paper.heightPt) || 842;
+  const margin = Number(paper.marginPt) || 56;
+  const binding = Number(paper.bindingMarginPt) || 0;
+  const style = $('printPageRule');
+  if (!style) return;
+  style.textContent = `@page { size: ${width}pt ${height}pt; margin: ${margin}pt ${margin}pt ${margin}pt ${margin + binding}pt; }`;
+}
+
+function printDoc() {
+  ensurePrintPageRule();
+  window.print();
+}
+
+window.addEventListener('beforeprint', ensurePrintPageRule);
+
 function markDirty(kind, id, value) {
   pendingEdits.set(kind + ':' + id, { kind, id, value });
 }
@@ -87,33 +127,12 @@ function isEditor(el) {
   return !!(el && el.dataset && (el.dataset.edit || el.dataset.field || el.dataset.controlField));
 }
 
-/* 全局进行中指示：任何请求期间显示顶栏下方的细条，
-   "有没有在跑"必须一眼可见，否则医生会重复点（不知道有没有生效）。 */
 let inflight = 0;
 
-/* --------------------------- 宿主接入点（唯一） ---------------------------
-   医生端要能被嵌进医生工作站，"请求怎么发出去"就必须可被宿主替换。本文件只从下面
-   这一个对象取外部能力 —— 与采集那条纪律同源：`captureClientOf()` 的地址与一次性
-   令牌同样来自外部注入，页面不写死任何地址（A21/A22 把它们钉成了机器证明）。
-
-   三条纪律（改这里之前先读 ui-self-test 的注入面断言）：
-     · **只注入三件事**：identity（身份）、context（患者与文书寻址）、transport（传输）；
-     · **不得出现任何写语义**（saveDocument / writeRevision / sign / accept…）：留痕、
-       门控与签章都属内核，注入一个"保存文档"等于把内核的三条不变量搬到宿主侧重实现；
-     · **注入缺失时行为不变**：仍走同源 fetch（本仓库独立运行的形态）。
-
-   惰性读取而不是加载时快照：脚本是 defer，宿主注入的时机由宿主决定，
-   "谁先谁后"不该成为一张必须遵守的时序表。 */
 function hostBridge() {
   return (typeof window === 'undefined' ? null : window.__L0_HOST__) || null;
 }
 
-/**
- * 广播一个事件给宿主（`/host-bridge.js` 那边负责真的发出去）。
- *
- * 独立运行时是空操作：那时没有宿主窗口，而"自己发给自己"会造出一条看似来自宿主的
- * 消息 —— 那是最难排查的一类假象。所以判空写在**这一侧**（所有调用点因此不必各判一次）。
- */
 function hostEmit(type, payload) {
   const bridge = typeof window === 'undefined' ? null : window.L0Host;
   if (bridge && typeof bridge.emit === 'function') bridge.emit(type, payload);
@@ -142,46 +161,21 @@ async function api(path, body) {
   }
 }
 
-/* --------------------------- 会话：本页不碰 ---------------------------
-   医生端既不登录、也没有任何"按身份置灰"的按钮（原先只有「重置」一个），
-   所以本页**不再请求 `/api/session`**：少一次启动请求，也少一处会撒谎的界面状态。
-   身份仍由服务端会话决定（写入留痕的 `writeActor` 读它）：要登录、要看身份，
-   都在管理后台（`/admin` → `/login`，与这里共用同一个会话）。
-   若以后重新往本页加"只有某人能做"的按钮，就照旧从 `/api/session` 的
-   `actions` 取判定结果（服务端 `guard` 才是唯一拦点），别在前端自己推。 */
-
 function esc(text) {
   return String(text ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-/* ---------------------------- 页签状态（记忆） ---------------------------- */
-
 const TABS = ['ai', 'voice', 'qc', 'timeline', 'compare', 'previsit', 'discharge', 'machine', 'export', 'log', 'metrics'];
-/**
- * 低频页签：**装得下就摆在条子里，装不下才收进「⋯」菜单**（见 `layoutRailTabs()`）。
- * 无论摆在哪，"收起 ≠ 删除"这条底线不变：它们随时可打开、可切换、可高亮。
- *
- * 五个高频入口（顺序即使用频次）：AI 助手 → 语音转写 → 质控提示 → 时间轴 → 机读信息；
- * 时间轴紧跟质控提示：它们回答的是同一件事的两个形态 —— 前者逐条说"哪里可能有问题"，
- * 后者说"这条线断在哪"（缺口是线上的事，逐条提示看不见它）。
- * 定稿是"写完之后"的动作，门控日志与指标留痕是排查/审计时看的，三者排在最后。
- *
- * 配置管理（`model`）不在这里：它不是页签，而是顶栏按钮打开的抽屉浮层。
- */
 const OPTIONAL_TABS = ['compare', 'previsit', 'discharge', 'export', 'log', 'metrics'];
 let activeTab = (() => {
   try { return localStorage.getItem(TAB_KEY) || 'ai'; } catch { return 'ai'; }
 })();
 if (!TABS.includes(activeTab)) activeTab = 'ai';
 
-/** 「⋯」菜单：装不下的页签收在这里（见 `layoutRailTabs()`），点开可切换 */
 function setMoreMenu(open) {
   const menu = $('moreMenu');
   if (!menu) return;
   const more = $('btnMoreTabs');
-  /* 纵向对齐到「⋯」那一行：条子是与面板等高的一整列，用 CSS 钉 `bottom` 会把它
-     甩到条子底部（离按钮几百像素）。`offsetTop` 与菜单同为"相对条子的内边距盒"，
-     所以直接对齐即可。 */
   if (open && more) {
     menu.style.top = `${Math.round(more.offsetTop)}px`;
     menu.style.bottom = 'auto';
@@ -191,80 +185,43 @@ function setMoreMenu(open) {
   syncMoreButton();
 }
 
-/**
- * 图标按钮的高亮：菜单开着，或当前面板就在菜单里时亮起。
- * 后半条是关键：页签栏里已经没有"定稿"的位置了，若按钮不亮，
- * 用户停在定稿面板时界面上没有任何地方显示"你在哪一栏"。
- */
 function syncMoreButton() {
   const button = $('btnMoreTabs');
   const menu = $('moreMenu');
   if (!button || !menu) return;
   button.classList.toggle('active', !menu.hidden || OPTIONAL_TABS.includes(activeTab));
-  /* 菜单里装着门控日志：有被拒记录时图标必须报警（否则"日志收进菜单"
-     就等于"被拒原因看不见"，那是功能倒退，不是紧凑） */
   const log = S && Array.isArray(S.log) ? S.log : [];
   const hasReject = log.some((item) => item.ok === false);
   button.classList.toggle('alert', hasReject);
   button.title = hasReject ? '更多页签（门控日志里有被拒记录）' : '装不下的页签收在这里（点开可切换）';
 }
 
-/**
- * 右栏菜单装满：**全部页签**按使用频次摆进竖排条子，只有高度真的不够时才把末尾几项
- * 收进「⋯」。
- *
- * 为什么不再固定"低频三项一律收进菜单"：竖排之后每个标签都拿到整条宽度、图标与全称
- * 上下叠放，八项加起来还不到视口的一半（见 .col.rail .tabbar）。此时再藏三项，只是
- * 让人多点一次 —— 而那三项里恰恰有"定稿"这种写完之后一定要走的动作。
- * 而"收起 ≠ 删除"这条底线不变：**放不下的**项仍旧进菜单，随时可打开。
- *
- * 量的对象是每个菜单项的实际下沿 vs 条子内底，不读 `scrollHeight`：条子上不能写
- * `overflow: hidden`（菜单是从条子左侧弹出去的浮层，会被一起裁掉），
- * 于是"有没有越界"只能按坐标自己算。
- */
 function layoutRailTabs() {
   const bar = $('tabbar');
   const menu = $('moreMenu');
   const more = $('btnMoreTabs');
-  /* 没有「⋯」就没有收容入口（能力开关把所有带 `data-capability` 的项摘光时，
-     按钮会连同空菜单一起被摘掉）：那就一项都不收，宁可让条子自然溢出，
-     也不能把页签搬进一个打不开的菜单里 */
   if (!bar || !menu || !more) return;
-  /* ① 全部摆进条子，顺序按 TABS（使用频次）。菜单项本来就是页签，只是先在标记里住在菜单 */
   for (const key of TABS) {
     const tab = bar.querySelector(`[data-tab="${key}"]`) || menu.querySelector(`[data-tab="${key}"]`);
     if (tab) bar.insertBefore(tab, more);
   }
-  /* ② 从末尾往回收，直到最后一项不再越出条子内底。
-     先让「⋯」占上它那一行再量：它是溢出入口，不占位置就量不准 */
   more.hidden = false;
   const innerBottom = () => {
     const rect = bar.getBoundingClientRect();
     return rect.bottom - parseFloat(getComputedStyle(bar).paddingBottom || '0');
   };
   for (let guard = TABS.length + 1; guard > 0; guard -= 1) {
-    /* 只数条子的**直接子项**：菜单本身也是条子的子节点，`querySelectorAll('.tab')`
-       会连菜单里的项一起数到 —— 那第一轮就会把刚收进去的项当成"最后一行"，
-       于是永远只收得掉一项（实测撞到）。 */
     const rows = [...bar.children].filter((el) => el.classList.contains('tab') && el !== more);
     const lastRow = rows[rows.length - 1];
-    /* 这一列的最后一项是「⋯」（它在时就排在最下）。它也要算进高度：
-       只盯着页签、不管「⋯」，装不下的「⋯」会画到条子外面去 */
     const tail = more.hidden ? lastRow : more;
     if (!tail || tail.getBoundingClientRect().bottom <= innerBottom() + 0.5) break;
     if (!lastRow) break;
     menu.insertBefore(lastRow, menu.firstChild);
   }
-  /* ③ 菜单空着就把入口收起来：点开一个空盒子比不放更糟（与 `applyCapabilities` 同一条理由） */
   more.hidden = menu.children.length === 0;
   syncMoreButton();
 }
 
-/**
- * 顶栏高度写进 `--header-h`：它是 `position: static`、高度由内容决定（窗口一窄就折成
- * 两行，78 → 128），CSS 读不到"内容撑了多高"。而右栏的吸附位置与"伸到视口底部上方 14px"
- * 都按它算（见 `--rail-top`）—— 拍一个固定值，在折行的宽度上就会错掉 50px（实测踩到过）。
- */
 function syncHeaderHeight() {
   const header = document.querySelector('header');
   if (!header) return;
@@ -272,8 +229,6 @@ function syncHeaderHeight() {
   if (height > 0) document.documentElement.style.setProperty('--header-h', `${height}px`);
 }
 
-/* 视口一变，"能列几项"与"顶栏几行"都变，所以两个量都要重算。
-   防抖：拖动窗口时不必每一帧都量（每次量都会强制一次布局） */
 let railLayoutTimer = null;
 function relayoutRail() {
   clearTimeout(railLayoutTimer);
@@ -283,15 +238,8 @@ function relayoutRail() {
   }, 120);
 }
 window.addEventListener('resize', relayoutRail);
-/* 字体落定后顶栏高度才稳定（换字体时行高会变一点），所以 `load` 再量一次 */
 window.addEventListener('load', relayoutRail);
 
-/**
- * 最近一次被拒，就地可见。
- * 门控日志收进「⋯」菜单后，被拒时页签栏上没有任何提示，错误反馈等于藏进了
- * 一个默认看不见的地方。而医生的下一个动作通常是"再点一次"，
- * 真正该做的却是"先看为什么被拒"。错误提示的位置决定了排查方向。
- */
 let dismissedRejectAt = null;
 
 function renderRejectBanner() {
@@ -309,7 +257,6 @@ function renderRejectBanner() {
     <button id="btnDismissReject" title="先收起来（再次被拒时仍会出现）" aria-label="收起被拒横幅">×</button>`;
 }
 
-/** 页签切换：只显示当前面板（紧凑），未显示的靠页签圆点传达状态 */
 function applyPanelState() {
   for (const panel of document.querySelectorAll('.panel')) {
     panel.classList.toggle('active', panel.dataset.panel === activeTab);
@@ -318,13 +265,8 @@ function applyPanelState() {
      "再点这一下能放回来"就只能由页签自己说出来 */
   const activePanel = document.querySelector('.panel.active');
   const folded = !!activePanel && activePanel.classList.contains('is-collapsed');
-  /* 收起 = 这一栏此刻什么也没显示。整列让给正文（`--rail-col` 归零，见 CSS 侧
-     `main.rail-folded`）：收了一栏还把 404px 空白留在右边，比不收更难看。 */
   const mainEl = document.querySelector('main');
   if (mainEl) mainEl.classList.toggle('rail-folded', folded);
-  /* 菜单项也是页签，必须一同参与高亮；aria-selected 同步给读屏。
-     收起的这块**不算选中**：页签若还亮着，人看到的会是"选中的那块不见了"；
-     而它现在确实什么都没在显示，选中态只该属于"正在显示的那一块"。 */
   for (const tab of document.querySelectorAll('.tab, .more-item')) {
     const current = tab.dataset.tab === activeTab;
     const on = current && !folded;
@@ -337,8 +279,7 @@ function applyPanelState() {
 function switchTab(key) {
   if (!TABS.includes(key)) return;
   activeTab = key;
-  try { localStorage.setItem(TAB_KEY, key); } catch { /* 隐私模式忽略 */ }
-  /* 切到某块 = "我要看这块"：它若被收起过，这里一并展开（否则切过去是一栏空白） */
+  try { localStorage.setItem(TAB_KEY, key); } catch { }
   const panel = document.querySelector(`.panel[data-panel="${key}"]`);
   if (panel && panel.classList.contains('is-collapsed')) {
     collapsedPanels.delete(panelKeyOf(panel));
@@ -346,21 +287,10 @@ function switchTab(key) {
     applyPanelCollapsed(panel, false);
   }
   applyPanelState();
-  // 面板刚从 display:none 变为可见，此时 scrollHeight 才有值
   autosizeAll();
 }
 applyPanelState();
 
-/* --------------------------- 面板折叠 ---------------------------
-   每个 `<h2 class="ph">` 右侧挂一枚收起按钮，收起的是**整块面板**：panel 整段
-   向右隐去、一个像素都不留（连标题行、徽标与操作按钮一起），右栏只剩页签条。
-
-   回来靠**页签自己**：再点一次「AI 助手」就是"把它放回来"（见点击处理里
-   `tab.dataset.tab === activeTab` 那一条）。恢复入口必须留在 panel 外面 ——
-   整块都收走了，入口若也在里面，收起来就等于删掉了。
-
-   状态按面板名（`data-panel`）存 localStorage，与页签、病历树同一处置 ——
-   这是**视图偏好**：不改数据、不改 rev、不进留痕。 */
 const PH_KEY = 'l0demo.collapsedPanels';
 const collapsedPanels = loadSet(PH_KEY);
 
@@ -376,7 +306,6 @@ function applyPanelCollapsed(panel, collapsed) {
     button.setAttribute('aria-label', label);
     button.title = label;
   }
-  /* 页签上的"这块收起来了"记号跟着变（判据只有 `is-collapsed` 一处） */
   applyPanelState();
 }
 
@@ -403,7 +332,6 @@ function togglePanelCollapsed(button) {
   else collapsePanel(panel);
 }
 
-/** 再点一次当前页签 = 把这一整块收起来 / 放回来（面板隐去后，页签是唯一还看得见的入口） */
 function toggleActivePanelCollapse() {
   const panel = document.querySelector('.panel.active');
   if (!panel) return;
@@ -414,14 +342,12 @@ function toggleActivePanelCollapse() {
 function initPanelToggles() {
   for (const panel of document.querySelectorAll('.panel')) {
     for (const ph of panel.querySelectorAll(':scope > .ph')) {
-      /* data-no-fold：这一行不要折叠按钮（同一面板里已经有顶部那一枚，重复的按钮只是噪音） */
       if (ph.hasAttribute('data-no-fold')) continue;
       if (ph.querySelector('[data-ph-toggle]')) continue;
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'ph-toggle';
       button.dataset.phToggle = panelKeyOf(panel);
-      /* 路径基态朝下，方向由 CSS 转出来：展开时朝右、收起后朝左（见 `.ph > .ph-toggle svg`） */
       button.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6l4 4 4-4"/></svg>';
       ph.append(button);
     }
@@ -431,22 +357,6 @@ function initPanelToggles() {
 }
 initPanelToggles();
 
-/* ------------------------------- 能力开关 -------------------------------
-   宿主可以按部署形态收窄界面：`__L0_HOST__.capabilities` 里显式给 `false` 的能力，
-   对应的页签、面板与入口**整个不出现**。
-
-   与"配了没有"必须分清（分不清就会做出"点了没反应"的界面）：
-     · **能力缺席**（本段）→ 入口不摆出来，因为这台机器上这条链路根本不存在；
-     · **配置缺失**（`capture.configured` / `readingAuthority.configured`）→ 入口在，
-       但置灰并写清缺哪几格 —— 「未配置」与「配了但不通」必须长得不一样。
-
-   两条纪律：
-     · **默认全开**：没注入时就是今天的形态，所以这段不改变任何既有行为；
-     · 它**不是安全边界** —— 真正的边界在服务端 `authorize()`，这里只是不再摆出
-       用不上的入口。也正因如此，"能力名拼错"的表现只是"某个入口永远不显示"，
-       而不会有任何报错：所以 A32 扫的是"页面上出现的每个 `data-capability`
-       都必须在下面这个白名单里"，以及"白名单里不得有没人用的名字"。
-*/
 const CAPABILITIES = ['qc', 'finalize', 'log', 'metrics', 'import'];
 
 function capabilityOff(name) {
@@ -454,19 +364,15 @@ function capabilityOff(name) {
   return !!(caps && caps[name] === false);
 }
 
-/** 把能力缺席的页签 / 面板 / 入口整个摘掉，并把活动页签回退到还在的那一个 */
 function applyCapabilities() {
   document.querySelectorAll('[data-capability]').forEach((el) => {
     if (capabilityOff(el.dataset.capability)) el.remove();
   });
-  /* 「⋯」菜单被摘空时按钮自己也该走：留一个点开什么都没有的图标，比不放更糟 */
   const menu = $('moreMenu');
   if (menu && menu.children.length === 0) {
     const more = $('btnMoreTabs');
     if (more) more.remove();
   }
-  /* 活动页签可能就是刚被摘掉的那一个（它还存在 localStorage 里）：回退到还存在的页签。
-     不回退的表现是"打开页面停在空气上"——页签栏没有任何一项是高亮的，面板也不显示。 */
   if (!document.querySelector(`[data-tab="${activeTab}"]`)) {
     const fallback = TABS.find((name) => document.querySelector(`[data-tab="${name}"]`));
     if (fallback) {
@@ -477,7 +383,6 @@ function applyCapabilities() {
   applyPanelState();
 }
 
-/** 面板是否还在文档里：被能力开关摘掉的面板不该再被渲染（摘了还渲染就是白算） */
 function panelAlive(name) {
   return !!document.querySelector(`[data-panel="${name}"]`);
 }
@@ -490,12 +395,8 @@ function autosizeAll() {
   }
 }
 
-/* ------------------------------- 顶部信息 ------------------------------- */
-
 const VISIT_LABEL = { outpatient: '门诊', inpatient: '住院', emergency: '急诊', 'physical-exam': '体检' };
 const GENDER_LABEL = { M: '男', F: '女', U: '未知' };
-/* 文书状态：五个态都要有名字。"审核中"尤其不能显示成"草稿" ——
-   医生以为还能改，改的时候却被告知审核中不可改，那是界面在骗人。 */
 const DOC_STATUS_LABEL = { draft: '草稿', reviewing: '审核中', signed: '已签章', archived: '已归档', void: '已作废' };
 
 function renderHeader() {
@@ -510,11 +411,8 @@ function renderHeader() {
       <div class="doc-title">${esc(d.docType)}</div>
       <div class="meta">${esc(VISIT_LABEL[e.visitType] || e.visitType || '—')} · ${esc(e.deptName || e.dept || '—')} · ${esc(e.visitDate || '')}${e.visitId ? ' · ' + esc(e.visitId) : ''}</div>
     </div>`;
-  /* rev 是内部标识：临床模式不下发到医生视线里（演示模式保留，供排查） */
   $('docStatus').textContent = `${DOC_STATUS_LABEL[d.status] || d.status}${isClinical() ? '' : ` · rev ${d.rev}`}`;
 }
-
-/* ------------------------------- 病历树（左栏导航） ------------------------------- */
 
 const TREE_KEY = 'l0demo.collapsedTree';
 
@@ -522,13 +420,12 @@ function loadSet(key) {
   try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); } catch { return new Set(); }
 }
 function saveSet(key, set) {
-  try { localStorage.setItem(key, JSON.stringify([...set])); } catch { /* 隐私模式忽略 */ }
+  try { localStorage.setItem(key, JSON.stringify([...set])); } catch { }
 }
 const collapsedTree = loadSet(TREE_KEY);
 
 const STATUS_LABEL = { draft: '草稿', reviewing: '审核中', signed: '已签章', archived: '已归档', void: '作废' };
 
-/** 树状导航：患者 → 就诊 → 病历（活动病历展开章节）。列窄，状态用圆点 + 悬停明细表达 */
 function renderTree() {
   const patients = S.tree || [];
   const docCount = patients.reduce((sum, patient) => sum + patient.visits.reduce((n, visit) => n + visit.docs.length, 0), 0);
@@ -545,31 +442,19 @@ function renderTree() {
           .filter(Boolean)
           .join(' · ');
         const dot = doc.machineStale ? 'danger' : (doc.unconfirmed > 0 ? 'warn' : (doc.status === 'signed' ? 'ok' : ''));
-        /* 章节按层级缩进显示（嵌套章节如"诊断明细"属于"初步诊断"）。
-           章节行带「确认本章」按钮（仅当该章还有待确认内容时出现）。
-           范围取章节级：医生按章节阅读，"本章我看过了"有明确含义；
-           整篇一键在几十页病历上只是"点了同意"。onclick 阻止冒泡，避免顺带切换文档。 */
         const sections = doc.sections.map((section) => {
-          /* 必备章节：给一个看得见的标记 + 一句"还没写"的提醒。
-             为什么只提醒、不拦签章：必备管「这一章在不在」（它删不掉 —— 内核的 `deleteNode` 拒删），
-             不管「写得够不够」；刚开出来的草稿必然还是空的，把它算成"不能签"只会让门控变成噪声。 */
           const required = section.required
             ? `<span class="chip mini${section.requiredEmpty ? ' warn' : ''}"
                 title="${section.requiredEmpty
                   ? '必备章节：这一章还没有内容。它删不掉（模板里标了必备），签章前请写清'
                   : '必备章节：这一章删不掉（模板里标了必备）'}">必备${section.requiredEmpty ? '·还没写' : ''}</span>`
             : '';
-          /* 章节说明（模板里写的"这一章要写清什么"）：**摆出来**而不是塞进悬浮提示 ——
-             提示的意义就是"不用去找"，藏进 tooltip 等于没有 */
           const hint = section.description
             ? `<div class="sec-hint">${esc(section.description)}</div>`
             : '';
           return `
-          <div class="trow section" style="padding-left:${8 + (section.depth || 0) * 12}px"><span class="dot ${section.hasUnconfirmed ? 'warn' : 'ok'}"></span><span class="ttl">${esc(section.title)}</span>${required}${section.hasUnconfirmed ? `<button class="mini-btn" data-confirm-subtree="${esc(section.id)}" title="确认「${esc(section.title)}」整章内容，范围与条数会记入留痕" onclick="event.stopPropagation()">确认本章</button>` : ''}${hint}</div>`;
+          <div class="trow section" style="padding-left:${8 + (section.depth || 0) * 12}px"><span class="dot ${section.hasUnconfirmed ? 'warn' : 'ok'}"></span><span class="ttl">${esc(section.title)}</span>${required}${section.hasUnconfirmed ? `<button class="mini-btn" data-confirm-subtree="${esc(section.id)}" title="确认「${esc(section.title)}」整章内容，范围与条数会记入留痕">确认本章</button>` : ''}${hint}</div>`;
         }).join('');
-        /* 删除入口**只给草稿**：签章/归档之后它是医疗记录，要改走「解锁修改」并留痕。
-           与内核判定同一条口径（`status === 'draft'`），按钮不出现只是前置提示 ——
-           服务端 `/api/delete-document` 会再判一次（绕过界面也删不掉）。 */
         const deletable = doc.status === 'draft';
         return `<div class="trow doc ${doc.active ? 'active' : ''}" data-doc="${esc(doc.docId)}" title="${esc(doc.title)} · ${esc(mark)}｜${esc(doc.docId)}">
             <span class="dot ${dot}"></span><span class="ttl">${esc(doc.title)}</span>
@@ -588,27 +473,14 @@ function renderTree() {
   }).join('');
 }
 
-/* ------------------------------- 正文 ------------------------------- */
-
-/* 逐个节点的渲染在 `/doc-view.js`（`window.L0DocView`）：**管理后台的模板预览用的是同一份**。
-   把它留在这里就等于给"预览与正文长得不一样"开了口子，而那种不一致最难被发现 ——
-   两处都自认为画对了（理由写在那个文件的文件头）。 */
-
 /** 插入段落后把光标放进新段落（否则用户还得自己在几十段里找刚建好的那一段） */
 function focusEdit(nodeId) {
   const el = document.querySelector(`[data-edit="${nodeId}"]`);
   if (el) el.focus();
 }
 
-/* ------------------------------- 正文贴图 ------------------------------- */
-
-/**
- * 一张图的上限。**以后端为准**（`media/image-probe.ts` 的 `MAX_IMAGE_BYTES`）：
- * 这里拦一道只是省一次白跑的上传，真正的拒绝在 `/api/image-upload`。
- */
 const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
 
-/** 让用户挑一张图。取消时 resolve(null) —— 不留一个永远 pending 的 Promise */
 function pickImageFile() {
   return new Promise((resolve) => {
     const input = document.createElement('input');
@@ -618,14 +490,11 @@ function pickImageFile() {
       const picked = input.files && input.files.length > 0 ? input.files[0] : null;
       resolve(picked);
     }, { once: true });
-    /* 取消选择：现代浏览器会发 `cancel`。不发的老浏览器也不会有副作用 ——
-       input 没有插进文档，那份 Promise 不持有任何 DOM，不会拖住界面。 */
     input.addEventListener('cancel', () => resolve(null), { once: true });
     input.click();
   });
 }
 
-/** 文件 → dataURL（服务端要 base64；Blob 直接跨 JSON 传不了） */
 function readImageAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -635,13 +504,6 @@ function readImageAsDataUrl(file) {
   });
 }
 
-/**
- * 选一张图并上传，返回 `{ resource, name }`；用户取消或中途失败返回 `null`。
- *
- * 抽出来是因为有两条入口要用它（段落「＋图」插新图、图片槽「贴图」换地址）。
- * 两处各写一遍的结果是"一条记得拦大小、另一条忘了"，而那种差异只有在有人
- * 挑了一张 30 MB 的图时才会暴露。
- */
 async function uploadPickedImage() {
   const file = await pickImageFile();
   if (!file) return null;
@@ -668,16 +530,227 @@ async function uploadPickedImage() {
   return { resource: uploaded.data || {}, name: String(file.name || '').replace(/\.[^.]+$/, '') };
 }
 
+let lastDocSnapshot = null;
+
+function cssQuote(value) {
+  if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(String(value));
+  return String(value).replace(/["\\]/g, '\\$&');
+}
+
+function captureScrolls(from) {
+  const saved = [];
+  for (let node = from; node; node = node.parentElement) {
+    if (node.scrollTop) saved.push([node, node.scrollTop]);
+  }
+  return saved;
+}
+
+function restoreScrolls(saved) {
+  for (const [node, top] of saved || []) {
+    if (node && node.isConnected) node.scrollTop = top;
+  }
+}
+
+function captureFieldFocus() {
+  const active = document.activeElement;
+  if (!active || typeof active.closest !== 'function' || !active.closest('#docBody')) return null;
+  const data = active.dataset || {};
+  const key = data.edit || data.field || data.controlField;
+  if (!key) return null;
+  let start = null;
+  let end = null;
+  try {
+    start = active.selectionStart;
+    end = active.selectionEnd;
+  } catch { }
+  return { key, start, end };
+}
+
+function restoreFieldFocus(saved) {
+  if (!saved) return;
+  const quote = cssQuote;
+  const el = document.querySelector(`[data-edit="${quote(saved.key)}"]`)
+    || document.querySelector(`[data-field="${quote(saved.key)}"]`)
+    || document.querySelector(`[data-control-field="${quote(saved.key)}"]`);
+  if (!el || typeof el.focus !== 'function') return;
+  el.focus();
+  if (saved.start !== null && saved.start !== undefined) {
+    try { el.setSelectionRange(saved.start, saved.end === null ? saved.start : saved.end); } catch { }
+  }
+}
+
+function renderDocFull(want) {
+  const body = $('docBody');
+  if (!body) return;
+  const scrolls = captureScrolls(body);
+  if (want.mode === 'flow') {
+    const caret = pendingCaret;
+    pendingCaret = null;
+    body.innerHTML = L0FlowView.render(want.items, {
+      readonly: want.readonly,
+      readonlyHint: want.readonlyHint,
+      clinical: want.clinical,
+      annotations: want.annotations,
+    });
+    restoreScrolls(scrolls);
+    if (caret) {
+      const host = flowHostOf(caret.key);
+      if (host) {
+        if (caret.focus === true) host.focus();
+        L0FlowView.setCaret(host, caret.at);
+      }
+    }
+    return;
+  }
+  const focus = captureFieldFocus();
+  body.innerHTML = L0DocView.nodesHtml(want.items, {
+    readonly: want.readonly,
+    readonlyHint: want.readonlyHint,
+    clinical: want.clinical,
+    annotations: want.annotations,
+  });
+  restoreScrolls(scrolls);
+  restoreFieldFocus(focus);
+}
+
+function patchDoc(decision, want) {
+  const body = $('docBody');
+  if (!body) return false;
+  return want.mode === 'flow'
+    ? patchFlowDoc(body, decision, want)
+    : patchCardDoc(body, decision, want);
+}
+
+function patchCardDoc(body, decision, want) {
+  const items = want.items;
+  const children = Array.from(body.children);
+  if (children.length !== items.length) return false;
+  const replace = new Set(decision.replace);
+  const textOnly = new Set(decision.textOnly);
+  const scrolls = captureScrolls(body);
+  const focus = captureFieldFocus();
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!replace.has(item.id)) continue;
+    const el = children[index];
+    if (!el || el.dataset.nodeId !== item.id) return false;
+    if (textOnly.has(item.id) && isTextUnchangedInCard(el, item)) {
+      const rev = el.querySelector('.rev');
+      if (rev) rev.textContent = `${item.id} · rev ${item.rev}`;
+      continue;
+    }
+    el.outerHTML = L0DocView.nodeHtml(item, {
+      readonly: want.readonly,
+      readonlyHint: want.readonlyHint,
+      clinical: want.clinical,
+      annotations: want.annotations,
+    });
+  }
+  restoreScrolls(scrolls);
+  restoreFieldFocus(focus);
+  return true;
+}
+
+function isTextUnchangedInCard(el, item) {
+  if (!item || item.kind !== 'text') return false;
+  const area = el.querySelector('textarea[data-edit]');
+  return !!area && area.value === String(item.text === undefined ? '' : item.text);
+}
+
+function patchFlowDoc(body, decision, want) {
+  const units = L0FlowView.renderUnits(want.items, {
+    readonly: want.readonly,
+    readonlyHint: want.readonlyHint,
+    clinical: want.clinical,
+    annotations: want.annotations,
+  });
+  const indexOfNode = new Map();
+  const indexOfKey = new Map();
+  units.forEach((unit, index) => {
+    indexOfKey.set(unit.key, index);
+    for (const id of unit.nodeIds) indexOfNode.set(id, index);
+  });
+
+  const replace = new Set(decision.replace);
+  const textOnly = new Set(decision.textOnly);
+  const dirty = new Set();
+  for (const nodeId of replace) {
+    const index = indexOfNode.get(nodeId);
+    if (index === undefined) return false;
+    const unit = units[index];
+    const peersDirty = unit.nodeIds.some((id) => id !== nodeId && replace.has(id));
+    if (textOnly.has(nodeId) && !peersDirty) {
+      const item = want.items.find((entry) => entry.id === nodeId);
+      const host = body.querySelector(`[data-flow-seg="${cssQuote(unit.key)}"]`);
+      const blockEl = host ? host.querySelector(`[data-node-id="${cssQuote(nodeId)}"]`) : null;
+      const parsed = blockEl ? L0FlowView.readBlock(blockEl) : null;
+      if (item && parsed && parsed.text === String(item.text === undefined ? '' : item.text)) {
+        if (blockEl.dataset) blockEl.dataset.nodeRev = String(item.rev);
+        continue;
+      }
+    }
+    dirty.add(index);
+  }
+
+  const scrolls = captureScrolls(body);
+  const focus = captureFieldFocus();
+  const activeHost = document.activeElement && typeof document.activeElement.closest === 'function'
+    ? document.activeElement.closest('[data-flow-seg]')
+    : null;
+  const caret = activeHost
+    ? { key: activeHost.dataset.flowSeg, at: L0FlowView.caretOf(activeHost), focus: true }
+    : null;
+
+  for (const index of Array.from(dirty).sort((a, b) => b - a)) {
+    const unit = units[index];
+    const el = unitElement(body, unit);
+    if (!el) return false;
+    el.outerHTML = unit.html;
+  }
+  restoreScrolls(scrolls);
+  restoreFieldFocus(focus);
+  if (caret && indexOfKey.has(caret.key) && dirty.has(indexOfKey.get(caret.key))) {
+    const host = flowHostOf(caret.key);
+    if (host) {
+      host.focus();
+      L0FlowView.setCaret(host, caret.at);
+    }
+  }
+  return true;
+}
+
+function unitElement(body, unit) {
+  if (!body || !unit) return null;
+  if (unit.kind === 'section') return body.querySelector(`[data-sec-id="${cssQuote(unit.nodeIds[0])}"]`);
+  if (unit.kind === 'card') {
+    const inner = body.querySelector(`[data-node-id="${cssQuote(unit.nodeIds[0])}"]`);
+    return inner && typeof inner.closest === 'function' ? inner.closest('.fcard') : null;
+  }
+  return body.querySelector(`[data-flow-seg="${cssQuote(unit.key)}"]`);
+}
+
+function docStatsSuffix() {
+  const items = Array.isArray(S.items) ? S.items : [];
+  const paragraphs = new Set();
+  let chars = 0;
+  let unconfirmed = 0;
+  for (const item of items) {
+    if (!item || item.kind === 'section') continue;
+    if (item.kind === 'text') {
+      if (item.paragraphId) paragraphs.add(item.paragraphId);
+      chars += String(item.text || '').replace(/\s+/g, '').length;
+    }
+    if (item.humanConfirmed === false) unconfirmed += 1;
+  }
+  if (paragraphs.size === 0 && chars === 0) return '';
+  const parts = [`${chars} 字`, `${paragraphs.size} 段`];
+  if (unconfirmed > 0) parts.push(`${unconfirmed} 处待确认`);
+  return ` · ${parts.join(' · ')}`;
+}
+
 function renderDoc() {
-  $('docMeta').textContent = `${S.doc.docType} · ${S.doc.docId}`;
-  /* 正文上方的提示位：粘贴（按外来内容处理）、撤销结果、已签章的提醒都往这里说一句。
-     已签章时不显示粘贴/撤销提示，而是把"为什么改不了、该怎么改"讲清楚。 */
+  $('docMeta').textContent = `${S.doc.docType} · ${S.doc.docId}${docStatsSuffix()}`;
   const signed = S.doc.status === 'signed';
-  /* 已签章与已归档在界面上都不可编辑，判据与内核 `commit()` 那道门完全一致
-     （`status === 'signed' || 'archived'`）。把"改不了"前置：
-     内核只会在提交时拒（`E_SIGNED_IMMUTABLE`），于是医生可以先改掉一大段、
-     点保存才被挡回来，那是最容易白做一场的顺序。
-     但要说清限度：只读只是前置提示，真正的拦点始终在内核（绕过界面也改不动）。 */
   const immutable = signed || S.doc.status === 'archived';
   /* 禁用/只读控件必须带原因：不给理由的只读只会被当成"界面卡了" */
   const immutableHint = S.doc.status === 'archived'
@@ -688,19 +761,13 @@ function renderDoc() {
     : signed
       ? '本文档已签章：内容不可修改。需要修改请到「定稿与导出」点「解锁修改」（会留痕并作废本次签章），改完重新签章。'
       : docNotice;
-  /* 撤销按钮：只在有可撤销项时可用，并把"撤的是哪一条"写进 title，只写"撤销"，
-     医生只能靠猜自己撤掉了什么（连续点两次之后尤其如此） */
   const undo = S.undo;
   const undoButton = $('btnUndo');
   if (undoButton) {
-    /* 不再禁用：这个按钮现在打开的是历史版本清单 ——
-       没有可撤销的写入时，"看我之前改过什么"依然是合理诉求。 */
     undoButton.title = undo
       ? `撤销 / 历史版本：可撤销第 ${undo.rev} 条（${undo.op}），也能回到最近 15 次里的任意一版`
       : '历史版本：最近 15 次写入（当前没有可撤销的写入；签章 / 解锁之后不可撤销）';
   }
-  /* 派生值重算入口：只在本文书真有派生值时出现。文案要说清"它只改公式算出来的格子"，
-     否则医生会担心它把自己的手写内容覆盖掉（而内核本来就不允许覆盖人工内容）。 */
   const derivedRow = $('derivedRow');
   if (derivedRow) {
     const derived = Number(S.derivedCount ?? 0);
@@ -709,8 +776,6 @@ function renderDoc() {
       ? ''
       : `本文书有 ${derived} 个派生值：按控件公式计算；输入项填好后点一次（手改过的不动，缺输入的不编数）。`;
   }
-  /* 落盘冲突的出路：冲突时给出可点的入口，并把"会影响什么、不影响什么"写清楚，
-     这是有后果的操作（放弃本终端尚未落盘的旁挂改动），不能只给一个裸按钮。 */
   const conflictRow = $('sidecarConflictRow');
   if (conflictRow) {
     const conflicted = !!((S.sidecar || {}).conflict);
@@ -721,50 +786,34 @@ function renderDoc() {
     }
   }
 
-  /* 正文两种画法，**同一批视图项**：
-       · 卡片模式（默认）由 `/doc-view.js` 给 —— 管理后台的模板预览用的是同一个函数、同一份样式；
-       · 流式模式由 `/flow-view.js` 给 —— 表格与专科控件仍然复用 `L0DocView.nodeHtml`，
-         所以"同一个控件在两种模式里长得不一样"不会发生。
-     两处都只是画：写路径完全同一条（见 flushFlow 与 flushEdits），
-     所以切换模式不会让"同一次改动"留下不同的痕迹。 */
-  if (isFlow()) {
-    const caret = pendingCaret;
-    pendingCaret = null;
-    /* 记下这一屏所基于的 rev：落笔时带上它做乐观锁。
-       必须在这里记、而不是落笔时现读 `S.doc.rev` —— 后者可能已被别的动作推进过，
-       那样乐观锁永远不报冲突，等于没接。 */
-    flowBaselineRev = typeof S.doc.rev === 'number' ? S.doc.rev : null;
-    $('docBody').innerHTML = L0FlowView.render(S.items, {
-      readonly: immutable,
-      readonlyHint: immutableHint,
-      clinical: isClinical(),
-      annotations: S.annotations || [],
-    });
-    /* 重画之后把光标放回去。这一步不是锦上添花：流式模式下一次落笔就会重画整片纸，
-       不还原光标等于"每写完一句就被踢出编辑区"，只能靠鼠标重新点回去。
-       `focus()` 要排在 `setCaret()` 前面：先聚焦会把光标默认放到元素开头/末尾，
-       再设选区才能落到该在的位置（反过来做，选区会被聚焦这一步冲掉）。 */
-    if (caret) {
-      const host = flowHostOf(caret.key);
-      if (host) {
-        if (caret.focus === true) host.focus();
-        L0FlowView.setCaret(host, caret.at);
-      }
-    }
-    return;
-  }
-  $('docBody').innerHTML = L0DocView.nodesHtml(S.items, {
+  const want = {
+    docId: S.doc.docId,
+    mode: isFlow() ? 'flow' : 'card',
     readonly: immutable,
     readonlyHint: immutableHint,
     clinical: isClinical(),
     annotations: S.annotations || [],
-  });
+    items: S.items || [],
+  };
+  const decision = typeof L0PatchPlan !== 'undefined' && L0PatchPlan
+    ? L0PatchPlan.planDoc(lastDocSnapshot, want)
+    : { mode: 'full', reason: 'no-planner', replace: [], textOnly: [] };
+  if (decision.mode === 'full') {
+    renderDocFull(want);
+  } else if (decision.mode === 'patch') {
+    if (!patchDoc(decision, want)) {
+      renderDocFull(want);
+    } else {
+      pendingCaret = null;
+    }
+  }
+  lastDocSnapshot = want;
+  if (want.mode === 'flow') {
+    flowBaselineRev = typeof S.doc.rev === 'number' ? S.doc.rev : null;
+  }
+  applyPaper();
 }
 
-/* ------------------------------ 质控提示（旁挂注解） ------------------------------ */
-
-/* 质控提示面板。与建议面板的关键差别：注解不会因为处置而消失，
-   列表永久保留（含处置史），因为"曾经提示过什么、谁怎么处理"本身就是证据链。 */
 /* 跨文书一致性区块。放在「质控提示」面板里，它本身就是质控的一种，
    不另开页签（页签表达载体，不是功能）。 */
 function renderConsistency() {
@@ -799,15 +848,6 @@ function renderConsistency() {
     .join('');
 }
 
-/**
- * 就诊时间轴：把跨文书质控的结论放回**一条线**上。
- *
- * 与「质控提示」的分工：那一栏逐条回答"哪里可能有问题"，这一栏回答"这条线断在哪"。
- * 缺口是**线**上的事 —— 一条挂在节点上的提示说不清"断在哪两份文书之间"。
- *
- * 判定不在这里：服务端跑的仍是那批已编译的时限规则，回传的 `detail` 与注解**逐字相同**，
- * 所以两边不会各说一句话（措辞只在上游一处）。
- */
 function renderTimeline() {
   const box = $('timeline');
   const trendBox = $('timelineTrend');
@@ -824,8 +864,6 @@ function renderTimeline() {
     return;
   }
 
-  /* 时刻只显示到分钟：年月日 + 时分足够回答"这两份之间隔了多久"，
-     秒与毫秒在 238px 宽的栏里只会把真正要看的字挤掉（完整值仍在文档 JSON 里）。 */
   const clock = (value) => {
     if (!value) return '—';
     const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(value));
@@ -838,24 +876,6 @@ function renderTimeline() {
     segmentsFrom.get(segment.fromDocId).push(segment);
   }
 
-  /* ------------------------- 四类待办：口径先写死在这里 -------------------------
-   *
-   * 为什么要在界面上**再算一次**，而不是让服务端下发"待办列表"：
-   * 这四类的判据全都已经在下发的数据里（`status` / `exceeds` / `gaps` / `trend.unwritten`），
-   * 再让服务端算一遍，等于把"什么算待办"多存一份口径 —— 那种东西迟早会和源头漂。
-   * 服务端继续只负责**判定**（时限、缺口、对照），界面只负责**归类成一个清单**。
-   *
-   * 哪四类：
-   *   1) 超时：同类文书间隔超过时限（`segments[].exceeds`）—— 线断了；
-   *   2) 未签：状态不是已签、也不是归档/作废（`status`）—— 决定还没落定；
-   *   3) 缺口：跨文书规则报出的"应有而缺 / 间隔超限"（`gaps`）；
-   *   4) 变化未写入病程：参考范围外的采样点之后再没被记录或提到（`trend.unwritten`）—— 写了但没写进去。
-   *
-   * `status` 为 null 的文书**不计入未签**：不知道就是不知道，把它算成"未签"会让清单里
-   * 永远挂着一份其实可能已签的文书；轴上仍标"状态未知"，人自己看。
-   */
-
-  /** 已签 / 未签 / 已归档作废 / 状态未知（四态，不让"未知"混进"未签"） */
   const signStateOf = (doc) => {
     if (!doc.status) return 'unknown';
     if (doc.status === 'signed') return 'signed';
@@ -876,9 +896,6 @@ function renderTimeline() {
   const overdue = (t.segments || []).filter((segment) => segment.exceeds);
   const unwrittenChanges = ((t.trend || {}).changes || []).filter((item) => item.unwritten);
 
-  /* 每条待办都必须**能落到一个动作**上，否则它就只是又一句提示。
-     动作只有一种是真的：切到那份文书（写不写、签不签仍然是人的事）。
-     纯提示类（变化未写入病程）不给按钮 —— 病程里补哪一句，系统不该替人决定。 */
   const todos = [];
   for (const segment of overdue) {
     todos.push({
@@ -971,7 +988,6 @@ function renderTimeline() {
       })
       .join('');
 
-  /* 未判定与前提都摆在明处：只显示缺口数，会把"有一批根本没判"读成"这条线是连的" */
   const unevaluated = (t.unevaluated || [])
     .map((item) => `<div class="muted">未判定：${esc(item.ruleId)} ${esc(item.reason)}</div>`)
     .join('');
@@ -991,8 +1007,6 @@ function renderTimeline() {
     ${unevaluated}
     ${notes}`;
 
-  /* 对照区只保留**已写入**的那部分：未写入的已经进了上面的待办，
-     同一个事实在两处各写一遍，人就得比对"这两条说的是不是同一件事"。 */
   const trend = t.trend || { changes: [], skipped: [], progressDocIds: [] };
   const written = (trend.changes || []).filter((item) => !item.unwritten);
   const changes = written.length === 0
@@ -1010,23 +1024,12 @@ function renderTimeline() {
   const skipped = (trend.skipped || [])
     .map((item) => `<div class="muted">未对照：${esc(item.reason)}（${esc(String(item.count))} 处）</div>`)
     .join('');
-  /* 判定口径（同一编码被再次记录，或正文提到它的名称，都算"写进去了"）不摆在标题上，
-     改放 title：它是"凭什么说已写入"的依据，需要时悬停可看，不必每屏占一行。 */
   trendBox.innerHTML = `
     <div class="mt10" title="同一编码被后续文书再次记录，或正文里提到该数据元的名称，都算“写进去了”"><b>变化与后续文书的对照</b></div>
     ${changes}
     ${skipped}`;
 }
 
-/* ---------------------------- 跨次就诊对比 ----------------------------
- *
- * 只显示**差异**：相同章节折叠成一行。
- * 医生要回答的是"这次和上次差在哪"，把逐字相同的章节再念一遍，
- * 等于让他在两份病历里重新找一遍 —— 那正是这一页要省掉的活。
- *
- * 每一段都直接给原文：不做摘要。摘要一旦错了，医生没法发现；
- * 而原文错了，他一眼就看得出来。
- */
 function renderCompare() {
   const box = $('comparePanel');
   const hint = $('compareHint');
@@ -1068,7 +1071,6 @@ function renderCompare() {
     return;
   }
 
-  /* 诊断：先给结论，再给依据。结论只有"同 / 不同 / 没有可比的东西"三种 */
   const diag = compare.diagnosis || { shared: [], onlyPrevious: [], onlyCurrent: [] };
   const label = (item) => esc(item.display || item.code);
   const diagChips = [];
@@ -1094,7 +1096,6 @@ function renderCompare() {
 
   const rowHtml = (row) => {
     const parts = [];
-    /* 删除线在下、新增在上：读起来就是"原来是这样 → 现在是这样" */
     for (const text of row.removed || []) parts.push(`<div class="cmp-p del">${esc(text)}</div>`);
     for (const text of row.added || []) parts.push(`<div class="cmp-p add">${esc(text)}</div>`);
     if (parts.length === 0) {
@@ -1115,7 +1116,6 @@ function renderCompare() {
     <div class="muted">${same.map((row) => esc(row.title)).join(' · ')}</div>
   </details>`;
 
-  /* 用药沿用：给得出原文才给按钮；给不出就说明原因，不用一个空块糊过去 */
   const med = compare.medication || { paragraphs: [], reason: null };
   let medHtml = '';
   if (med.reason) {
@@ -1140,16 +1140,6 @@ function renderCompare() {
     <div class="mt10">${notes}</div>`;
 }
 
-/* ------------------------------ 出院汇总 ------------------------------
- *
- * 两栏：**派生条目**与**缺口**。
- *
- * 缺口必须单独成栏：混进条目里时，"这次为什么没有出院医嘱"会藏进某条的空字段，
- * 而那正是最容易被漏掉的地方。医生要的不是"系统尽力了"，是"还差哪份文书、哪一章"。
- *
- * 每条来源都可点：点一下就切到那份额文书 —— 让人自己核对原文，
- * 而不是相信一个"来源已溯源"的标记。派生本身只搬运原文，不做摘要。
- */
 function renderDischarge() {
   const box = $('dischargePanel');
   const hint = $('dischargeHint');
@@ -1215,16 +1205,6 @@ function renderDischarge() {
     <div class="mt10">${notes}</div>`;
 }
 
-/* ------------------------------ 预问诊 ------------------------------
- *
- * 这一栏读的是**别人填好的东西**：患者候诊时写的原文，一个字都不是判断。
- * 所以它只有两件事可做：核对原文、生成建议。
- * 没有"一键写入正文"—— 患者自述进病历必须有医生签字那一步，
- * 而这一步在这个系统里就是建议通道（采纳 → 人工确认 → 才成为病历内容）。
- *
- * 为什么逐条列、不复述成一段：原文是证据。把"胸口闷三天"和"走快一点就闷"
- * 合成一段通顺的话，读起来更省事，但"哪句是他说的"就没了。
- */
 function renderPrevisit() {
   const box = $('previsitPanel');
   const hint = $('previsitHint');
@@ -1255,7 +1235,6 @@ function renderPrevisit() {
     return;
   }
 
-  /* 页签栏这一格很窄，只放"几条"；提交/读取时刻放到面板里（见下面那行小字） */
   hint.textContent = `${items.length} 条`;
   const missing = items.filter((item) => !item.hasTarget).length;
   badge.innerHTML = `<span class="chip ${missing > 0 ? 'warn' : 'ok'}">${items.length - missing}/${items.length} 条有落点</span>`;
@@ -1280,25 +1259,11 @@ function renderPrevisit() {
       : '<div class="mt10 muted">这份表单的字段在本次文书里都没有对应章节，无法生成建议。</div>'}`;
 }
 
-/* ------------------------- 就诊范围（摆不摆这一栏） -------------------------
- *
- * 「出院汇总」只对住院有意义：门诊 / 急诊 / 体检上点进去只会得到"可派生 0 条 + 一堆缺口"，
- * 那些缺口说的都是同一件事（这不是住院），读起来像系统在报错。
- *
- * 判据由服务端下发（`encounter.dischargeSummaryAvailable`）：前端不复制"什么算住院"，
- * 复制一份必然漂移，而漂移的方向是"该出现的入口不出现"——这类问题不会报错，只会让人以为功能丢了。
- *
- * 与 `applyCapabilities` 的分工要分清：
- *   · 那个答"这台机器有没有这条链路" —— 一次性摘除，永不恢复；
- *   · 这个答"当前这份病历适不适用" —— 随切文书来回变，只能切换 `hidden`，不能删。
- */
 function applyVisitScope() {
   const available = !!(S && S.encounter && S.encounter.dischargeSummaryAvailable);
   for (const el of document.querySelectorAll('[data-visit-scope="inpatient"]')) {
     el.hidden = !available;
   }
-  /* 从住院切到门诊时，当前页签可能正是被摘掉的那一个：不退回就会出现
-     "选中态停在一个看不见的面板上"（面板空、页签还亮，人只会以为卡住了）。 */
   if (!available && activeTab === 'discharge') switchTab('ai');
 }
 
@@ -1306,25 +1271,12 @@ function renderAnnotations() {
   const list = S.annotations || [];
   const counts = S.annotationCounts || { total: 0, open: 0, acknowledged: 0, dismissed: 0, resolved: 0, anchorLost: 0 };
 
-  /* 规则出处（哪几版包、启用了多少条）不再常驻显示：正常状态下它只是一行长字，
-     对"点哪一条、这件事做没做"毫无帮助。**只保留异常态**——库里一条规则都没有时
-     质控根本跑不了，那必须说出来，否则"没提示"会被读成"没问题"。
-     "有没有规则可跑"看的是**规则条数**，不是包数：判定方式也是包内容，库里天然会有一个
-     只装判定方式的包（出厂那 6 条就写在自建包里），拿包数当判据会把"一条规则都没有"
-     显示成"质控正常"。 */
   const catalog = Array.isArray((S.knowledgePacks || {}).rules) ? S.knowledgePacks.rules : [];
   const packLine = $('qcPackLine');
   if (packLine) {
     packLine.textContent = catalog.length === 0 ? '还没有任何规则：质控当前不可用。' : '';
   }
 
-  /* 未判定：与命中数同屏出现。时限类规则依赖入院时间或外部导入件的性质，
-     判不了时既不报也不是"没问题"，不说出来，医生就会把"这次没报"当成"查过了"。 */
-  /* 内涵类质控：没接上要写在界面上。它不是"没发现"，
-     引擎未接入 / 规则清单为空这两件事，与"跑了 0 命中"在数据与界面上都长得一模一样，
-     而处置完全不同（前者要配引擎/清单，后者是"确实干净"）。
-     但"还没跑过"不写：那只是"这一栏还没被用过"，摆在首屏等于要求医生先读一句
-     与当前动作无关的话；跑过之后的结论（可用 / 不可用）才必须写出来。 */
   const contentLine = $('qcContentLine');
   if (contentLine) {
     const info = S.qcContent;
@@ -1385,28 +1337,8 @@ function renderAnnotations() {
   }).join('');
 }
 
-/* -------------------------- 本机客户端采集（C3b③） --------------------------
-
-   形态：麦克风由**本机进程**采（浏览器在 http://10.x 下拿不到麦克风，本机进程没有这个限制），
-   **分片也在客户端做**（它有音频，也直接复用 `capture.ts` 的同一份规则）。
-   页面只做两件事：把段取过来、上传给同源采集路由（由服务端转发 ASR）——
-   于是页面这边**一行分片规则都不需要**（这是这个形态最要紧的收益）。
-
-   地址与一次性令牌来自 URL 参数（客户端打开页面时带上），页面**不写死任何地址**：
-   写死地址等于把"音频从哪来"钉进前端，而它本来是部署参数。
---------------------------------------------------------------------------- */
-
-/** 本机客户端的**固定约定**：只在本机回环、只在这个端口。
- *
- * 为什么可以写死：它不是拓扑地址（不是某台服务器的内网 IP），而是"本机装的那个客户端"——
- * 换机器也不变、与部署环境无关。地址仍可由 URL 参数覆盖（换端口做实验时不用改前端）。
- * 令牌是可选的：客户端没启用令牌时，页面空令牌直连；启用时页面从 URL/上次记录里取。 */
 const DEFAULT_CAPTURE_CLIENT = '127.0.0.1:8901';
 
-/** URL 里的本机客户端信息：`?captureClient=127.0.0.1:8901&captureToken=…`
- *
- * 优先级：URL 参数 > 上一次从客户端打开时记住的（本机同源 localStorage）> 固定约定。
- * 令牌只在前两者里出现：页面不生成、不猜令牌。 */ 
 const CAPTURE_CLIENT_KEY = 'l0demo.captureClient';
 
 function readRememberedClient() {
@@ -1420,7 +1352,7 @@ function readRememberedClient() {
     if (host === '') return null;
     return { host, token: parsed.token.trim() };
   } catch {
-    return null; /* 隐私模式 / 坏数据：记住只是便利，不是能力 */
+    return null;
   }
 }
 
@@ -1430,7 +1362,6 @@ function rememberClient(host, token) {
     if (remembered !== null && remembered.host === host && remembered.token === token) return;
     localStorage.setItem(CAPTURE_CLIENT_KEY, JSON.stringify({ host, token }));
   } catch {
-    /* 存不下也不影响这次（URL 里本来就带着） */
   }
 }
 
@@ -1444,25 +1375,18 @@ function captureClientOf() {
   }
   const remembered = readRememberedClient();
   if (remembered !== null) return { ...remembered, base: `http://${remembered.host}/dictation-capture` };
-  /* 兜底：本机客户端没带参数打开页面（裸地址）也照样检测 —— 地址是固定约定，令牌可空。
-     客户端启用了令牌时会回 401，状态行会明确说"令牌不匹配"，不会静默失败。 */
   return { host: DEFAULT_CAPTURE_CLIENT, token: '', base: `http://${DEFAULT_CAPTURE_CLIENT}/dictation-capture` };
 }
 
 /** 本机客户端的检测结果（`null` = 正在检测 / 还没检测）。**只读：不打开设备、不发一个字节音频** */
 let clientProbe = null;
-/** 探测序号：只有最后一次探测的结果能落到界面上（先发后到的旧结果会把"已连接"冲回"连不上"） */
 let clientProbeSeq = 0;
-/** 探测是否在飞：心跳 3s 一次、单次最长 2.5s，不挡住并发就会叠出一串请求 */
 let clientProbeInflight = false;
-/** 最近一次探测成功时的源标识：断线时仍要能说清"刚才用的是哪个源" */
 let clientSource = '';
 /** 页面 ↔ 本机客户端的心跳间隔：状态必须能自己变，不能靠人点「重新检测」 */
 const CLIENT_HEARTBEAT_MS = 3000;
 
-/** 本机采集的页面侧状态（它不属于服务端 state：过程由客户端与页面共同产生） */
 let localCapture = null;
-/** 录音过程的轮询句柄（客户端把计时 / 电平放在 /hello 的 progress 里，页面按 300ms 取一次） */
 let localProgressTimer = null;
 
 async function bridgeFetch(client, path, options = {}) {
@@ -1473,14 +1397,12 @@ async function bridgeFetch(client, path, options = {}) {
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   if (res.status === 401) {
-    /* 与"客户端不在"分开报：两者的处置完全不同（一个是去启动客户端，一个是重新从客户端打开页面） */
     const payload = await res.json().catch(() => ({}));
     throw Object.assign(new Error(payload.message || '令牌不匹配'), { code: payload.code || 'E_BRIDGE_BAD_TOKEN' });
   }
   return res.json();
 }
 
-/** 探测失败 → "现场表现 + 怎么办"（与采集源同一条纪律：只丢一个错误码等于让人去搜） */
 function describeClientProbeFailure(err) {
   const code = String((err && err.code) || '');
   if (code === 'E_BRIDGE_BAD_TOKEN') {
@@ -1504,16 +1426,6 @@ function describeClientProbeFailure(err) {
   };
 }
 
-/**
- * 检测本机客户端在不在、令牌对不对、采集源是什么。
- *
- * 为什么要单独检测、而且**定时**检测、而不是等按下"开始"再发现：地址与令牌由客户端给出，
- * 但**客户端进程可能还没启动或已经退出**（或端口被占）—— 那时按下去只会得到一句"连不上"，
- * 而医生会以为自己按错了。检测只打一个 `/hello`：不打开设备、不发任何音频。
- *
- * 心跳不看当前是"已连上"还是"连不上"：客户端后启动要能自动接上，中途退出也要在下一次心跳里
- * 显示出来 —— 只在已连上时复检，等于"断了就再也不看了"。
- */
 async function probeCaptureClient() {
   const client = captureClientOf();
   if (client === null) {
@@ -1527,11 +1439,9 @@ async function probeCaptureClient() {
     renderCaptureButtons();
     return clientProbe;
   }
-  /* 上一次探测还没回来：等它落定即可（心跳下一次会接着探），不叠请求 */
   if (clientProbeInflight) return clientProbe;
   clientProbeInflight = true;
   const seq = (clientProbeSeq += 1);
-  /* 只有第一次（还没有结论）才显示"正在检测"；心跳保持上一次结论，避免每 3s 闪一下 */
   if (clientProbe === null) renderCaptureLocal();
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   const timer = controller === null ? null : setTimeout(() => controller.abort(), 2500);
@@ -1558,14 +1468,12 @@ async function probeCaptureClient() {
   return clientProbe;
 }
 
-/** 秒数：一分钟以内给到 0.1s（录音时的计时感），超过就给 m:ss */
 function fmtSeconds(value) {
   const sec = Math.max(0, Number(value) || 0);
   if (sec < 60) return `${sec.toFixed(1)}s`;
   return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 }
 
-/** 录音电平条：只反映客户端真实给出的帧（`voiced` / `level`），不是纯装饰动画 */
 function updateLocalWave() {
   const wave = $('captureLocalWave');
   if (!wave) return;
@@ -1573,18 +1481,10 @@ function updateLocalWave() {
   wave.hidden = !active;
   if (!active) return;
   const level = Math.max(0, Math.min(1, Number(localCapture.level || 0)));
-  /* 平方根拉伸：脚本音频的 RMS 只有 ~0.18，线性画出来几乎看不见 */
   wave.style.setProperty('--amp', (level <= 0 ? 0.1 : Math.min(1, Math.sqrt(level) * 2.4)).toFixed(2));
   wave.dataset.voiced = localCapture.voiced === true ? '1' : '0';
 }
 
-/**
- * 采集中每 300ms 取一次进度：计时与电平要**在段定稿之前**就在动，否则看着像"按了没反应"。
- *
- * 除了进度，这里还要看 `sourceProblem`：设备被拔掉 / 被别的程序独占时，
- * 客户端不会"报错退出"，它只是**不再送帧**，最后被看门狗判成停摆并把 problem 写进 `/hello`。
- * 心跳那一路 3s 一次、只管连接是否还在，不会把这个变化带到界面上。
- */
 async function refreshLocalProgress() {
   const client = captureClientOf();
   if (client === null || !localCapture || !localCapture.running) return;
@@ -1599,17 +1499,13 @@ async function refreshLocalProgress() {
       localCapture.level = Number(progress.level || 0);
       localCapture.voiced = progress.voiced === true;
       localCapture.clientState = String(progress.state || '');
-      /* 过短丢弃的段数：它们不会出现在"失败"里，但医生会觉得"我说了一句却没变文字" */
       localCapture.shortDropped = Number(progress.shortDropped || 0);
       dirty = true;
     }
-    /* 实际打开的设备与采样率由 /hello 的 source 带回：多卡环境下这条要尽早显示准确
-       （心跳 3s 才更新一次 clientProbe，采集刚开始那几秒不能还停在旧文案上） */
     if (typeof hello.source === 'string' && hello.source !== '' && hello.source !== clientSource) {
       clientSource = hello.source;
       dirty = true;
     }
-    /* 只在"有问题/问题变了/问题消失"时换一次，别每 300ms 重画整块状态栏 */
     const problem = hello.sourceProblem && typeof hello.sourceProblem === 'object' ? hello.sourceProblem : null;
     const before = localCapture.problem === null ? '' : String(localCapture.problem.code || '');
     const after = problem === null ? '' : String(problem.code || '');
@@ -1619,7 +1515,6 @@ async function refreshLocalProgress() {
     }
     if (dirty) renderCaptureLocal();
   } catch {
-    /* 轮询失败不打断采集：真正的问题由 /next 那一路报出来（这里的重试是 300ms 后） */
   }
 }
 
@@ -1630,13 +1525,8 @@ function stopLocalProgressPoll() {
   }
 }
 
-/** 手动重试是否在进行中：只影响这个按钮（旋转 + 置灰），不影响状态卡里的结论 */
 let reprobeBusy = false;
 
-/** 状态卡右侧的"重新检测"图标按钮。
- * 它必须是**看得见在动**的：探测最长 2.5s，期间没有反馈的话，
- * 人只会怀疑"这按钮到底能不能按"，于是再点几下 —— 而结果是同一个。
- * 所以：点击即进入 spinning + disabled，落定后由重画收尾。 */
 function capRefreshButton() {
   return `<button class="cap-refresh${reprobeBusy ? ' spinning' : ''}" data-client-reprobe="1"`
     + (reprobeBusy ? ' disabled aria-busy="true"' : '')
@@ -1649,9 +1539,6 @@ function capRefreshButton() {
     + '</button>';
 }
 
-/** 采集状态卡的一行：标签（固定列）/ 值 / 动作（可选）。
- * 标签列对齐是这张卡的全部意义：同义的几组事实各自成行，
- * 换行位置不再由文字长度决定。 */
 function capRow(label, valueHtml, cls, action) {
   return `<div class="cap-row"><span class="cap-k">${esc(label)}</span>`
     + `<span class="cap-v${cls ? ` ${cls}` : ''}">${valueHtml}</span>`
@@ -1665,15 +1552,12 @@ function renderCaptureLocal() {
   updateLocalWave();
   const client = captureClientOf();
   const reprobe = capRefreshButton();
-  /* 左侧色条取"最坏的那一条"：整块是正常、将就（能录但转不了）、还是坏了，一眼可见 */
   const card = (tone, rows, notes) => `<div class="cap-status${tone ? ` ${tone}` : ''}">`
     + rows.join('')
     + (notes.length === 0 ? '' : `<div class="cap-notes">${notes.map((note) => `<div class="cap-note">${note}</div>`).join('')}</div>`)
     + '</div>';
 
   if (client === null) {
-    /* 本机客户端是**唯一**的采集来源：页面不是从它打开时，只留一行状态，
-       不再展开"去哪儿启动、用哪个地址打开"的操作指引。 */
     el.hidden = false;
     el.innerHTML = card('danger', [capRow('本机客户端', '未检测到', 'danger')], []);
     return;
@@ -1685,19 +1569,13 @@ function renderCaptureLocal() {
   }
   const state = localCapture || {};
   const connected = clientProbe.ok === true;
-  /* `S` 在第一次取状态之前是 null（心跳会在那之前就跑起来）：不守卫会在这里抛错，
-     而表现在界面上就是永远停在"正在检测"。 */
   const asrReady = !!(S && S.capture && S.capture.configured === true);
   const rows = [];
   const notes = [];
   let tone = '';
   const failed = Number(state.failed || 0);
 
-  /* 录音中优先：心跳失败时也要先让人看见"它还在录"（连接断了另加一条），
-     不能因为一次探测失败就把录音指示换成一行"不可用" —— 那会让人以为录音已经停了。 */
   if (state.running) {
-    /* 页面自己的 running 只管"这一轮还在不在跑"；客户端若已先收尾（源停摆/被停止），
-       要显示"收尾中"而不是继续挂着"录音中"——两边说法不一致时，人会以为录音还在继续 */
     tone = connected ? 'warn' : 'danger';
     rows.push(capRow(
       '状态',
@@ -1715,7 +1593,6 @@ function renderCaptureLocal() {
     rows.push(capRow('分段', `已定稿 ${Number(state.finalized || 0)} 段 · 已取段 ${Number(state.acked || 0)} 段`
       + (failed > 0 ? ` · 失败 ${failed} 段` : ''), failed > 0 ? 'danger' : ''));
     if (state.message) notes.push(esc(state.message));
-    /* 采集源异常（设备被拔掉/被独占）：**不能**只让秒数停住 —— 那看起来像卡死，不像故障 */
     if (state.problem) {
       notes.push(`采集源异常：${esc(state.problem.message)}。怎么办：${esc(state.problem.howTo || '')}`);
     }
@@ -1725,7 +1602,6 @@ function renderCaptureLocal() {
     rows.push(capRow('本机客户端', `不可用 —— ${esc(clientProbe.message)}`, 'danger', reprobe));
     notes.push(`怎么办：${esc(clientProbe.howTo)}。页面每 ${Math.round(CLIENT_HEARTBEAT_MS / 1000)} 秒自动检测一次，也可以手动重试。`);
   } else {
-    /* 能录、但转不了：这是"将就可用"，用 warn 而不是 danger —— 采集入口照旧可用 */
     tone = asrReady ? 'ok' : 'warn';
     rows.push(capRow('本机客户端', `● 已连接<span class="cap-host">${esc(client.host)}</span>`, 'ok', reprobe));
     if (clientSource) rows.push(capRow('采集源', esc(clientSource)));
@@ -1735,7 +1611,6 @@ function renderCaptureLocal() {
         + (failed > 0 ? ` · 失败 ${failed} 段` : ''), failed > 0 ? 'danger' : ''));
     }
     if (state.message) notes.push(esc(state.message));
-    /* 采集结束后 problem 仍要留着：设备就是刚才那一下掉的，"结束得正常"不能把原因盖掉 */
     const sourceProblem = state.problem || clientProbe.sourceProblem;
     if (sourceProblem) {
       notes.push(`客户端采集源异常：${esc(sourceProblem.message)}。怎么办：${esc(sourceProblem.howTo || '')}`);
@@ -1744,30 +1619,15 @@ function renderCaptureLocal() {
   el.innerHTML = card(tone, rows, notes);
 }
 
-/* -------------------------- 采集入口：一个开始 + 一个停止 --------------------------
-
-  来源只有**本机客户端**这一条：音频由本机进程采、分片也在本机做，
-  页面只做"取段 → 上传同源路由 → 一组建议"。
-  浏览器麦克风（`http://10.x` 下拿不到设备）与服务端脚本音频（只是演示）不再摆成可选项 ——
-  把它们与真正的来源并排放在一个下拉里，现场只会去猜"哪个才是真的"。
---------------------------------------------------------------------------- */
-
-/** 采集按钮的唯一状态来源：谁在跑、能不能跑、按下去会发生什么，都在这里判一次 */
 function renderCaptureButtons() {
   const start = $('btnCaptureStart');
   const stop = $('btnCaptureStop');
   if (!start || !stop) return;
   const active = !!(localCapture && localCapture.running);
-  /* **录音与转写是两件事**：这里只拦"采不到音"的情况（客户端不在 / 令牌不对）。
-     语音识别没配就不让录，是把这个按钮当成了"转写按钮" —— 想试麦克风的人连按都按不下去，
-     而失败本来就能逐段报出来（哪一段没转成、为什么）。 */
   const clientReady = clientProbe !== null && clientProbe.ok === true;
   start.disabled = active || !clientReady;
   stop.disabled = !active;
-  /* 来源只有一条，文案就不必跟着选择走：按下去之前就知道这一次会从哪儿取音频 */
   start.textContent = '开始采集';
-  /* **为什么按不动**贴在 title 上：页面上不常驻那几段说明，
-     但理由仍要能问到 —— 灰按钮不给理由，只会被当成"界面卡了"。 */
   start.title = active
     ? '正在采集：先按「停止」结束这一次'
     : !clientReady
@@ -1776,12 +1636,10 @@ function renderCaptureButtons() {
 }
 
 async function startCapture() {
-  /* 唯一的采集入口：本页只支持本机客户端（地址与令牌由客户端打开页面时带上） */
   await runLocalCapture();
 }
 
 async function stopCapture() {
-  /* 按停只让**客户端**把当前那一段定稿；页面这边继续把队列取完（已经说出口的话不丢） */
   if (!localCapture || !localCapture.running) return;
   const client = captureClientOf();
   if (client === null) return;
@@ -1792,19 +1650,9 @@ async function stopCapture() {
   }
 }
 
-/**
- * 本机客户端采集：取段 → 上传同源采集路由 → 按结果 ack → 全部收齐后提交成建议。
- *
- * 三条要点：
- *   - **ack 之前不推进队列**（客户端那边的纪律）：上传失败也要 ack(ok:false) 把原因带回去，
- *     否则那一段会在客户端队列里永远挂着，而页面什么都不知道；
- *   - **上传仍然只走同源**：不把 ASR 端点告诉页面（否则就退回被否决的方案 A）；
- *   - **时间区间原样带过去**：它是客户端给的，页面不代编（服务端也只校验）。
- */
 async function runLocalCapture() {
   const client = captureClientOf();
   if (client === null) return;
-  /* 按下去之前先确认客户端真的在：只凭 URL 里有参数是不够的（进程可能已经退出） */
   const probe = clientProbe !== null && clientProbe.ok === true ? clientProbe : await probeCaptureClient();
   if (probe === null || probe.ok !== true) {
     toast(`本机客户端不可用：${probe ? probe.message : '未检测到'}`, 'danger');
@@ -1826,12 +1674,9 @@ async function runLocalCapture() {
     level: 0,
     voiced: false,
     outcome: '',
-    /* 采集源异常（设备被拔掉/被独占）：由 /hello 的 sourceProblem 带回来，收尾时也要留着 */
     problem: null,
-    /* 客户端侧的状态（recording / done）：页面自己的 running 只管"这一轮还在不在跑" */
     clientState: '',
     shortDropped: 0,
-    /* 这一轮的开始时间：采集记录要记"什么时候录的"，不能等收尾时补一个假的 */
     startedAt: new Date().toISOString(),
   };
   renderCaptureLocal();
@@ -1845,15 +1690,11 @@ async function runLocalCapture() {
     stopLocalProgressPoll();
     localProgressTimer = setInterval(() => { void refreshLocalProgress(); }, 300);
 
-    /* 逐段：取 → 上传同源路由 → ack */
     for (;;) {
       const payload = await bridgeFetch(client, '/next');
       const next = payload.next || {};
       if (next.kind === 'done') {
         localCapture.finalized = Number(next.total || 0);
-        /* 先补一次进度：停在最后一段时计时要落到"真实的录音时长"，
-           同时把设备停摆的 problem 取回来（否则"结束得正常"会把原因盖掉）。
-           原因本身由 `state.problem` 那条说明行展开 —— 拼进摘要只会让同一句话出现两次。 */
         await refreshLocalProgress();
         localCapture.message = `采集结束（定稿 ${next.total} 段 / 失败 ${(next.failures || []).length} 段）`;
         localCapture.outcome = localCapture.message;
@@ -1885,7 +1726,6 @@ async function runLocalCapture() {
         localCapture.segments.push({ index: meta.index, text: result.data.text, startSec: meta.startSec, endSec: meta.endSec });
         localCapture.acked += 1;
       } catch (err) {
-        /* 失败也要 ack 回去（客户端据此记账、并在 done 里如实回报）—— 不许让它挂在队列里 */
         ok = false;
         failure = { code: err.code || 'E_CAPTURE_SEGMENT_FAILED', message: err.message || '该段上传失败' };
         localCapture.failed += 1;
@@ -1899,11 +1739,9 @@ async function runLocalCapture() {
   } finally {
     stopLocalProgressPoll();
     localCapture.running = false;
-    /* 收尾时电平归零：录音指示不能停在"还在响"上（病房里看到的是它） */
     localCapture.voiced = false;
     localCapture.level = 0;
     renderCaptureLocal();
-    /* 收齐后提交成建议：**与"页面自己录"完全同一条路**（`/api/dictate` 收真实转写） */
     if (localCapture.segments.length > 0 && localCapture.asrModelId !== '') {
       await apply(
         await api('/api/dictate', {
@@ -1913,35 +1751,14 @@ async function runLocalCapture() {
         }),
       );
     }
-    /* 记一笔采集元数据（何时、哪块设备、多久、几段成败）。
-       **音频不留存**，所以这条记录里没有音频字段，界面上也不会有回放入口。 */
     void submitCaptureRecord();
   }
 }
 
-/* --------------------------- 采集记录（只有元数据） --------------------------- */
-
 let captureHistoryLoaded = false;
-/**
- * 上一次读记录时用的是哪份病历。
- *
- * 只靠 `captureHistoryLoaded` 会让"切换病历"停在上一份的 DOM 上：`switchDoc` 之后
- * `renderAll` 每次都调 `renderCaptureHistory()`（不带 force），于是直接早退，
- * 面板里留着的就是上一个患者的采集记录 —— 既串档，也会被读成"这一份也录失败了"。
- */
 let captureHistoryDocId = '';
-/**
- * 读取序号：切病历很快时，先发的请求可能后到。
- * 没有它，"A → B"会以 A 的记录收场（而且表面上一切正常），排查时只能怀疑数据本身。
- */
 let captureHistorySeq = 0;
 
-/**
- * 提交一次采集的元数据。
- *
- * 为什么不在这条记录里带文本或音频：文本已经作为建议走 `/api/dictate`（带来源、带留痕），
- * 音频按设计不留存。把任何一样抄进来，都会多出一份"生命周期和门控都不一样"的副本。
- */
 async function submitCaptureRecord() {
   const state = localCapture;
   if (!state || !state.startedAt) return;
@@ -1963,7 +1780,6 @@ async function submitCaptureRecord() {
     });
     if (response && response.ok === true) await renderCaptureHistory(true);
   } catch {
-    /* 记录失败不打扰医生：采集与建议都已经完成，这只是一笔账 */
   }
 }
 
@@ -1980,20 +1796,10 @@ const RECORD_OUTCOME = {
   failed: '<span class="chip danger">没有一段成功</span>',
 };
 
-/**
- * 采集记录列表：**只到本份病历**，最近若干条，只到"哪次、哪块设备、多久、几段成败"。
- *
- * 这里**没有播放按钮**，不是漏了：音频按设计不留存，
- * 摆一个点了会说"文件不存在"的入口，比不摆更糟。
- *
- * 读取必须带 `docId` 且跟着当前病历走：记录是该次采集挂在哪份病历上的，
- * 而"上一份病历录了几段"不该出现在下一个患者的面板里。
- */
 async function renderCaptureHistory(force) {
   const el = $('captureHistory');
   if (!el) return;
   const docId = (S && S.activeDocId) || '';
-  /* 没有活动病历时没有"本份"可言：藏起来，而不是退化成"显示全部" */
   if (docId === '') {
     captureHistoryLoaded = false;
     captureHistoryDocId = '';
@@ -2009,9 +1815,7 @@ async function renderCaptureHistory(force) {
     const response = await api(`/api/dictation/capture/records?docId=${encodeURIComponent(docId)}`);
     if (response && response.ok === true) data = response.data || null;
   } catch {
-    /* 读不到就不显示：记录是辅助信息，不能因为它报错就打断别的事 */
   }
-  /* 等回来时病历已经又换了：这次响应过期，写进去就是"B 的面板上停着 A 的记录" */
   if (seq !== captureHistorySeq || docId !== ((S && S.activeDocId) || '')) return;
   captureHistoryLoaded = true;
   captureHistoryDocId = docId;
@@ -2032,8 +1836,6 @@ async function renderCaptureHistory(force) {
       <div class="muted mt6">设备：${esc(record.device || '未回报')}${record.client ? ` · 客户端 ${esc(record.client)}` : ''}</div>
     </div>`;
   }).join('');
-  /* 清空按钮只清**本份病历**（服务端会再核一次 docId）：失败的记录留着没有用处，
-     但"怎么删"必须写在界面上 —— 否则只能删文件或等 7 天，那是运维才知道的事。 */
   el.innerHTML = `<div class="row mb6">
       <span class="muted push">采集记录（本份病历 · 保留 ${Number(data.retentionDays) || 7} 天；只记元数据，音频不留存，无法回放）</span>
       <button data-capture-clear title="只清空本份病历的采集记录；管理审计里的采集记录不受影响">清空本份记录</button>
@@ -2041,31 +1843,16 @@ async function renderCaptureHistory(force) {
   el.hidden = false;
 }
 
-/* ------------------------------- 语音转写 ------------------------------- */
-
-/** 可接收拖放的节点集合（每次渲染语音页签时刷新，供下面的拖拽处理用） */
 let placementCandidateIds = new Set();
 
-/* 转写结果展示。把"规范化做了什么"（丢了空段、重排了乱序）摆在明面上，
-   这类事静默处理的话，医生会以为自己的话被吞了，却查不出原因 */
 function renderDictation() {
   const dictation = S.dictation;
-  /* dragover 是高频事件：候选集在这里算好，别在事件处理里反复建 Set */
   placementCandidateIds = new Set((Array.isArray(S.placementCandidates) ? S.placementCandidates : []).map((item) => item.nodeId));
-  /* 采集可用性：这段放在早返回之前 —— 它说的是服务端配置，不是"有没有转写结果"。
-     但**只在已配置时写一行**：未配置时不在医生页面展开"缺哪几格、去哪儿配"，
-     那是部署方的动作，摆在每台终端上只会每天重复一次；点采集仍会明确报错
-     （`E_CAPTURE_NOT_CONFIGURED`），原因在那句报错里，而不是这里的一大段说明。 */
   const capture = S.capture || {};
-  /* 这一行说的是**语音识别服务**（服务端配置），下面那一行说的是**麦克风**（本机环境）——
-     两者是两件事，所以各自带主语，避免读成同一句"不可用"。 */
-  /* 只说"能不能用"与"音频会不会被留下"：服务地址与模型标识属部署参数，由管理后台管。
-     地址画在医生页面上没有任何用途，却把"这份内容与音频发往哪台服务器"摆到了每台终端上。 */
   const captureLine = $('dictationCapture');
   captureLine.textContent = capture.configured
     ? `语音识别服务：已配置（音频${capture.retainAudio ? '会留存' : '不留存'}）`
     : '';
-  /* 未配置时整行**不占位**：空 div 仍带一段下边距，看起来像"这儿少了点什么" */
   captureLine.hidden = capture.configured !== true;
   if (!dictation) {
     $('badgeVoice').innerHTML = '<span class="chip">未接入</span>';
@@ -2076,15 +1863,11 @@ function renderDictation() {
   const placements = Array.isArray(dictation.placements) ? dictation.placements : [];
   const byIndex = new Map(placements.map((item) => [item.index, item]));
   const unplaced = Number(dictation.unplaced || 0);
-  /* 落点可指定 = 还没提交。提交后再改只能重新转写，
-     建议一旦生成就有独立生命周期（采纳/拒绝/留痕），在它背后偷换落点会让留痕与内容对不上。 */
   const selectable = dictation.submitted !== true;
   const candidates = Array.isArray(S.placementCandidates) ? S.placementCandidates : [];
   const optionsFor = (selected) => ['<option value="">— 请选择落点 —</option>']
     .concat(candidates.map((item) => `<option value="${esc(item.nodeId)}"${item.nodeId === selected ? ' selected' : ''}>${esc(item.label)}</option>`))
     .join('');
-  /* 文本从哪来必须标出来：模拟转写与真实采集在界面上长得一样（都是一段文本 + 时间区间），
-     而"仓库里写死的一段话"与"真识别出来的"信任程度完全不同 */
   $('badgeVoice').innerHTML = `<span class="chip${dictation.source === 'capture' ? ' ok' : ' warn'}">${dictation.source === 'capture' ? '真实采集' : '模拟转写'}</span>`
     + ` <span class="chip ok">${segments.length} 段</span>`
     + (unplaced > 0 ? ` <span class="chip warn">未落位 ${unplaced}</span>` : '')
@@ -2093,14 +1876,10 @@ function renderDictation() {
     const span = segment.startSec === undefined ? '无时间戳' : `${segment.startSec}s ~ ${segment.endSec}s`;
     const placement = byIndex.get(segment.index);
     const chosen = placement && placement.nodeId ? placement.nodeId : '';
-    /* 落点必须显式标出："系统猜的"与"没猜到"要让医生一眼分辨，
-       错误落位比不落位更难被发现（主诉写进现病史，医生未必逐字看） */
     const target = selectable
       ? `<select data-place-index="${segment.index}" title="为这一段指定落点（只影响建议落点，不改门控档位）">${optionsFor(chosen)}</select>`
       : (chosen ? `<span class="chip ok">落点 ${esc(chosen)}</span>` : '<span class="chip warn">未落位</span>');
     const hint = placement ? `<span class="muted">${esc(placement.reason)}</span>` : '';
-    /* 未提交时整块可拖到正文的段落上（见下面的拖拽处理），拖拽只是另一种指定落点的方式，
-       与下拉等价：更顺手，但不是唯一路径（键盘用户与触屏仍用下拉）。 */
     const dragAttrs = selectable ? ` draggable="true" data-drag-segment="${segment.index}"` : '';
     return `<div class="sugg${selectable ? ' draggable' : ''}"${dragAttrs}>
       <div class="row"><span class="chip">第 ${segment.index} 段</span><span class="chip">${esc(span)}</span>
@@ -2125,13 +1904,6 @@ function renderDictation() {
     ${warns ? `<div class="row mt10"><b>规范化与落位提示</b></div><div class="row mt4">${warns}</div>` : ''}
     <div class="muted mt10">这些是<b>建议</b>，尚未写入正文；采纳后仍需人工确认才能签章。</div>`;
 }
-
-/* --------------------------- 拖拽指定落点（V2b） ---------------------------
-   把语音页签里的一段拖到正文的段落上 = 给这一段选落点。
-   它不新增任何通道：拖完只是改写那个下拉框的值，后面的"生成建议"照旧走 `/api/dictate-commit`。
-   所以拖拽就算坏掉，也只是少了一种更顺手的操作方式，不会让落位逻辑出错。
-   只接受候选集内的文本节点（内核也只认文本节点），其它位置不 preventDefault，
-   浏览器自己会显示"禁止"光标，等于就地告诉用户"这里放不下"。 */
 
 /** 命中的落点容器；不在候选集内返回 null（不 preventDefault = 此处不可放） */
 function dropZoneOf(target) {
@@ -2180,8 +1952,6 @@ document.addEventListener('drop', async (event) => {
   const index = Number(event.dataTransfer ? event.dataTransfer.getData('text/plain') : '');
   const select = Number.isInteger(index) ? document.querySelector(`[data-place-index="${index}"]`) : null;
   if (!select) {
-    /* 落点已提交、或转写已换过一次：没有对应的下拉框。说明，不静默忽略，
-       否则用户会以为"拖成功了"，而实际上什么都没发生 */
     await askAlert('这一段现在没有可指定的落点（可能已生成建议，或转写已更新）：请在「语音转写」里重新确认');
     return;
   }
@@ -2191,10 +1961,6 @@ document.addEventListener('drop', async (event) => {
   window.setTimeout(() => select.classList.remove('just-set'), 1200);
 });
 
-/* ------------------------------- AI 建议 ------------------------------- */
-
-/* 产出方式标注：顺着我写的（续写）与模型自己写的（草稿）信任程度不一样，
-   不区分的话，医生要么全信、要么全不信，两者都不对 */
 const MODE_LABEL = { complete: '续写', draft: '草稿', polish: '润色', voice: '语音', consistency: '一致性', unknown: '未知', other: '其他' };
 
 function chipMode(mode) {
@@ -2202,26 +1968,13 @@ function chipMode(mode) {
   return `<span class="chip${mode === 'voice' ? ' ai' : ''}" title="产出方式：${esc(label)}">${esc(label)}</span>`;
 }
 
-/* ------------- 接入状态：只读（配置已搬到管理后台 /admin） -------------
-   这里没有任何配置控件：模型地址决定病历内容发往哪台服务器，那是数据流向，
-   属于管理后台的动作（见 admin.html）。医生端只保留"这条建议由谁产出"的只读呈现，
-   那是信任问题，不是配置问题，见 AI 面板的「产出方」。 */
-
-/* 配置抽屉的开关、遮罩点击、Esc 与焦点归还已随抽屉一起移除，
-   配置整体搬到管理后台独立页面（`/admin`，见 admin.html / admin.js）。
-   医生端只留一条"去管理后台"的链接，不在这里复制一份配置入口：
-   两个地方都能改配置，迟早会出现"改的是哪一处"的混乱。 */
-
 function renderModelPanel() {
-  /* 配置从 state 里取（`/api/state` 已下发脱敏后的 `model`），不另开读接口：
-     少一条路由就少一处可被绕过的地方，而这份数据本来就是每次渲染都要用的。 */
   const cfg = S.model || {};
   $('cfgFormat').value = cfg.format === 'openai-compatible' ? 'openai-compatible' : 'offline';
   $('cfgModel').value = cfg.model || '';
   $('cfgEndpoint').value = cfg.endpoint || '';
   $('cfgTimeout').value = cfg.timeoutMs || 20000;
   $('cfgMaxItems').value = cfg.maxItems || 20;
-  /* 密钥永不回显：每次渲染都清空。回显一次，密钥就进了浏览器内存、截图和前端日志。 */
   $('cfgApiKey').value = '';
   const from = cfg.source === 'store' ? '配置界面' : '默认（离线）';
   /* 时间要给人看：ISO 原始串是机器格式，管理界面上直接甩出来，读的人得自己拆一遍。 */
@@ -2231,8 +1984,6 @@ function renderModelPanel() {
   };
   $('cfgCurrent').textContent = `当前：${cfg.modelId || '—'} · 来源 ${from} · 密钥${cfg.apiKeyPresent ? '已配置' : '未配置'}`
     + (cfg.updatedBy ? ` · 最近由 ${cfg.updatedBy} 于 ${when(cfg.updatedAt)} 修改` : '');
-  /* 原先这里按临床模式隐藏"配置管理"入口（入口已搬去管理后台，见 admin.html）。
-     内置规则列出来：医生看到"缺记录时间"这条提示时，应当能查到它出自哪条规则 */
   const rules = Array.isArray(S.formRules) ? S.formRules : [];
   const rulesCell = $('cfgFormRules');
   if (rulesCell) rulesCell.textContent = rules.length === 0 ? '未加载' : rules.map((r) => `${r.id} ${r.title}`).join('；');
@@ -2241,16 +1992,13 @@ function renderModelPanel() {
   renderReadingAuthorityPanel();
 }
 
-/** 规则表的可用性随策略变化：用"禁用"而不是"隐藏"，隐藏会让人以为这一格不存在 */
 function syncPlacementTerms(strategy) {
   const terms = $('cfgPlaceTerms');
   /* 用默认值兜底：策略来自界面上可能为空的新值 */
   const selected = strategy || 'ordered';
-  /* "按顺序"与"外部落位服务"都不使用规则表 */
   const usesRules = selected === 'section-title' || selected === 'term-table';
   terms.disabled = !usesRules;
   terms.placeholder = usesRules ? '每行一条：主诉=t_1\n现病史=t_2' : `当前策略（${selected}）不使用规则表`;
-  /* 结构化词表跟着同一个开关位：策略不参与时它也不会被用到（既然要说"不参与"，就不能让它看起来还能配） */
   const structure = $('cfgPlaceStructure');
   if (structure) {
     structure.disabled = !usesRules;
@@ -2260,21 +2008,12 @@ function syncPlacementTerms(strategy) {
   }
 }
 
-/* 结构化词表回显：形状是"词 → { system, code, display? }"，界面统一成"词=体系:编码[:显示名]" */
 function structureMapLines(structureMap) {
   return Object.entries(structureMap || {})
     .map(([word, tag]) => `${word}=${tag.system}:${tag.code}${tag.display ? `:${tag.display}` : ''}`)
     .join('\n');
 }
 
-/**
- * 解析结构化词表输入（"词=体系:编码[:显示名]"）。
- *
- * 返回 `{ ok: true, map }` 或 `{ ok: false, message }`：不合法就当场点名第几行，
- * 而不是"保存成功、其中一条悄悄没生效" —— 配置类错误最怕这种沉默。
- * **体系是否合法交给服务端判**（清单只有一份）：前端再抄一份，
- * 迟早出现"前端放过去、后端拒了"或反过来的分歧。
- */
 function parseStructureMapInput(text) {
   const map = {};
   const lines = String(text || '').split('\n').map((line) => line.trim()).filter((line) => line !== '');
@@ -2294,7 +2033,6 @@ function parseStructureMapInput(text) {
   return { ok: true, map };
 }
 
-/* 落位配置表单：与模型配置同属"每次 state 更新都要同步"的内容（`/api/state` 已下发 `placement`） */
 function renderPlacementPanel() {
   const pl = S.placement || {};
   const strategy = pl.strategy || 'ordered';
@@ -2302,18 +2040,15 @@ function renderPlacementPanel() {
   $('cfgPlaceCeiling').value = pl.confidenceCeiling ?? 0.85;
   const within = (pl.candidate && pl.candidate.withinSections) || [];
   $('cfgPlaceSections').value = within.join(',');
-  /* 规则表按当前策略回显：两种策略的数据形状不同（对象 / 数组），界面统一成"关键词=节点" */
   const pairs = strategy === 'term-table'
     ? (pl.termMap || []).map((item) => `${item.match}=${item.nodeId}`)
     : Object.entries(pl.sectionMap || {}).map(([key, value]) => `${key}=${value}`);
   $('cfgPlaceTerms').value = pairs.join('\n');
-  /* 结构化词表独立回显：它与落位规则表是两张表（可以只配一张），不复用上面的 pairs */
   const structureField = $('cfgPlaceStructure');
   if (structureField) structureField.value = structureMapLines(pl.structureMap);
   const external = pl.external || {};
   $('cfgPlaceEndpoint').value = external.endpoint || '';
   $('cfgPlaceTimeout').value = external.timeoutMs || 20000;
-  /* 密钥永不回显：每次渲染都清空（同模型面板） */
   $('cfgPlaceApiKey').value = '';
   syncPlacementTerms(strategy);
   const from = pl.source === 'store' ? '配置界面' : '默认';
@@ -2321,17 +2056,6 @@ function renderPlacementPanel() {
     + (pl.updatedBy ? ` · 最近由 ${pl.updatedBy} 修改` : '');
 }
 
-/* --------------------------- 医院签名服务（声明式映射） ---------------------------
-   字段映射是给"不同医院的签名服务"用的：换医院只填映射，不改代码。
-   没有"内置软件签名"这一档：本系统唯一的签名后端就是这套服务，
-   未配齐就签不了章（`E_SIGN_NOT_CONFIGURED`），绝不回退演示密钥。 */
-
-/**
- * 授权平台配置回显。
- *
- * 这里只有"信任哪个平台"一件事，没有"演示替身"这一档：
- * 一个"本系统也能签发"的开关，迟早会被当成生产可选项打开。
- */
 function renderReadingAuthorityPanel() {
   const auth = S.readingAuthority || {};
   $('cfgAuthEndpoint').value = auth.endpoint || '';
@@ -2350,12 +2074,6 @@ function renderReadingAuthorityPanel() {
     + (auth.updatedBy ? ` · 最近由 ${auth.updatedBy} 修改` : '');
 }
 
-/**
- * 保存授权平台配置。
- *
- * 公钥留空 = 不修改（不回显全文，也就无法通过留空把它"悄悄"清掉，
- * 清掉等于没有信任根，受控阅读会整块不可用）。平台地址可单独改，留空即清空。
- */
 async function saveAuthorityFromForm() {
   const body = { adminId: $('cfgAdmin').value.trim(), endpoint: $('cfgAuthEndpoint').value.trim() };
   const key = $('cfgAuthPublicKey').value.trim();
@@ -2375,7 +2093,6 @@ async function saveAuthorityFromForm() {
   }
 }
 
-/** 导入外部平台的授权书：服务端做三道判定（形状 → 自洽 → 受信），界面只负责回报结论 */
 async function importCredentialFromForm() {
   const text = $('cfgAuthCredential').value.trim();
   if (text === '') {
@@ -2404,7 +2121,6 @@ function renderSignPanel() {
   $('cfgSignKeyId').value = http.keyId || '';
   $('cfgSignAuthHeader').value = auth.headerName || '';
   $('cfgSignAuthScheme').value = auth.scheme || '';
-  /* 密钥永不回显：每次渲染都清空 */
   $('cfgSignApiKey').value = '';
   $('cfgSignToSignField').value = request.toSignField || 'toSign';
   $('cfgSignToSignEncoding').value = request.toSignEncoding || 'base64';
@@ -2417,14 +2133,11 @@ function renderSignPanel() {
   $('cfgSignPublicKeyPath').value = response.publicKeyPath || '';
   $('cfgSignCertificatePath').value = response.certificatePath || '';
   $('cfgSignFingerprint').value = cfg.expectedFingerprint || '';
-  /* 预置公钥不回显全文（太长，且它只需要被核对）：只报"已预置 + 指纹"，留空即不修改 */
   $('cfgSignPublicKey').value = '';
   $('cfgSignPublicKey').placeholder = cfg.publicKeyPresent
     ? `已预置公钥（指纹 ${String(cfg.publicKeyFingerprint || '').slice(0, 16)}…）：留空 = 不修改`
     : 'SPKI base64（签章必需：先点「测试签名」拿到指纹，再把公钥固定下来）';
   const from = cfg.source === 'store' ? '配置界面' : '未配置';
-  /* 未配置时要明说后果（签不了章），而不是只说"没配"，
-     否则用户只会遇到"签章失败"，却找不到原因；而这里连"还缺哪一格"都给了。 */
   const missing = Array.isArray(cfg.missing) ? cfg.missing : [];
   const head = cfg.configured === true
     ? '当前：已配置医院签名服务（签章会经过它）'
@@ -2444,8 +2157,6 @@ async function saveModelConfigFromForm(apiKeyOverride) {
     timeoutMs: Number($('cfgTimeout').value),
     maxItems: Number($('cfgMaxItems').value),
   };
-  /* 密钥三态：留空 = 不改（不传该字段）；显式 null = 清除；填了 = 设置。
-     把"留空"当成"清空"，会让管理员只改个地址就把密钥弄丢。 */
   const typed = $('cfgApiKey').value;
   if (apiKeyOverride === null) body.apiKey = null;
   else if (typed !== '') body.apiKey = typed;
@@ -2461,15 +2172,6 @@ async function saveModelConfigFromForm(apiKeyOverride) {
   }
 }
 
-/**
- * 保存落位配置。
- *
- * 界面把两种策略的规则统一成"关键词=节点"一张表，保存时按策略分发：
- *   - `section-title` → `sectionMap`（对象）；
- *   - `term-table` → `termMap`（数组）。
- * 界面上只有一处要填（少一处就少一处配错的机会），而服务端仍能对两种形状分别校验。
- * 注意没有"自动落位"选项：策略只决定建议的初始落点，未命中就是"未落位"。
- */
 async function savePlacementFromForm() {
   const strategy = $('cfgPlaceStrategy').value;
   const sections = $('cfgPlaceSections').value.split(',').map((item) => item.trim()).filter((item) => item !== '');
@@ -2481,8 +2183,6 @@ async function savePlacementFromForm() {
     strategy,
     confidenceCeiling: Number($('cfgPlaceCeiling').value),
     candidate: { onlyTextNodes: true, ...(sections.length > 0 ? { withinSections: sections } : {}) },
-    /* 外部落位：地址 / 超时；**密钥值单独走 `apiKey`**（单独一行加密落库、永不回显）。
-       留空 = 不改（不传该字段）—— 把"留空"当成"清空"会让只改地址的人把密钥弄丢。 */
     external: {
       ...(endpoint ? { endpoint } : {}),
       ...(Number.isInteger(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
@@ -2504,8 +2204,6 @@ async function savePlacementFromForm() {
     if (strategy === 'section-title') body.sectionMap = Object.fromEntries(entries.map((entry) => [entry.match, entry.nodeId]));
     else body.termMap = entries;
   }
-  /* 结构化词表与策略无关地一起保存（与落位规则表是两张独立的表）。
-     输入框为空 = 不带该字段：服务端是**整体替换**配置，所以那就是"清空词表"。 */
   const structureField = $('cfgPlaceStructure');
   const parsedStructure = parseStructureMapInput(structureField ? structureField.value : '');
   if (parsedStructure.ok !== true) {
@@ -2524,16 +2222,8 @@ async function savePlacementFromForm() {
   }
 }
 
-/**
- * 保存签名服务配置。
- *
- * 服务地址是这段配置的锚：地址留空 = 未配置签名服务（签章随之不可用，这是明确行为）。
- * 此时不提交 `http` 段，免得"映射填了一半、地址忘填"被当成一份半成品配置存下来，
- * 那会让人以为"配过了"。期望指纹与预置公钥照常提交：它们不属于 http 段，是身份信息。
- */
 async function saveSignBackendFromForm() {
   const body = { adminId: $('cfgAdmin').value.trim() };
-  /* 密钥值**单独提交**（单独一行加密落库、永不回显）；留空 = 不改（不传该字段） */
   const typedSignKey = $('cfgSignApiKey').value;
   if (typedSignKey !== '') body.apiKey = typedSignKey;
   if ($('cfgSignEndpoint').value.trim() !== '') {
@@ -2614,41 +2304,12 @@ async function runSignTest() {
   setSignStatus(parts.join(' · ') + (d.notes && d.notes.length ? ` · ${d.notes.join('；')}` : ''));
 }
 
-/**
- * 建议列表的显示开关。
- *
- * 只影响显示，不影响数据与指标：已处理（含被拒绝的）经历是留痕与拒绝率的一部分，
- * 默认收起是为了让待办清爽，不是为了看不见（计数行始终把三类条数摆出来）。
- */
 let showProcessedSuggestions = false;
 
-/**
- * 上一次产出被判定为"重复"时的提示（幂等规则见 `core/suggestions.ts` 的 `add`）。
- *
- * 需要显式提示：幂等命中时界面上没有多出一条，不说清就会被当成"点了没反应"（系统坏了）。
- * 它在"任何其它动作"发生时清空，这句话只对刚刚那一下有意义。
- */
 let suggestionNotice = '';
 
-/**
- * 正文卡片上那一行提示（粘贴结果 / 撤销结果 / 已签章提醒）。
- *
- * 与 `suggestionNotice` 同一处置："点了没反应"必须能说出原因，粘贴被按外来内容处理、
- * 撤销撤掉了哪一条、已签章为什么改不了，都要有地方讲。
- */
 let docNotice = '';
 
-/**
- * 已采纳建议的改动幅度标签（三级归因落到**条**上）。
- *
- * 四种情况必须可分：
- *   · `heavy` / `light` → 标出来（前者多半是事实或结构不对，后者是措辞）；
- *   · `as-is` → **不加标签**：原样采纳是最干净的情况，加标签只会让界面变吵；
- *   · 无记录（`null`）→ 明说"幅度未记录"，**不显示成原样采纳** ——
- *     把"不知道"说成"模型写对了"，与指标面板把未归因并进原样是同一个错。
- *
- * 分档值由服务端下发（`editBandOf` 只在内核一处）：前端不自己定那个 0.2 的边界。
- */
 function chipEditBand(s) {
   const base = '<span class="chip ok">已采纳</span>';
   const pct = typeof s.editRatio === 'number' ? ` ${Math.round(s.editRatio * 100)}%` : '';
@@ -2658,18 +2319,6 @@ function chipEditBand(s) {
   return `${base} <span class="chip warn">改动幅度未记录</span>`;
 }
 
-/**
- * 沉默报告：本次 AI 调用**没产出**的目标节点与原因。
- *
- * 为什么非显示不可：医生对 AI 的信任崩塌，通常不是因为它写错了，而是因为它**不知道它没写**。
- * "这次没提示"会被读成"查过了没问题" —— 与质控里"没判"被读成"没问题"是同一个错误，
- * 而那个错误本仓库已经修过两次（形式类的未判定、内涵类的未报告规则），这是第三次。
- *
- * 三种状态必须互相可分：
- *   · `null`     → 还没调过 AI（**不能**显示成"本次没有跳过"）
- *   · 跳过为空   → 本次范围全部产出（这是值得说出来的事实，不是无话可说）
- *   · 跳过非空   → 按档位**分组计数**（同一档出现十次时，逐条列出会把真正要看的那档淹掉）
- */
 function renderAiSilence() {
   const line = $('aiSilenceLine');
   if (!line) return;
@@ -2687,54 +2336,23 @@ function renderAiSilence() {
   }
   const tally = new Map();
   for (const item of skipped) {
-    /* 档位的人话名由服务端下发（`AI_SILENCE_LABELS`）；缺了就退回原因码原文，
-       而不是在前端编一个中文名 —— 编了就是两处口径，日志与界面迟早对不上 */
     const label = item.label || item.code;
     tally.set(label, (tally.get(label) || 0) + 1);
   }
   const detail = [...tally].map(([label, count]) => `${label} ×${count}`).join('；');
-  /* 被丢弃的自述也要说：那说明产出方在**理由**上说了假话（幻觉节点 / 自相矛盾 / 自造原因码），
-     不报出来就等于替它把这件事擦了 */
   const rejected = Array.isArray(silence.rejected) ? silence.rejected.length : 0;
   const rejectedNote = rejected > 0 ? `；另有 ${rejected} 条跳过说明不合规，已忽略` : '';
   line.className = 'muted warn-text';
   line.textContent = `${summary}，未产出 ${skipped.length} 个：${detail}${rejectedNote}`;
 }
 
-/* ------------------------- 逐句审阅（采纳前先看清改了哪句） -------------------------
- *
- * ## 它解决什么
- *
- * 原来的卡片只有一个大文本框：AI 写了什么、和自己已经写的差在哪，全靠医生**逐字读**。
- * 而病历里"改动"其实是**句级**的 —— 加一句、删一句、把一句换掉。
- * 于是这里把建议与现正文按句对齐，逐句给出"新增 / 删除 / 改写"，并让人逐句取舍。
- *
- * ## 三条不越界
- *
- * 1) **不伪造逐句置信度**：`confidence` 是**整条建议**的口径（模型没按句给分），
- *    所以置信度只在卡片顶部出现一次，句子行只标"它是什么改动"。给每句编一个分数，
- *    等于把"整条可信"伪装成"每句都验过"，正好是这套系统最不能做的事。
- * 2) **不改写路径**：逐句取舍只是**算出最终文本**，落笔仍然是一次
- *    `acceptSuggestion({ editedText })` —— 一条留痕、一次门控、一个 `editRatio`。
- * 3) **勾选只是草稿**：它不落盘、不产生 rev；关掉页面就没了，这与"建议不是文档内容"同源。
- *
- * ## 为什么默认值是可解释的
- *
- * 采纳的语义是"整段被这条文本替换"，所以：AI 的新增句/改写句**默认采纳**，
- * AI 没提的原句**默认删除**（这正是"替换"的字面含义），而"保留原句"需要医生主动勾。
- * 反过来（默认全保留）会让"直接采纳"变成一个几乎不改动的动作，指标也随之失真。
- */
-
-/** 建议 id → 它的句子级对照（每次渲染重建；勾选状态也只活在这一屏） */
 const sentenceReviews = new Map();
 
-/** 目标节点的当前正文（只有文本节点才有可对照的句子） */
 function nodeTextOf(nodeId) {
   const item = (Array.isArray(S.items) ? S.items : []).find((node) => node.id === nodeId && node.kind === 'text');
   return item ? String(item.text || '') : null;
 }
 
-/** 按句切分：句末标点归前一句（"体温 36.5℃。" 是一整句，不是"体温 36.5℃"+"。"） */
 function splitSentences(text) {
   const source = String(text || '');
   if (source === '') return [];
@@ -2742,12 +2360,6 @@ function splitSentences(text) {
   return parts.filter((part) => part !== '');
 }
 
-/**
- * 句子级 LCS —— 只用来**对齐**，不用来算相似度。
- *
- * 为什么不用字符级 diff：中文病历一句话二三十字，字符级 diff 会把"改为"拆成一堆碎块，
- * 读起来比原文还慢；而医生真正判断的是"这句要不要"。
- */
 function sentenceDiff(before, after) {
   const rows = before.length;
   const cols = after.length;
@@ -2780,14 +2392,6 @@ function sentenceDiff(before, after) {
   return ops;
 }
 
-/**
- * 一段"连续的删/加"合成若干条"改写"：分开显示会让人以为是两件事。
- *
- * ⚠️ 必须**按组配对**，不能"遇到就合并"：连着删两句再加两句时，逐条合并会把
- * 第一句删的文本配到**最后一句加**的文本上（实测样例：删「伴咳嗽。」「既往高血压病史。」
- * 后加「伴咳嗽、咳痰。」「既往体健。」，逐条合并得到的是"既往高血压病史。=>伴咳嗽、咳痰。"，
- * 医生一眼就会觉得这系统不认识字）。按组内第 i 个删配第 i 个加，才是位置对齐。
- */
 function pairReplacements(ops) {
   const out = [];
   let index = 0;
@@ -2826,7 +2430,6 @@ function buildReview(suggestion, currentText) {
   return { rows, currentText, aiText: suggestion.text, manual: false };
 }
 
-/** 一行在最终文本里贡献什么（`equal` 恒定；其余看勾选） */
 function reviewRowText(row) {
   if (row.type === 'equal') return row.text;
   if (row.type === 'del') return row.pick ? row.text : '';
@@ -2834,18 +2437,10 @@ function reviewRowText(row) {
   return row.pick ? (row.after || '') : (row.before || '');
 }
 
-/** 按当前勾选拼出最终文本（顺序完全跟着 diff 走，所以句子不会跑位） */
 function composeReview(review) {
   return review.rows.map(reviewRowText).join('');
 }
 
-/**
- * 由勾选结果算出"最终文本里哪几段是 AI 写的"。
- *
- * 只有"采纳了 AI 的那一句"（新增 / 改写且勾选）才算 AI；医生保留的原句**一个字都不标**。
- * 偏移按**拼出来的文本**累计，所以与 `composeReview` 必然对齐 —— 两处若各算一遍，
- * 迟早会出现"文本对、区间差一位"的错位，而那会让整段来源全部错位一格。
- */
 function aiRangesOf(review) {
   const ranges = [];
   let offset = 0;
@@ -2887,8 +2482,6 @@ function renderReviewHtml(suggestion, review) {
   </div>`;
 }
 
-/* 勾选与手改：都只改"草稿文本"，不落盘（见上面三条不越界）。
-   用事件委托而不是逐条绑：卡片是整片 innerHTML 重画的，绑在元素上的监听活不过一次渲染。 */
 document.addEventListener('change', (event) => {
   const box = event.target;
   if (!box || !box.dataset || !box.dataset.suggPick) return;
@@ -2916,10 +2509,6 @@ document.addEventListener('input', (event) => {
   if (hint) hint.textContent = '已手动改写全文：上方勾选不再与文本同步（改动会按"修改率"计入）';
 });
 
-/* 句级导航：↑/↓（或 j/k）在改动行之间走，空格取舍，Enter 采纳整条。
-   为什么不把 Tab 劫持成"下一句"：Tab 是浏览器的焦点顺序，用户还要靠它走出卡片 ——
-   抢走它，键盘用户就再也出不去了。复选框本身可聚焦，Tab 照样能用；
-   这里只是给"逐句走查"多一条更顺的路（走完不必回到鼠标）。 */
 function reviewRowOf(target) {
   return target && target.closest ? target.closest('.sr-row') : null;
 }
@@ -2965,32 +2554,50 @@ document.addEventListener('focusin', (event) => {
   if (hint) hint.textContent = `${reviewSummary(review)} · 第 ${position}/${changed.length} 处（空格取舍，Enter 采纳）`;
 });
 
+async function runSuggestFor(nodeId, mode) {
+  const id = String(nodeId || '').trim();
+  if (id === '') {
+    toast('没有指明要给哪一段生成建议', 'info');
+    return null;
+  }
+  /* 让右栏的状态与这次请求一致：否则面板上还停在上一次的目标，人会以为建议挂错了段 */
+  const target = $('suggTarget');
+  if (target && [...target.options].some((option) => option.value === id)) target.value = id;
+  const modeSelect = $('suggMode');
+  if (modeSelect && [...modeSelect.options].some((option) => option.value === mode)) modeSelect.value = mode;
+  const confidenceInput = $('confidence');
+  const r = await api('/api/suggest', {
+    nodeId: id,
+    confidence: Number(confidenceInput ? confidenceInput.value : 0.95),
+    mode,
+  });
+  const reusedId = r.ok && r.data && r.data.reused === true ? String(r.data.suggestionId || '') : '';
+  suggestionNotice = reusedId === ''
+    ? ''
+    : `已有同样内容的待处理建议（${reusedId}），未重复生成。建议数与采纳/拒绝率不受影响。`;
+  if (reusedId !== '') showProcessedSuggestions = false;
+  await apply(r);
+  switchTab('ai');
+  return r;
+}
+
 function renderSuggestions() {
   const all = S.suggestions;
-  /* 对照表每次重建：节点正文可能刚被改过，拿上一轮的句子来对齐就会指向已不存在的文字 */
   sentenceReviews.clear();
   const pending = all.filter((item) => item.status === 'pending');
   const acceptedCount = all.filter((item) => item.status === 'accepted').length;
   const rejectedCount = all.filter((item) => item.status === 'rejected').length;
   const list = showProcessedSuggestions ? all : pending;
-  /* 计数行始终把三类都摆出来：过滤是显示选择，不是让已处理的消失 */
   $('suggCounts').textContent = `待处理 ${pending.length} · 已采纳 ${acceptedCount} · 已拒绝 ${rejectedCount}`;
   $('btnToggleProcessed').textContent = showProcessedSuggestions ? '只看待处理' : '显示已处理（含拒绝）';
   $('suggNotice').textContent = suggestionNotice;
   $('thresholdHint').textContent = `门控：一般内容 ≥ ${S.thresholds.general} 可落笔；关键内容 ≥ ${S.thresholds.key}。低于阈值只能拒绝或继续修改。`;
-  /* 沉默报告要在**任何 return 之前**渲染：列表为空时（"产出方一条都没给"）
-     它恰恰是最该出现的东西 —— 空列表配上沉默原因，才不是一句无从追问的"暂无建议" */
   renderAiSilence();
 
-  /* 产出方必须显示：离线模板与真模型产出的建议，信任程度完全不同。
-     只报**是谁产的**（服务地址与配置来源属部署参数，不进医生页面）。 */
   const model = S.model || {};
   $('modelInfo').textContent = model.modelId ? String(model.modelId) : '—';
-  /* 前面留空格：它紧跟在 modelId 后面，不空格会粘成"offline:landed-v2离线模板" */
   $('modelHint').textContent = ' ' + (model.format === 'offline' ? '离线模板（未接入真实模型）' : '在线模型');
 
-  /* 组条：一次提交（整批 / 语音 / 草稿）产出的多条建议可以整组操作。
-     把"组级采纳不绕过门控"写在界面上，否则医生会以为"接受本组" = 全部落笔。 */
   const groupBar = (S.groups || [])
     .filter((group) => group.pending > 0)
     .map((group) => `<div class="sugg group">
@@ -3006,8 +2613,6 @@ function renderSuggestions() {
     </div>`).join('');
 
   if (list.length === 0) {
-    /* 空态要分清两种：本来就没有 vs 待处理已清空，
-       后者若也只说"暂无建议"，医生会以为处理过的记录丢了。 */
     $('suggestions').innerHTML = groupBar + (all.length === 0
       ? '<div class="empty">暂无建议。选一个节点，点"生成一条"或"生成整批"。</div>'
       : `<div class="empty">待处理已清空（已处理 ${all.length} 条：已采纳 ${acceptedCount} · 已拒绝 ${rejectedCount}，点上方按钮可查看）。</div>`);
@@ -3018,7 +2623,6 @@ function renderSuggestions() {
     const badge = s.status === 'pending'
       ? (low ? '<span class="chip danger">低于阈值</span>' : '<span class="chip ok">可落笔</span>')
       : (s.status === 'accepted' ? chipEditBand(s) : '<span class="chip danger">已拒绝</span>');
-    /* 逐句对照只对"待处理的文本建议"有意义：已处理的只是记录，没有可取舍的东西 */
     const currentText = s.status === 'pending' ? nodeTextOf(s.targetNodeId) : null;
     const review = currentText === null ? null : buildReview(s, currentText);
     if (review) sentenceReviews.set(s.id, review);
@@ -3044,15 +2648,11 @@ function renderSuggestions() {
   }).join('');
 }
 
-/* ------------------------------ 机读信息 ------------------------------ */
-
 function renderMachine() {
   const m = S.machine;
   const badge = $('machineBadge');
   badge.className = 'chip ' + (m.stale ? 'danger' : 'ok');
   badge.textContent = m.stale ? '陈旧，需重算' : '最新';
-  /* 指纹（sourceHash）不进界面：它是内部校验值，医生既看不懂也无法据此做任何操作，
-     摆出来只会让人以为"机读信息里有一串看不懂的东西"。陈旧判定照旧按指纹做，只是不展示。 */
   $('machineMeta').innerHTML = `数据元 <b>${m.count}</b> 条<br/>生成时间 ${esc(m.generatedAt || '—')}`;
   $('machineReasons').innerHTML = m.stale ? `<div class="row">${m.reasons.map((r) => `<span class="chip danger">${esc(r)}</span>`).join('')}</div>` : '';
   $('machineElements').innerHTML = m.elements.length === 0
@@ -3067,17 +2667,9 @@ function renderMachine() {
       </tbody></table>`;
 }
 
-/* ------------------------------ 定稿导出 ------------------------------ */
-
-/* ------------------------------ 定稿导出 ------------------------------
-   一个主按钮 + 一份产物清单：顶栏的「导出」只产出归档产物（OFD-H），
-   "这份病历产出过什么、各自什么状态、怎么取走"全在清单里说清，
-   两种产物用途不同（归档封存 / 跨系统交换），摆成两张卡就不必再用一段话去解释它们的区别。 */
-
 function renderExport() {
   const e = S.lastExport;
   const w = S.lastWst500;
-  /* 「解锁修改」只在已签章时出现：没签章就"解锁"，是摆一个没意义的按钮 */
   const unlockButton = $('btnUnlock');
   if (unlockButton) unlockButton.classList.toggle('hide', S.doc.status !== 'signed');
   /* 签名信息与导出记录分开渲染：即使还没导出，只要签了章就应该能看到"用了什么算法、验签是否通过" */
@@ -3130,31 +2722,12 @@ function renderExport() {
     </div>`;
 }
 
-/**
- * 签名后端的人话名字。
- *
- * `provider` 是审计用的机器标识（`http` / `software`），直接摆在医生面前几乎等于没写：
- * 他要判断的是"这份病历由谁盖的章"，而不是"走没走 HTTP"。原始标识不丢，
- * 放在 `title` 里，留痕里也一直是原值。
- */
 function providerLabel(provider) {
   if (provider === 'http') return '医院签名服务';
   if (provider === 'software') return '内置软件（演示）';
   return provider || '未知';
 }
 
-/**
- * 签名面板：算法 / 后端 / 公钥指纹 / 签章状态。
- *
- * 三态必须分开，而不是"验签通过 / 验签失败"两态：
- *   ① 当前有效：`signatureState.kind === 'valid'` 且独立验签通过；
- *   ② 已被解锁作废（`kind === 'voided'`）：这是一次有理由、有责任人的动作，不是出事了，
- *      它该显示的是"谁、为什么解锁、被作废的是哪一次签章"；
- *   ③ 验签失败（材料还在、状态也说已签章，但内容与签名对不上）：这才是要找人处理的信号。
- *
- * 把 ② 和 ③ 合成一个红色"验签失败"，读起来就是"这份病历被动过手脚"，
- * 而两者的处置完全不同：一个要查文件，一个只需看一眼留痕里的解锁理由。
- */
 function renderSignature() {
   const el = $('signBody');
   if (!el) return;
@@ -3173,8 +2746,6 @@ function renderSignature() {
       : verify.ok
         ? '<span class="chip ok">验签通过</span>'
         : '<span class="chip danger">验签失败</span>';
-  /* 作废时不列"验签失败"的那几条理由：它们在解锁场景下必然出现（内容改了、摘要自然不符），
-     照列只会把人推向"被篡改"的结论。改为把"作废"这件事本身讲清楚。 */
   const reasons = (!voided && verify && !verify.ok ? verify.reasons : []).map((text) => `<li>${esc(text)}</li>`).join('');
   const invalidated = voided ? state.voidedBy && state.voidedBy.invalidated[0] : null;
   const voidedNote = voided
@@ -3199,10 +2770,6 @@ function renderSignature() {
     ${reasons ? `<ul class="note-list mt6">${reasons}</ul>` : ''}`;
 }
 
-/**
- * 审计报告摘要：既要有"几项通过"，也要把未通过的证据直接摆出来，
- * 只显示"通过 5/7"而不说哪两条没过、为什么，等于让人自己去猜（核查场景最忌讳这个）。
- */
 function renderAudit() {
   const body = $('auditBody');
   if (!body) return;
@@ -3223,15 +2790,6 @@ function renderAudit() {
     ${failed}`;
 }
 
-/**
- * 受控阅读面板：授权清单 + 最近一次受控视图 + 拒绝原因。
- *
- * 界面要让人一眼看出三件事：
- *   ① 这份授权还能读几次、读到什么时候、限哪台机器；
- *   ② 被拒绝时具体是哪一条控制拦住的（过期？次数？终端？文档被改？）；
- *   ③ 未被授权的章节不显示内容，但必须显示"有 N 个章节未授权"。
- */
-/** base64 → PEM 文本（纯展示：便于线下交换，服务端始终只存 base64） */
 function pemFromBase64(base64) {
   const wrapped = String(base64 || '').replace(/(.{64})/g, '$1\n').trim();
   return `-----BEGIN PUBLIC KEY-----\n${wrapped}\n-----END PUBLIC KEY-----`;
@@ -3241,8 +2799,6 @@ function renderReading() {
   const body = $('readingBody');
   if (!body) return;
 
-  /* 接收方公钥目录：它现在是「交付目标」的登记处（供授权平台封装内容密钥），
-     不再参与签发，本系统不签发授权，所以这里没有"选接收方"的下拉。 */
   const keyStore = S.recipientKeys || { keys: [], error: null };
   const keyBody = $('rkBody');
   if (keyBody) {
@@ -3263,8 +2819,6 @@ function renderReading() {
      平台不可能猜出这份文档的指纹，藏起来等于"对接无从谈起"。 */
   const fpCell = $('readingDocFingerprint');
   if (fpCell) fpCell.textContent = reading.documentFingerprint || '—';
-  /* 真实数据验证入口：文档 JSON 是独立探针（S2 保真 / S3 留痕回放 / S5 模型校验）的输入，
-     它不经过我们的解析结论，直接查文档本身是否守规矩。 */
   const jsonLine = S.lastJson
     ? `<div class="chip ok mb8">已导出文档 JSON：${esc(S.lastJson.file)}（${S.lastJson.nodes} 节点 / ${S.lastJson.bytes} 字节），可直接供 S2/S3/S5 独立探针使用</div>`
     : '<div class="muted mb8">尚未导出文档 JSON（供独立探针核对）。</div>';
@@ -3273,8 +2827,6 @@ function renderReading() {
     return;
   }
 
-  /* 授权清单上要能看出"签发者还在不在信任集里"：换了授权源之后，旧授权会立刻变成读不了，
-     这件事必须在列表上看得出来，否则用户只会遇到"被拒"却找不到原因。 */
   const trustedFingerprints = (S.readingAuthority && Array.isArray(S.readingAuthority.trustedFingerprints))
     ? S.readingAuthority.trustedFingerprints
     : [];
@@ -3327,8 +2879,6 @@ function renderReading() {
   body.innerHTML = `${jsonLine}<div class="checks">${rows}</div>${denyLine}${viewBlock}`;
 }
 
-/* ------------------------------ 导入来源 ------------------------------ */
-
 function renderImport() {
   const card = $('importCard');
   const info = S.importSource;
@@ -3339,9 +2889,6 @@ function renderImport() {
   card.style.display = 'block';
   /* 摘要由服务端给出（两种格式口径一致）；老数据没有 summary 时退回按字段拼接 */
   $('importMeta').textContent = info.summary || `${info.format} · ${info.pages} 页 · ${info.textChars} 字 · 机读数据 ${info.machineElements ?? 0} 条`;
-  /* 签章状态与"验签结论"必须分开显示：
-     "已签章"只说文件里带了签名文件，"验签通过"才说明被覆盖的文件与签名一致。
-     只显示前者会把"文件可能被改过"藏起来。 */
   const verified = info.signatureVerified;
   const algorithm = info.signatureAlgorithm || '';
   let signature;
@@ -3350,8 +2897,6 @@ function renderImport() {
   else if (verified === true) signature = `<span class="chip ok">源文件已签章 · 验签通过（${esc(algorithm)}）</span>`;
   else if (verified === false) signature = `<span class="chip danger">源文件已签章 · 验签失败（${esc(algorithm)}）</span>`;
   else signature = '<span class="chip warn">源文件已签章 · 未验签（缺少签名材料）</span>';
-  /* 段落重建：把"切了多少段、其中多少段是猜的"直接摆出来。
-     低置信段落是必须让人看见的信息，那部分边界需要人工确认。 */
   const low = Number(info.layoutLow ?? 0);
   const layout = info.layoutParagraphs === undefined
     ? ''
@@ -3371,8 +2916,6 @@ function renderImport() {
     ${notes ? `<ul class="muted note-list">${notes}</ul>` : ''}`;
 }
 
-/* ------------------------------ 日志/指标 ------------------------------ */
-
 function renderLog() {
   $('logBody').innerHTML = S.log.length === 0
     ? '<div class="empty">暂无操作记录。</div>'
@@ -3385,11 +2928,6 @@ function renderLog() {
 
 function renderMetrics() {
   const m = S.metrics;
-  /* 三级归因（原样 / 微改 / 大改）：修改率只能回答"改没改"，而"改一个错字"与"整段重写"
-     要改的东西完全不同 —— 前者是提示词，后者是上下文供给（取数没到 / 模板没给）。
-     口径由服务端算好下发（`editRatioOf` 只在内核一处），前端不自己算一份。
-     `unknown`（没有改动幅度记录的采纳）**有才占位**：把它并进"原样采纳"就是让指标
-     无端变好，而它出现的唯一原因是老数据 / 别的来源写入 —— 那件事该被看见，不该被抹平。 */
   const a = S.attribution;
   const attribution = a
     ? `<div class="stat" title="采纳后一字未改：模型写对了"><b>${a.asIs}</b><span>采纳·原样</span></div>
@@ -3412,18 +2950,8 @@ function renderMetrics() {
   renderHistory();
 }
 
-/* ------------------------------ 撤销 / 历史版本 ------------------------------
-   「撤销」点开的不是"立刻撤回一笔"，而是一张清单：
-     · 顶上：撤销最近一次（原来那个动作，一键到位）
-     · 下面：最近 15 次写入，每条一句"改了什么"，可点回到那一版
-   为什么不全量列：这个抽屉是给人找"哪一版"的，不是翻档案 ——
-   全量留痕在「指标与留痕」与审计报告里，一条不少。
---------------------------------------------------------------------------- */
-
-/** 抽屉里最多列多少条（找的是"哪一版"，不是翻档案） */
 const HISTORY_LIMIT = 15;
 
-/** 撤销最近一次（抽屉里的按钮与 Ctrl+Z 共用这一条路径） */
 async function doUndo() {
   const r = await api('/api/undo', {});
   docNotice = r.ok
@@ -3452,8 +2980,6 @@ function closeHistory() {
   if (opener) opener.focus();
 }
 
-/* Esc / 点击阴影关闭时浏览器直接关掉 <dialog>，不走 closeHistory ——
-   滚动锁必须在这里解，否则页面从此滚不动 */
 {
   const drawer = $('historyDrawer');
   if (drawer) {
@@ -3462,14 +2988,12 @@ function closeHistory() {
       const opener = $('btnUndo');
       if (opener) opener.focus();
     });
-    /* 点阴影关闭：原生 <dialog> 不会替你关，得自己判"点在内容之外" */
     drawer.addEventListener('click', (event) => {
       if (event.target === drawer) closeHistory();
     });
   }
 }
 
-/** 把服务端的拒绝理由显示在抽屉里（下一次重绘自动清掉） */
 function showHistoryError(message) {
   const body = $('historyBody');
   if (!body) return;
@@ -3526,24 +3050,18 @@ function renderHistory() {
     <div class="hist-list">${rows || '<div class="empty">这份病历还没有写入记录。</div>'}</div>`;
 }
 
-/* --------------------------- 折叠面板徽标（收起也能看状态） --------------------------- */
-
 function renderPanelBadges() {
   const pending = S.suggestions.filter((s) => s.status === 'pending').length;
   const lastError = S.log.find((l) => !l.ok);
 
   $('badgeAi').innerHTML = `<span class="chip">建议 ${S.suggestions.length}</span>${pending ? ` <span class="chip warn">待处理 ${pending}</span>` : ''}`;
 
-  /* 质控提示的页签圆点：待处理与"锚点丢失"都该被看见，
-     锚点丢失不处理会一直挂着，那是设计使然（不能静默消失） */
   const annoCounts = S.annotationCounts || { open: 0, acknowledged: 0, anchorLost: 0 };
   const annoPending = annoCounts.open + annoCounts.acknowledged;
   const qcDot = $('tabDotQc');
   qcDot.className = `tdot${annoPending > 0 || annoCounts.anchorLost > 0 ? ' warn' : ''}`;
   qcDot.title = `待处理提示 ${annoPending} · 锚点丢失 ${annoCounts.anchorLost}`;
 
-  /* 时间轴页签的圆点：这条线上有缺口时亮起。
-     缺口与提示是同一件事的两个形态，提示有圆点而缺口没有，等于把"线断了"藏起来 */
   const timeline = S.visitTimeline;
   const timelineDot = $('tabDotTimeline');
   if (timelineDot) {
@@ -3552,7 +3070,6 @@ function renderPanelBadges() {
     timelineDot.title = timeline ? `就诊时间轴：缺口 ${gaps} 条` : '尚未读取就诊时间轴';
   }
 
-  /* 语音页签的圆点：有转写结果时亮起（提示"这里有一组待处理的建议"） */
   const voiceDot = $('tabDotVoice');
   voiceDot.className = `tdot${S.dictation ? ' warn' : ''}`;
   voiceDot.title = S.dictation ? `最近一次转写：${S.dictation.segments.length} 段 → 一组建议` : '尚无转写';
@@ -3572,34 +3089,15 @@ function renderPanelBadges() {
   $('tabDotMetrics').className = `tdot ${m.editRate > 0.5 ? 'warn' : ''}`;
 }
 
-/* ------------------------- 模板（按模板新建文书） ------------------------- */
-
 /** 就诊类型的中文名。界面上一律用中文：`outpatient` 是模型里的取值，不是给医生读的词 */
 const VISIT_SCOPE_LABEL = { outpatient: '门诊', emergency: '急诊', inpatient: '住院' };
 
-/**
- * 这份模板能不能开在本次就诊上。
- *
- * 判据来自服务端随模板下发的 `visitTypes`（口径只有一处：`template-pack.ts` 的
- * `visitTypesOfDocType` —— 入院记录 / 病程记录 / 出院记录属住院，门（急）诊病历属门诊与急诊）。
- * **空数组 = 不限**：认不出类型（院内自定义、导入件）就照旧列出来 ——
- * 我们不知道它属于哪一档，藏起来还解释不了"为什么这里没有它"。
- */
 function templateFitsVisit(tpl, visitType) {
   const scope = Array.isArray(tpl.visitTypes) ? tpl.visitTypes : [];
   if (scope.length === 0 || !visitType) return true;
   return scope.includes(visitType);
 }
 
-/**
- * 「新建」：先问"开哪一类文书"，再按选中的模板建。返回 `templateId`，取消返回 null。
- *
- * 为什么是弹框而不是左栏一个下拉：左栏只有 238px，下拉里只放得下名字，
- * 而选它的依据是"这是什么文书 / 有多厚 / 这次就诊开不开得出"。弹框里一条一项，
- * 名称与说明分两行，且**只列本次就诊开得出的那几类** ——
- * 门诊 / 急诊只开「门（急）诊病历」，住院只开「入院记录」「病程记录」「出院记录」，
- * 列一份开不出来的，等于让人点进去再被拒一次。
- */
 async function pickTemplate() {
   const all = Array.isArray(S.templates) ? S.templates : [];
   const visitType = (S.encounter && S.encounter.visitType) || '';
@@ -3611,7 +3109,6 @@ async function pickTemplate() {
     return null;
   }
   if (list.length === 0) {
-    /* 有模板、但一份都不是这次就诊能开的：说清"为什么没有"，而不是给一个空清单 */
     await askAlert(
       `本次就诊开不出文书\n\n已装载的模板都属于别的就诊类型（本次是${visitLabel || '未知类型'}）。`
       + '\n\n门诊 / 急诊开「门（急）诊病历」，住院开「入院记录」「病程记录」「出院记录」；要别的写法，由管理员在「模板库」里加一份。',
@@ -3641,13 +3138,8 @@ async function pickTemplate() {
   );
 }
 
-/* ------------------------------- 总入口 ------------------------------- */
-
 function renderAll() {
-  /* 编辑范式决定的是**正文怎么画**，所以类名必须在 `renderDoc()` 之前就位 ——
-     晚一步的后果是流式那一屏先按卡片模式的样式排一次版，看起来像闪了一下。 */
   document.body.classList.toggle('flow-mode', isFlow());
-  /* 就诊范围要先于各栏渲染：切到门诊时，被摘掉的页签不能还亮着 */
   applyVisitScope();
   renderHeader();
   renderTree();
@@ -3663,25 +3155,18 @@ function renderAll() {
   renderCaptureLocal();
   void renderCaptureHistory();
   renderRejectBanner();
-  /* 模式选择器与状态保持同步（重渲染不重置用户的选择） */
   document.body.classList.toggle('clinical', isClinical());
   const viewSelect = $('viewMode');
   if (viewSelect && viewSelect.value !== viewMode) viewSelect.value = viewMode;
-  /* 编辑范式同理：类名已经在 `renderAll` 开头就位（见那里的说明），
-     这里只把切换器与工具栏的可见性跟状态对齐 */
   syncEditMode();
   const tools = $('flowTools');
   if (tools) tools.hidden = !isFlow();
+  if (!isFlow()) setFlowToolsFloating(false);
   renderImport();
   renderMachine();
-  /* 能力缺席时对应面板已被摘除：摘了就不再渲染（渲染函数摸到 null 会直接抛）。
-     这三个在 renderAll 里都只有这一处调用点，所以守在这里是完整的。
-     `renderImport` 不在此列：它渲染的是左栏"导入来源卡"（`importCard`），
-     而能力开关摘掉的是顶栏那个"导入病历文件"按钮 —— 两者职责不同。 */
   if (panelAlive('export')) renderExport();
   if (panelAlive('log')) renderLog();
   if (panelAlive('metrics')) renderMetrics();
-  /* 抽屉开着时随状态一起重绘（回滚完列表要立刻反映新的一条，而不是停在旧内容） */
   renderHistory();
   renderPanelBadges();
   updateDirtyBadge();
@@ -3697,7 +3182,6 @@ function renderAll() {
   select.innerHTML = optionsOf();
   if (current) select.value = current;
 
-  /* 质控提示的目标节点：与建议共用同一份候选（同一个"内容节点"概念） */
   const qcSelect = $('qcTarget');
   const qcCurrent = qcSelect.value;
   qcSelect.innerHTML = optionsOf();
@@ -3705,14 +3189,13 @@ function renderAll() {
 }
 
 async function apply(result) {
+  /* 重画会换掉 textarea 里的选区：浮条必须一起收掉，
+     否则它会悬在一段已经不是"刚才选中那段"的文字上方。 */
+  hideSelectionBar();
   if (result && result.state) { S = result.state; renderAll(); }
   else await refresh();
-  /* 全局回执：操作有结果就让人看见。失败尤其重要，没有回执时，
-     医生的反应是"再点一次"，而不是"看为什么没生效"。 */
   if (result && result.ok === false) toast(`${result.code || ''} ${result.message || ''}`.trim(), 'danger');
   else if (result) toast('已生效', 'ok');
-  /* 写操作的结果同步给宿主：rev 与签章状态变了而宿主不知道，工作站顶上的"已保存 / 已签章"
-     就会与编辑器里的实际状态对不上 —— 而医生是按工作站那个状态决定"能不能走"的。 */
   hostEmit('state', hostSnapshot());
   return result;
 }
@@ -3724,11 +3207,9 @@ function toast(text, kind) {
   if (!el) return;
   el.textContent = text;
   el.className = kind === 'danger' ? 'toast danger' : kind === 'info' ? 'toast info' : 'toast';
-  /* 紧急程度对读屏可见：失败要打断（assertive），成功不必（polite） */
   el.setAttribute('aria-live', kind === 'danger' ? 'assertive' : 'polite');
   el.hidden = false;
   clearTimeout(toastTimer);
-  /* 失败停留更久：错误码需要时间读 */
   toastTimer = setTimeout(() => { el.hidden = true; }, kind === 'danger' ? 4200 : 2600);
 }
 
@@ -3738,21 +3219,14 @@ async function refresh() {
   return res;
 }
 
-/* ------------------------------- 交互 ------------------------------- */
-
-/* 视图模式切换：改模式后必须整体重渲染，因为内部标识是条件渲染的，
-   不重渲染的话，界面会停在上一个模式的形态（那比不做模式更糟） */
 document.addEventListener('change', (event) => {
   const el = event.target;
   if (!el || el.id !== 'viewMode') return;
   viewMode = el.value === 'clinical' ? 'clinical' : 'demo';
-  try { localStorage.setItem(MODE_KEY, viewMode); } catch { /* 隐私模式忽略 */ }
+  try { localStorage.setItem(MODE_KEY, viewMode); } catch { }
   renderAll();
 });
 
-/* 编辑范式切换器（卡片 / 流式）是一个**分段控件**（见 ui.html 的 `.seg` 与 ui.css 同名块）。
-   它的全部状态只有两个：容器上的 `data-mode`（决定滑块停在哪一段）与每段的 `aria-checked`。
-   都在这里一次同步完 —— 分两处写，重渲染之后必然出现"滑块在流式、正文还是卡片"的错位。 */
 function syncEditMode(mode = editMode) {
   const seg = $('editMode');
   if (!seg) return;
@@ -3760,35 +3234,26 @@ function syncEditMode(mode = editMode) {
   seg.querySelectorAll('.seg-item').forEach((item) => {
     const on = item.dataset.mode === mode;
     item.setAttribute('aria-checked', on ? 'true' : 'false');
-    /* 单选组的 Tab 只停一次，停在当前选中的那一段上（roving tabindex）：
-       否则键盘用户要按两下 Tab 才能从这组里走过去，还得先猜哪一段是被选中的。 */
     item.tabIndex = on ? 0 : -1;
   });
 }
 
-/* 换范式后正文会整片重画，给它一次"重新排过一次版"的提示（见 ui.css 的 `.paper-swap`）。
-   只在换范式时放：落笔也重画正文，那时也放就成了"每写一个字纸面闪一下"。 */
 function paperSwap() {
   const host = $('docBody');
   if (!host) return;
   host.classList.remove('paper-swap');
-  /* 读一次布局：同一次会话里来回切也看得见（不读的话第二次加同一个类名不会重放动画） */
   void host.offsetWidth;
   host.classList.add('paper-swap');
   host.addEventListener('animationend', () => host.classList.remove('paper-swap'), { once: true });
 }
 
-/* 编辑范式切换：**先落笔再换**（换模式会重画正文，没落笔的改动会随之消失，
-   而那种"我的字不见了"没有任何提示，是最伤信任的一类失败）。
-   换完必须整体重渲染：两种模式的正文 DOM 完全不是一回事。 */
 async function setEditMode(mode) {
   const next = mode === 'flow' ? 'flow' : 'card';
   if (next === editMode) return;
-  /* 滑块先走：落笔要等一次网络往返，等它回来才动滑块的话，点下去就像没反应 */
   syncEditMode(next);
   await flushEdits();
   editMode = next;
-  try { localStorage.setItem(EDIT_MODE_KEY, editMode); } catch { /* 隐私模式忽略 */ }
+  try { localStorage.setItem(EDIT_MODE_KEY, editMode); } catch { }
   renderAll();
   paperSwap();
 }
@@ -3800,9 +3265,13 @@ document.addEventListener('click', (event) => {
   void setEditMode(item.dataset.mode);
 });
 
-/* 单选组的键盘约定：左右方向键在选项之间走，并**立刻选中**（原生 radio 就是这样，
-   "走一格还要再按一下确认"是另一种约定，两套混用会让人以为键盘坏了）。
-   Tab 在整组上只停一次（roving tabindex 由 `syncEditMode` 维护）。 */
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  const button = target instanceof Element ? target.closest('#docFont [data-font]') : null;
+  if (!button) return;
+  stepDocFont(Number(button.dataset.font) < 0 ? -1 : 1);
+});
+
 document.addEventListener('keydown', (event) => {
   const target = event.target;
   const item = target instanceof Element ? target.closest('.seg-edit .seg-item') : null;
@@ -3817,33 +3286,1407 @@ document.addEventListener('keydown', (event) => {
   void setEditMode(next.dataset.mode);
 });
 
-/* 落位策略切换：只调整规则表的可用性，不回显表单，
-   回显会拿 state 里的旧策略覆盖用户刚选的策略（那正是"点了没反应"的典型现场） */
 document.addEventListener('change', (event) => {
   const el = event.target;
   if (el && el.id === 'cfgPlaceStrategy') syncPlacementTerms(el.value);
 });
 
-/* ---------------------------- 命令面板（Ctrl+K） ----------------------------
- *
- * 医生的手离开键盘一次，就要"找鼠标 → 找按钮 → 找位置"三步；而跳段落、插检验值、
- * 套模板、查术语原本分散在左栏、右栏、顶栏与正文四处。面板把这四件事收成一次 Ctrl+K。
- *
- * 四条纪律（与下面的快捷键体系同源，缺一条它就从"省事"变成"又一个要背的东西"）：
- *   ① 打开前先记下光标 —— 面板会抢走焦点，落点只能提前存；
- *   ② 不新增写路径 —— 插入走 `/api/edit`、套模板走 `/api/template-create`，
- *      门控、留痕、乐观锁一条都不绕；
- *   ③ 插入不猜位置 —— 没有光标就明说"先点进某一段"，绝不往"最后一段"里塞；
- *   ④ 不可逆动作不进来 —— 删除文书、重置工作区一律不在这里。
- *
- * 面板本身只是界面件（`/command-palette.js`）：它不知道 S、不知道 api()，
- * 候选与动作全部由这里注入 —— 于是"面板长什么样"与"命令能改什么"是两件独立的事。
- */
+let MY_CONTENT = [];
+let MY_CONTENT_ERRORS = [];
 
-/** 打开面板那一刻的光标。`null` = 当时没有落点（例如从顶栏按钮打开的）。 */
+const MY_CONTENT_KIND = { phrase: '常用语', 'content-paragraph': '内容段落' };
+const MY_CONTENT_SCOPE = { personal: '我的', dept: '本科室', hospital: '全院' };
+
+let contentTargetCaret = null;
+let lastCaret = null;
+let contentContinuous = false;
+
+function currentDocId() {
+  return (S && S.doc && S.doc.docId) ? String(S.doc.docId) : '';
+}
+
+function caretAlive(caret) {
+  if (!caret || !caret.nodeId) return false;
+  if (caret.docId && currentDocId() && caret.docId !== currentDocId()) return false;
+  const items = Array.isArray(S && S.items) ? S.items : [];
+  return items.some((node) => node.id === caret.nodeId && node.kind === 'text');
+}
+
+function rememberCaret() {
+  const el = document.activeElement;
+  if (el && el.tagName === 'TEXTAREA' && el.dataset && el.dataset.edit) {
+    lastCaret = {
+      nodeId: el.dataset.edit,
+      start: typeof el.selectionStart === 'number' ? el.selectionStart : null,
+      end: typeof el.selectionEnd === 'number' ? el.selectionEnd : null,
+      docId: currentDocId(),
+    };
+    return;
+  }
+  if (!isFlow()) return;
+  const selection = window.getSelection();
+  const anchor = selection && selection.anchorNode ? selection.anchorNode : null;
+  const host = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
+  const block = host && typeof host.closest === 'function' ? host.closest('.fp[data-node-id]') : null;
+  if (block && block.dataset.nodeId) {
+    lastCaret = { nodeId: block.dataset.nodeId, start: null, end: null, docId: currentDocId() };
+  }
+}
+
+function sectionTitleOf(nodeId) {
+  const items = Array.isArray(S && S.items) ? S.items : [];
+  const index = items.findIndex((node) => node.id === nodeId);
+  if (index < 0) return '';
+  for (let cursor = index; cursor >= 0; cursor -= 1) {
+    if (items[cursor].kind === 'section') return String(items[cursor].title || '');
+  }
+  return '';
+}
+
+function renderContentTarget() {
+  const el = $('contentTarget');
+  if (!el) return;
+  const caret = contentTargetCaret;
+  if (!caret || !caretAlive(caret)) {
+    el.textContent = '没有落点：先点进正文某一段，再打开这里（不猜位置，也不往最后一段里塞）';
+    el.classList.add('warn');
+    return;
+  }
+  el.classList.remove('warn');
+  const node = (Array.isArray(S && S.items) ? S.items : []).find((candidate) => candidate.id === caret.nodeId);
+  const whole = String((node && node.text) || '');
+  const section = sectionTitleOf(caret.nodeId);
+  const hasRange = typeof caret.start === 'number' && typeof caret.end === 'number' && caret.end > caret.start;
+  if (hasRange) {
+    const picked = whole.slice(caret.start, caret.end).trim();
+    const pickedPreview = picked.length > 18 ? `${picked.slice(0, 18)}…` : picked;
+    el.textContent = `将替换选中的 ${caret.end - caret.start} 个字${pickedPreview ? `：「${pickedPreview}」` : ''}`;
+    return;
+  }
+  const text = whole.trim();
+  const preview = text === ''
+    ? '空段落（会优先填它）'
+    : (text.length > 26 ? `${text.slice(0, 26)}…` : text);
+  el.textContent = `将插入到：${section ? `${section} · ` : ''}${preview}`;
+}
+
+async function loadMyContent() {
+  let result;
+  try {
+    result = await api('/api/content-list', {});
+  } catch {
+    MY_CONTENT = [];
+    MY_CONTENT_ERRORS = ['内容清单读不出来（服务端没有响应）'];
+    renderMyContent();
+    return;
+  }
+  if (!result || result.ok !== true) {
+    MY_CONTENT = [];
+    MY_CONTENT_ERRORS = [String((result && (result.message || result.code)) || '内容清单读不出来')];
+    renderMyContent();
+    return;
+  }
+  const data = result.data || {};
+  MY_CONTENT = Array.isArray(data.items) ? data.items : [];
+  MY_CONTENT_ERRORS = Array.isArray(data.errors) ? data.errors : [];
+  renderMyContent();
+}
+
+function focusEditAt(nodeId, position) {
+  if (!nodeId) return;
+  const target = document.querySelector(`[data-edit="${nodeId}"]`);
+  if (!target) return;
+  target.focus();
+  const text = String(target.value ?? '');
+  const at = position === null || position === undefined
+    ? text.length
+    : Math.max(0, Math.min(position, text.length));
+  try {
+    target.setSelectionRange(at, at);
+  } catch {
+  }
+}
+
+async function insertMyContent(item, caret, options = {}) {
+  if (!item) return { ok: false, caret: null };
+  if (!caret || !caret.nodeId) {
+    toast('先把光标点进正文某一段，再按 Ctrl+K —— 没有落点就不猜位置', 'info');
+    return { ok: false, caret: null };
+  }
+  /* 先落盘：插入要在"服务端那一版正文"上算位置，否则会把防抖里还没发出去的字盖掉 */
+  clearTimeout(blurTimer);
+  await flushEdits();
+  const body = { itemId: item.id, nodeId: caret.nodeId };
+  if (item.kind === 'phrase') {
+    const node = (Array.isArray(S.items) ? S.items : []).find((candidate) => candidate.id === caret.nodeId);
+    const length = String((node && node.text) || '').length;
+    body.start = typeof caret.start === 'number' ? caret.start : length;
+    body.end = typeof caret.end === 'number' ? caret.end : body.start;
+  } else if (typeof caret.start === 'number' && typeof caret.end === 'number') {
+    body.replaceStart = caret.start;
+    body.replaceEnd = caret.end;
+  }
+  const result = await api('/api/content-insert', body);
+  await apply(result);
+  if (!(result && result.ok === true)) return { ok: false, caret: null };
+  const data = result.data || {};
+  const verb = item.kind === 'phrase' ? '已插入' : (data.triggerExpanded ? '已按触发词带入' : '已带入');
+  toast(`${verb}「${item.name}」${data.summary ? ` · ${data.summary}` : ''}`, 'ok');
+
+  let nextCaret = null;
+  if (item.kind === 'phrase') {
+    const inline = data.inline || {};
+    const node = (Array.isArray(S.items) ? S.items : []).find((candidate) => candidate.id === caret.nodeId);
+    const length = String((node && node.text) || '').length;
+    const at = typeof inline.start === 'number'
+      ? Math.min(inline.start + Number(inline.length || 0), length)
+      : length;
+    nextCaret = { nodeId: caret.nodeId, start: at, end: at, docId: currentDocId() };
+    if (!options.keepFocus) focusEditAt(caret.nodeId, at);
+  } else {
+    const landed = [...(data.filled || []), ...(data.created || [])];
+    const lastId = landed.length > 0 ? landed[landed.length - 1] : caret.nodeId;
+    const node = (Array.isArray(S.items) ? S.items : []).find((candidate) => candidate.id === lastId);
+    const length = String((node && node.text) || '').length;
+    nextCaret = { nodeId: lastId, start: length, end: length, docId: currentDocId() };
+    if (!options.keepFocus) focusEditAt(landed[0] || caret.nodeId, null);
+  }
+  void loadMyContent();
+  return { ok: true, caret: nextCaret, data };
+}
+
+const TRIGGER_PATTERN_UI = /(?:^|[\s\u3000])[;；]([A-Za-z0-9_\-\u4e00-\u9fa5]{1,12})$/;
+
+let triggerInflight = false;
+
+function triggerHitFor(el) {
+  const caret = typeof el.selectionStart === 'number' ? el.selectionStart : null;
+  if (caret === null) return null;
+  const before = String(el.value || '').slice(0, caret);
+  const matched = TRIGGER_PATTERN_UI.exec(before);
+  if (!matched) return null;
+  const code = matched[1].toLowerCase();
+  const item = MY_CONTENT.find((candidate) => String(candidate.trigger || '').toLowerCase() === code);
+  if (!item) return null;
+  const start = caret - matched[0].length;
+  return { item, start, end: caret, prefix: before.slice(0, start) };
+}
+
+async function expandTrigger(hit, el) {
+  if (triggerInflight) return;
+  triggerInflight = true;
+  try {
+    await insertMyContent(hit.item, {
+      nodeId: el.dataset.edit,
+      start: hit.start,
+      end: hit.end,
+      docId: currentDocId(),
+    });
+  } finally {
+    triggerInflight = false;
+  }
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key !== ' ' && event.key !== 'Enter') return;
+  const el = event.target;
+  if (!el || el.tagName !== 'TEXTAREA' || !el.dataset || !el.dataset.edit) return;
+  const hit = triggerHitFor(el);
+  if (!hit) return;
+  if (hit.item.kind === 'content-paragraph' && hit.prefix.trim() !== '') return;
+  event.preventDefault();
+  void expandTrigger(hit, el);
+}, true);
+
+/** 把当前这一段存进"个人模板"。脱敏与 PHI 检查在服务端，客户端只负责问名字 */
+async function saveParagraphAsContent(kind, caret) {
+  if (!caret || !caret.nodeId) {
+    toast('先把光标点进要存的那一段正文', 'info');
+    return;
+  }
+  const node = (Array.isArray(S.items) ? S.items : []).find((candidate) => candidate.id === caret.nodeId);
+  const text = String((node && node.text) || '').trim();
+  if (text === '') {
+    toast('这一段还是空的：先写下要存的内容', 'info');
+    return;
+  }
+  const name = await askText(
+    `给这${kind === 'phrase' ? '句常用语' : '段内容'}起个名字\n\n名字是清单里的那一行，写“腹部查体（正常）”“我这里正常”这类一眼认得出的。`,
+    { okLabel: '存进个人模板', required: true },
+  );
+  if (!name) return;
+  const result = await api('/api/content-save-from-doc', { nodeId: caret.nodeId, kind, name });
+  await apply(result);
+  if (result && result.ok === true) {
+    const replaced = (result.data && Array.isArray(result.data.replaced)) ? result.data.replaced : [];
+    toast(
+      `已存进个人模板「${name}」${replaced.length > 0 ? ` · ${replaced.length} 处患者信息换成了占位符` : ''}`,
+      'ok',
+    );
+    await loadMyContent();
+    contentGotoItem(String((result.data && result.data.item && result.data.item.id) || ''));
+  }
+}
+
+async function saveSectionAsContent(caret) {
+  const at = caret && caretAlive(caret) ? caret : (caretAlive(lastCaret) ? lastCaret : null);
+  if (!at) {
+    toast('先点进正文某一段，再另存整章 —— 没有落点就不知道存哪一章', 'info');
+    return;
+  }
+  const title = sectionTitleOf(at.nodeId);
+  const name = await askText(
+    `把「${title || '光标所在这一章'}」整章存成一条内容段落？\n\n`
+      + '存进去的是这一章现有的每一段（空段不存，子章节不算在内）。患者信息会换成占位符，残余的身份信息会被拦住。',
+    {
+      okLabel: '存进个人模板',
+      required: true,
+      ...(title !== '' ? { defaultValue: `${title}（整套）` } : {}),
+    },
+  );
+  if (!name) return;
+  const result = await api('/api/content-save-from-doc', {
+    nodeId: at.nodeId,
+    kind: 'content-paragraph',
+    name,
+    source: 'section',
+  });
+  await apply(result);
+  if (result && result.ok === true) {
+    const count = Number((result.data && result.data.paragraphs) || 0);
+    const replaced = result.data && Array.isArray(result.data.replaced) ? result.data.replaced : [];
+    toast(
+      `已存进个人模板「${name}」 · ${count} 段${replaced.length > 0 ? ` · ${replaced.length} 处患者信息换成了占位符` : ''}`,
+      'ok',
+    );
+    contentTab = 'content-paragraph';
+    contentKeyword = '';
+    const searchBox = $('contentSearch');
+    if (searchBox) searchBox.value = '';
+    await loadMyContent();
+    contentGotoItem(String((result.data && result.data.item && result.data.item.id) || ''));
+    return;
+  }
+  toast(String((result && (result.message || result.code)) || '没能存进去'), 'error');
+}
+
+let selCaret = null;
+let selBarDismissed = false;
+
+function readSelectionCaret() {
+  if (!S.doc || S.doc.status === 'signed' || S.doc.status === 'archived') return null;
+  if (isFlow()) {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+    const range = selection.getRangeAt(0);
+    const anchor = range.commonAncestorContainer;
+    const host = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
+    const block = host && typeof host.closest === 'function' ? host.closest('.fp[data-node-id]') : null;
+    if (!block) return null;
+    const startBlock = L0FlowView.blockAt(block, range.startContainer);
+    const endBlock = L0FlowView.blockAt(block, range.endContainer);
+    if (!startBlock || !endBlock || startBlock.el !== block || endBlock.el !== block) return null;
+    const start = L0FlowView.offsetIn(block, range.startContainer, range.startOffset);
+    const end = L0FlowView.offsetIn(block, range.endContainer, range.endOffset);
+    if (end <= start) return null;
+    const text = String(block.textContent || '').slice(start, end);
+    if (text.trim() === '') return null;
+    return { nodeId: block.dataset.nodeId, start, end, text, rect: range.getBoundingClientRect(), docId: currentDocId() };
+  }
+  const el = document.activeElement;
+  if (!el || el.tagName !== 'TEXTAREA' || !el.dataset || !el.dataset.edit || el.readOnly) return null;
+  const start = el.selectionStart;
+  const end = el.selectionEnd;
+  if (typeof start !== 'number' || typeof end !== 'number' || end <= start) return null;
+  const text = String(el.value || '').slice(start, end);
+  if (text.trim() === '') return null;
+  return { nodeId: el.dataset.edit, start, end, text, rect: el.getBoundingClientRect(), docId: currentDocId() };
+}
+
+function placeSelectionBar(caret) {
+  const bar = $('selBar');
+  if (!bar) return;
+  bar.hidden = false;
+  const size = bar.getBoundingClientRect();
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  let left = caret.rect.left + caret.rect.width / 2 - size.width / 2;
+  left = Math.max(8, Math.min(left, width - size.width - 8));
+  let top = caret.rect.top - size.height - 8;
+  if (top < 8) top = caret.rect.bottom + 8;
+  if (top + size.height > height - 8) top = Math.max(8, height - size.height - 8);
+  bar.style.left = `${Math.round(left)}px`;
+  bar.style.top = `${Math.round(top)}px`;
+}
+
+function hideSelectionBar() {
+  const bar = $('selBar');
+  if (bar) bar.hidden = true;
+  selCaret = null;
+}
+
+function refreshSelectionBar() {
+  if (selBarDismissed) return;
+  const caret = readSelectionCaret();
+  selCaret = caret;
+  if (!caret) {
+    hideSelectionBar();
+    return;
+  }
+  placeSelectionBar(caret);
+}
+
+/** 把选中的那一截存成常用语：仍走脱敏 + PHI 关卡，客户端只负责问名字 */
+async function saveSelectionAsContent(caret) {
+  const picked = String(caret.text || '').trim();
+  if (picked === '') return;
+  const preview = picked.length > 40 ? `${picked.slice(0, 40)}…` : picked;
+  const name = await askText(
+    `把选中的 ${picked.length} 个字存成一条常用语？\n\n「${preview}」\n\n患者信息会换成占位符，残余的身份信息会被拦住。`,
+    { okLabel: '存进个人模板', required: true },
+  );
+  if (!name) return;
+  const result = await api('/api/content-save-from-doc', {
+    nodeId: caret.nodeId,
+    kind: 'phrase',
+    name,
+    start: caret.start,
+    end: caret.end,
+  });
+  await apply(result);
+  if (result && result.ok === true) {
+    const replaced = result.data && Array.isArray(result.data.replaced) ? result.data.replaced : [];
+    toast(
+      `已存进个人模板「${name}」${replaced.length > 0 ? ` · ${replaced.length} 处患者信息换成了占位符` : ''}`,
+      'ok',
+    );
+    await loadMyContent();
+    contentGotoItem(String((result.data && result.data.item && result.data.item.id) || ''));
+    return;
+  }
+  toast(String((result && (result.message || result.code)) || '没能存进去'), 'error');
+}
+
+/** 复制为纯文本：贴到别处不带样式，也不带占位符外的格式 */
+async function copySelectionText(caret) {
+  const text = String(caret.text || '');
+  if (text === '') return;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`已复制 ${text.length} 个字（纯文本）`, 'ok');
+  } catch {
+    const holder = document.createElement('textarea');
+    holder.value = text;
+    holder.setAttribute('readonly', '');
+    holder.style.position = 'fixed';
+    holder.style.left = '-9999px';
+    document.body.appendChild(holder);
+    holder.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    holder.remove();
+    toast(ok ? `已复制 ${text.length} 个字（纯文本）` : '浏览器不让复制：请用 Ctrl+C', ok ? 'ok' : 'error');
+  }
+}
+
+let polishCandidate = null;
+let compareCandidate = null;
+
+async function polishSelection(caret) {
+  const result = await api('/api/polish-selection', {
+    nodeId: caret.nodeId,
+    start: caret.start,
+    end: caret.end,
+  });
+  if (!(result && result.ok === true)) {
+    toast(String((result && (result.message || result.code)) || 'AI 润色没有结果'), 'error');
+    return;
+  }
+  polishCandidate = { ...result.data, nodeId: caret.nodeId, length: caret.end - caret.start };
+  const dialog = $('polishDialog');
+  if (!dialog) return;
+  const before = $('polishBefore');
+  const after = $('polishAfter');
+  if (before) before.textContent = String(polishCandidate.before || '');
+  if (after) after.textContent = String(polishCandidate.after || '');
+  const meta = $('polishMeta');
+  if (meta) {
+    const confidence = typeof polishCandidate.confidence === 'number'
+      ? ` · 置信度 ${Math.round(polishCandidate.confidence * 100)}%`
+      : '';
+    meta.textContent = `${polishCandidate.modelId || ''}${confidence}`;
+  }
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
+  const accept = $('polishAccept');
+  if (accept) accept.focus();
+}
+
+async function acceptPolish() {
+  const candidate = polishCandidate;
+  const dialog = $('polishDialog');
+  if (dialog && typeof dialog.close === 'function') dialog.close();
+  polishCandidate = null;
+  if (!candidate) return;
+  const result = await api('/api/edit', { nodeId: candidate.nodeId, text: candidate.fullText });
+  await apply(result);
+  if (result && result.ok === true) {
+    toast(`已替换选中的 ${candidate.length} 个字（AI 润色 · ${candidate.modelId || '模型'}）`, 'ok');
+    return;
+  }
+  toast(String((result && (result.message || result.code)) || '没能替换'), 'error');
+}
+
+async function compareSelection(caret) {
+  const result = await api('/api/compare-selection', {
+    nodeId: caret.nodeId,
+    start: caret.start,
+    end: caret.end,
+  });
+  if (!(result && result.ok === true)) {
+    toast(String((result && (result.message || result.code)) || '没有可对照的上一次'), 'info');
+    return;
+  }
+  compareCandidate = result.data || {};
+  const dialog = $('compareDialog');
+  if (!dialog) return;
+  const text = $('compareText');
+  if (text) text.textContent = String(compareCandidate.previousText || '');
+  const meta = $('compareMeta');
+  if (meta) {
+    const date = String(compareCandidate.createdAt || '').slice(0, 10);
+    const align = compareCandidate.aligned && compareCandidate.sectionTitle
+      ? `同章「${compareCandidate.sectionTitle}」`
+      : '不同章（按内容相似度匹配）';
+    const type = compareCandidate.sameDocType === false ? ' · 不同文书类型' : '';
+    const score = Math.round(Number(compareCandidate.score || 0) * 100);
+    meta.textContent = `${compareCandidate.title || compareCandidate.docId || ''} · ${date} · ${align}${type} · 重合 ${score}%`;
+  }
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
+  const close = $('compareClose');
+  if (close) close.focus();
+}
+
+(() => {
+  const polishDialog = $('polishDialog');
+  if (polishDialog) {
+    polishDialog.addEventListener('close', () => { polishCandidate = null; });
+    const cancel = $('polishCancel');
+    if (cancel) cancel.addEventListener('click', () => polishDialog.close());
+    const accept = $('polishAccept');
+    if (accept) accept.addEventListener('click', () => { void acceptPolish(); });
+  }
+  const compareDialog = $('compareDialog');
+  if (compareDialog) {
+    compareDialog.addEventListener('close', () => { compareCandidate = null; });
+    const close = $('compareClose');
+    if (close) close.addEventListener('click', () => compareDialog.close());
+    const copy = $('compareCopy');
+    if (copy) {
+      copy.addEventListener('click', async () => {
+        if (!compareCandidate) return;
+        try {
+          await navigator.clipboard.writeText(String(compareCandidate.previousText || ''));
+          toast('已复制上次那一段', 'ok');
+        } catch {
+          toast('浏览器不让复制：请选中文字后 Ctrl+C', 'error');
+        }
+      });
+    }
+  }
+})();
+
+(() => {
+  const bar = $('selBar');
+  if (!bar) return;
+  bar.addEventListener('mousedown', (event) => event.preventDefault());
+  bar.addEventListener('click', async (event) => {
+    const button = event.target instanceof Element ? event.target.closest('[data-sel-action]') : null;
+    if (!button) return;
+    const caret = selCaret;
+    hideSelectionBar();
+    if (!caret) return;
+    const action = button.dataset.selAction;
+    if (action === 'save-content') { await saveSelectionAsContent(caret); return; }
+    if (action === 'replace-content') { contentTab = 'phrase'; openMyContent(caret); return; }
+    if (action === 'polish-selection') { await polishSelection(caret); return; }
+    if (action === 'compare-previous') { await compareSelection(caret); return; }
+    if (action === 'copy') await copySelectionText(caret);
+  });
+
+  let frame = 0;
+  const schedule = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => { frame = 0; refreshSelectionBar(); });
+  };
+  document.addEventListener('mouseup', schedule, true);
+  document.addEventListener('keyup', (event) => {
+    if (event.key === 'Escape') { selBarDismissed = true; hideSelectionBar(); return; }
+    selBarDismissed = false;
+    schedule();
+  }, true);
+  document.addEventListener('selectionchange', schedule);
+  document.addEventListener('mousedown', (event) => {
+    const target = event.target;
+    if (target instanceof Element && bar.contains(target)) return;
+    selBarDismissed = false;
+    hideSelectionBar();
+  }, true);
+  window.addEventListener('scroll', () => hideSelectionBar(), true);
+  window.addEventListener('resize', () => hideSelectionBar());
+})();
+
+let contentTab = 'phrase';
+let contentKeyword = '';
+let contentPage = 1;
+/* 10 条一页：与「模板库」同一口径；抽屉一屏大约能扫六七条，10 条是"翻一次刚好"的量 */
+const CONTENT_PAGE_SIZE = 10;
+let contentEditorOpener = null;
+let similarTimer = null;
+let similarKey = '';
+
+function escapeHtml(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function composeRows() {
+  const text = $('contentText');
+  return String((text && text.value) || '')
+    .split(/\r?\n/)
+    .map((row) => row.trim())
+    .filter((row) => row !== '');
+}
+
+function updateContentHint() {
+  const hint = $('contentHint');
+  if (!hint) return;
+  const rows = composeRows();
+  const chars = rows.join('').length;
+  if (rows.length === 0) {
+    hint.textContent = '一行话：会插进光标所在的那一句';
+    return;
+  }
+  if (rows.length === 1) {
+    hint.textContent = chars > 500
+      ? `一行 ${chars} 字，超过 500：中间按一次回车就能作为多段落带入`
+      : `一行话 · ${chars} 字：会插进光标所在的那一句`;
+    return;
+  }
+  hint.textContent = `${rows.length} 段 · ${chars} 字：会在光标之后另起 ${rows.length} 段`;
+}
+
+function renderContentSimilar(data) {
+  const box = $('contentSimilar');
+  if (!box) return;
+  const exact = data && data.exact ? data.exact : null;
+  const similar = data && Array.isArray(data.similar) ? data.similar : [];
+  if (!exact && similar.length === 0) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = (exact
+    ? `<div class="content-similar-exact">已有同名条目「${escapeHtml(exact.name)}」：保存会被拒 —— 改个名字，或者直接去改那一条。</div>`
+    : '')
+    + (similar.length > 0
+      ? `<div class="content-similar-head">这里已经有相近的内容，确认不是同一件事再存：</div>`
+        + similar.map((hit) => '<div class="content-similar-row">'
+          + `<span class="content-similar-name">${escapeHtml(hit.item.name)}</span>`
+          + `<span class="content-similar-score">${Math.round(Number(hit.score || 0) * 100)}%</span>`
+          + `<span class="content-similar-preview">${escapeHtml(hit.item.preview)}</span>`
+          + '</div>').join('')
+      : '');
+}
+
+function scheduleContentSimilar() {
+  clearTimeout(similarTimer);
+  const name = String(($('contentName') && $('contentName').value) || '').trim();
+  const rows = composeRows();
+  if (name === '' && rows.length === 0) {
+    similarKey = '';
+    renderContentSimilar(null);
+    return;
+  }
+  const key = `${name}\u0000${rows.join('\u0001')}`;
+  if (key === similarKey) return;
+  similarKey = key;
+  similarTimer = setTimeout(() => {
+    void (async () => {
+      let result = null;
+      try {
+        result = await api('/api/content-similar', { name, paragraphs: rows });
+      } catch {
+        result = null;
+      }
+      if (!result || result.ok !== true) return;
+      renderContentSimilar(result.data || {});
+    })();
+  }, 320);
+}
+
+function openContentEditor() {
+  const dialog = $('contentEditor');
+  if (!dialog) return;
+  const name = $('contentName');
+  const text = $('contentText');
+  const trigger = $('contentTrigger');
+  if (name) name.value = '';
+  if (text) text.value = '';
+  if (trigger) trigger.value = '';
+  similarKey = '';
+  clearTimeout(similarTimer);
+  renderContentSimilar(null);
+  updateContentHint();
+  contentEditorOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
+  document.documentElement.classList.add('dialog-open');
+  if (name) name.focus();
+}
+
+function closeContentEditor() {
+  const dialog = $('contentEditor');
+  if (!dialog) return;
+  clearTimeout(similarTimer);
+  if (typeof dialog.close === 'function') dialog.close();
+  else dialog.removeAttribute('open');
+  document.documentElement.classList.remove('dialog-open');
+  const opener = contentEditorOpener;
+  contentEditorOpener = null;
+  if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+}
+
+async function submitContentEditor() {
+  const name = String(($('contentName') && $('contentName').value) || '').trim();
+  const rows = composeRows();
+  if (name === '') {
+    toast('先给它起个名字：那是清单里的那一行', 'info');
+    const input = $('contentName');
+    if (input) input.focus();
+    return;
+  }
+  if (rows.length === 0) {
+    toast('内容是空的：先写下要存的话', 'info');
+    const text = $('contentText');
+    if (text) text.focus();
+    return;
+  }
+  const kind = rows.length > 1 ? 'content-paragraph' : 'phrase';
+  /* 触发词可以不填：它不是"必须起个短码"，而是给每天都用的那几条留的近路。 */
+  const trigger = String(($('contentTrigger') && $('contentTrigger').value) || '').trim();
+  const result = await api('/api/content-create', {
+    kind,
+    name,
+    paragraphs: rows,
+    ...(trigger !== '' ? { trigger } : {}),
+  });
+  await apply(result);
+  if (result && result.ok === true) {
+    const saved = (result.data && result.data.item) || {};
+    const savedTrigger = String(saved.trigger || '');
+    toast(
+      `已存进个人模板「${saved.name || name}」 · ${MY_CONTENT_KIND[kind]}`
+        + (savedTrigger !== '' ? ` · 正文里打 ;${savedTrigger} 再按空格即可带入` : ''),
+      'ok',
+    );
+    closeContentEditor();
+    contentTab = kind;
+    contentKeyword = '';
+    const searchBox = $('contentSearch');
+    if (searchBox) searchBox.value = '';
+    await loadMyContent();
+    contentGotoItem(String(saved.id || ''));
+    return;
+  }
+  toast(String((result && (result.message || result.code)) || '没能存进去'), 'error');
+  if (result && result.code === 'E_CONTENT_DUPLICATE_NAME') {
+    renderContentSimilar({ exact: { name }, similar: [] });
+  }
+  if (result && result.code === 'E_CONTENT_DUPLICATE_TRIGGER') {
+    const input = $('contentTrigger');
+    if (input) input.focus();
+  }
+}
+
+function setContentTab(tab) {
+  const next = tab === 'content-paragraph' ? 'content-paragraph' : 'phrase';
+  if (next === contentTab) return;
+  contentTab = next;
+  contentPage = 1;
+  renderMyContent();
+}
+
+function contentMatches(item, keyword) {
+  if (keyword === '') return true;
+  const fields = [item.name, item.trigger, item.group, item.preview];
+  if (Array.isArray(item.paragraphs)) fields.push(...item.paragraphs);
+  return fields.some((value) => String(value ?? '').toLowerCase().includes(keyword));
+}
+
+function contentGotoItem(itemId) {
+  if (!itemId || contentKeyword.trim() !== '') return;
+  const items = MY_CONTENT.filter((item) => item.kind === contentTab);
+  const index = items.findIndex((item) => item.id === itemId);
+  if (index < 0) return;
+  contentPage = Math.floor(index / CONTENT_PAGE_SIZE) + 1;
+  renderMyContent();
+}
+
+function renderMyContent() {
+  renderContentTarget();
+  const list = $('contentList');
+  if (!list) return;
+  const errors = $('contentErrors');
+  if (errors) {
+    errors.hidden = MY_CONTENT_ERRORS.length === 0;
+    errors.textContent = MY_CONTENT_ERRORS.join('；');
+  }
+
+  const phrases = MY_CONTENT.filter((item) => item.kind === 'phrase');
+  const paragraphs = MY_CONTENT.filter((item) => item.kind === 'content-paragraph');
+  const phraseCount = $('contentPhraseCount');
+  if (phraseCount) phraseCount.textContent = String(phrases.length);
+  const paraCount = $('contentParaCount');
+  if (paraCount) paraCount.textContent = String(paragraphs.length);
+
+  const keyword = contentKeyword.trim().toLowerCase();
+  if (contentTab === 'phrase' && phrases.length === 0 && paragraphs.length > 0) contentTab = 'content-paragraph';
+  if (contentTab === 'content-paragraph' && paragraphs.length === 0 && phrases.length > 0) contentTab = 'phrase';
+
+  if (keyword !== '') {
+    const currentHits = (contentTab === 'phrase' ? phrases : paragraphs).filter((item) => contentMatches(item, keyword)).length;
+    const otherHits = (contentTab === 'phrase' ? paragraphs : phrases).filter((item) => contentMatches(item, keyword)).length;
+    if (currentHits === 0 && otherHits > 0) contentTab = contentTab === 'phrase' ? 'content-paragraph' : 'phrase';
+  }
+
+  const tabs = $('contentTabs');
+  if (tabs) {
+    for (const button of tabs.querySelectorAll('[data-content-tab]')) {
+      const active = button.dataset.contentTab === contentTab;
+      button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.classList.toggle('active', active);
+      button.tabIndex = active ? 0 : -1;
+    }
+  }
+
+  const kindLabel = contentTab === 'phrase' ? '常用语' : '内容段落';
+  const canInsert = !!contentTargetCaret && caretAlive(contentTargetCaret);
+  const cardOf = (item) => {
+    const count = Number(item.paragraphCount || (Array.isArray(item.paragraphs) ? item.paragraphs.length : 1));
+    const marks = [
+      item.pinned ? '置顶' : '',
+      item.scope && item.scope !== 'personal' ? (MY_CONTENT_SCOPE[item.scope] || item.scope) : '',
+      item.trigger ? `;${item.trigger}` : '',
+      item.group || '',
+      Array.isArray(item.placeholders) && item.placeholders.length > 0 ? `占位符 ${item.placeholders.length}` : '',
+    ].filter((part) => part !== '');
+    const more = count > 1 ? `<div class="content-more">还有 ${count - 1} 段</div>` : '';
+    return '<div class="content-card">'
+      + '<div class="content-card-main">'
+      + `<div class="content-name">${escapeHtml(item.name)}</div>`
+      + `<div class="content-preview">${escapeHtml(item.preview)}</div>`
+      + more
+      + (marks.length > 0 ? `<div class="content-meta">${marks.map(escapeHtml).join(' · ')}</div>` : '')
+      + '</div>'
+      + '<div class="content-actions">'
+      + `<button data-content-insert="${escapeHtml(item.id)}"${canInsert ? '' : ' disabled title="先点进正文某一段，再打开个人模板"'}>${contentContinuous ? '带入并继续' : '带入'}</button>`
+      + `<button data-content-pin="${escapeHtml(item.id)}" title="${item.pinned ? '从清单最前面撤下来' : '钉在清单最前面（只影响你自己的顺序）'}">${item.pinned ? '取消置顶' : '置顶'}</button>`
+      + `<button data-content-delete="${escapeHtml(item.id)}" title="只从个人模板里删掉，已写进病历的字不动">删</button>`
+      + '</div>'
+      + '</div>';
+  };
+
+  const items = contentTab === 'phrase' ? phrases : paragraphs;
+  if (items.length === 0) {
+    list.innerHTML = '<div class="content-empty">'
+      + (MY_CONTENT.length === 0
+        ? '还没有内容：在正文里按 <kbd>Ctrl</kbd>+<kbd>K</kbd> 存一条，或点「新建内容」写一条。'
+        : `这一签还没有${kindLabel}：点「新建内容」写一条。`)
+      + '</div>';
+    return;
+  }
+  const matched = keyword === '' ? items : items.filter((item) => contentMatches(item, keyword));
+  if (matched.length === 0) {
+    list.innerHTML = '<div class="content-empty">'
+      + `没有名称或内容含「${escapeHtml(contentKeyword.trim())}」的${kindLabel}（这一签共 ${items.length} 条）。`
+      + '<br>换个词，或清空上方的查询条件。'
+      + '</div>';
+    return;
+  }
+  const pageCount = Math.max(1, Math.ceil(matched.length / CONTENT_PAGE_SIZE));
+  if (contentPage > pageCount) contentPage = pageCount;
+  if (contentPage < 1) contentPage = 1;
+  const start = (contentPage - 1) * CONTENT_PAGE_SIZE;
+  const pageRows = matched.slice(start, start + CONTENT_PAGE_SIZE);
+  const pager = pageCount > 1
+    ? '<div class="tpl-pager">'
+      + `<span class="muted">第 ${contentPage} / ${pageCount} 页 · 本页 ${pageRows.length} 条`
+      + `（共 ${matched.length} 条，每页 ${CONTENT_PAGE_SIZE} 条）</span>`
+      + '<span class="tpl-pager-btns">'
+      + `<button class="secondary" data-content-page="${contentPage - 1}"${contentPage <= 1 ? ' disabled' : ''}`
+      + ' title="上一页（只翻这一页的清单，不重新拉）">上一页</button>'
+      + `<button class="secondary" data-content-page="${contentPage + 1}"${contentPage >= pageCount ? ' disabled' : ''}`
+      + ' title="下一页（只翻这一页的清单，不重新拉）">下一页</button>'
+      + '</span></div>'
+    : '';
+  list.innerHTML = pageRows.map(cardOf).join('') + pager;
+}
+
+let findQuery = '';
+let findCaseSensitive = false;
+let findHits = [];
+let findCursor = -1;
+
+function isDocLocked() {
+  const status = S && S.doc ? String(S.doc.status || '') : '';
+  return status === 'signed' || status === 'archived';
+}
+
+function findCandidates() {
+  const items = Array.isArray(S.items) ? S.items : [];
+  const out = [];
+  for (const item of items) {
+    if (!item) continue;
+    if (item.kind === 'text' && typeof item.text === 'string') {
+      out.push({ itemId: item.id, writeId: item.id, field: false });
+    } else if (item.kind === 'field') {
+      out.push({ itemId: item.id, writeId: item.id, field: true });
+    } else if (item.kind === 'listItem') {
+      if (item.textId) out.push({ itemId: item.id, writeId: item.textId, field: false });
+      if (item.fieldId) out.push({ itemId: item.id, writeId: item.fieldId, field: true });
+    }
+  }
+  return out;
+}
+
+function textOfCandidate(candidate) {
+  const item = (S.items || []).find((node) => node.id === candidate.itemId);
+  if (!item) return '';
+  return String((candidate.field ? item.value : item.text) ?? '');
+}
+
+function scanFindHits() {
+  const query = findQuery;
+  if (query === '') {
+    findHits = [];
+    findCursor = -1;
+    return;
+  }
+  const fold = (text) => (findCaseSensitive ? text : text.toLowerCase());
+  const needle = fold(query);
+  const hits = [];
+  for (const candidate of findCandidates()) {
+    const text = textOfCandidate(candidate);
+    if (text === '') continue;
+    const body = fold(text);
+    let at = body.indexOf(needle);
+    while (at >= 0) {
+      hits.push({ ...candidate, index: at, length: query.length });
+      at = body.indexOf(needle, at + Math.max(needle.length, 1));
+    }
+  }
+  findHits = hits;
+  if (findCursor >= hits.length) findCursor = hits.length - 1;
+  if (findCursor < 0 && hits.length > 0) findCursor = 0;
+}
+
+function findReplaceValue() {
+  const input = $('findReplace');
+  return input ? String(input.value) : '';
+}
+
+function replaceEveryIn(text) {
+  if (text === '' || findQuery === '') return text;
+  if (findCaseSensitive) return text.split(findQuery).join(findReplaceValue());
+  const pattern = new RegExp(findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  return text.replace(pattern, () => findReplaceValue());
+}
+
+function replaceOneIn(text, index) {
+  return text.slice(0, index) + findReplaceValue() + text.slice(index + findQuery.length);
+}
+
+async function writeCandidate(candidate, nextText) {
+  return candidate.field
+    ? api('/api/set-field', { nodeId: candidate.writeId, value: nextText })
+    : api('/api/edit', { nodeId: candidate.writeId, text: nextText });
+}
+
+function renderFindBar() {
+  const count = $('findCount');
+  if (count) {
+    count.textContent = findHits.length === 0 ? '0 / 0' : `${findCursor + 1} / ${findHits.length}`;
+  }
+  const locked = isDocLocked();
+  for (const id of ['findReplaceOne', 'findReplaceAll']) {
+    const button = $(id);
+    if (button) button.disabled = locked || findHits.length === 0;
+  }
+}
+
+async function revealHit(hit) {
+  const item = (S.items || []).find((node) => node.id === hit.itemId);
+  if (!item) return;
+  scrollToItem(item);
+  const selector = hit.field ? `[data-field="${hit.writeId}"]` : `[data-edit="${hit.writeId}"]`;
+  const element = document.querySelector(selector);
+  if (element) {
+    element.focus({ preventScroll: true });
+    if (typeof element.setSelectionRange === 'function') {
+      try { element.setSelectionRange(hit.index, hit.index + hit.length); } catch { }
+    }
+    return;
+  }
+  const block = document.querySelector(`[data-flow-seg] [data-node-id="${hit.writeId}"]`)
+    || document.querySelector(`[data-flow-seg] [data-node-id="${hit.itemId}"]`);
+  if (!block) return;
+  block.classList.remove('find-flash');
+  void block.offsetWidth;
+  block.classList.add('find-flash');
+  setTimeout(() => block.classList.remove('find-flash'), 950);
+}
+
+function moveFindCursor(delta) {
+  if (findHits.length === 0) return;
+  findCursor = (findCursor + delta + findHits.length) % findHits.length;
+  renderFindBar();
+  void revealHit(findHits[findCursor]);
+}
+
+function openFindBar() {
+  const bar = $('findBar');
+  if (!bar) return;
+  bar.hidden = false;
+  const input = $('findInput');
+  if (input) {
+    findQuery = String(input.value || '');
+    scanFindHits();
+    input.focus();
+    input.select();
+  }
+  renderFindBar();
+}
+
+function closeFindBar() {
+  const bar = $('findBar');
+  if (!bar) return;
+  bar.hidden = true;
+  const input = $('findInput');
+  if (input) input.blur();
+}
+
+async function replaceOneHit() {
+  if (isDocLocked()) {
+    toast('已签章 / 已归档的文书不能替换', 'info');
+    return;
+  }
+  await flushEdits();
+  scanFindHits();
+  const hit = findHits[findCursor];
+  if (!hit) {
+    renderFindBar();
+    return;
+  }
+  const before = textOfCandidate(hit);
+  const next = replaceOneIn(before, hit.index);
+  if (next === before) return;
+  const result = await writeCandidate(hit, next);
+  await apply(result);
+  if (!(result && result.ok)) {
+    toast(`替换未生效：${(result && (result.message || result.code)) || '未知原因'}`, 'error');
+  }
+  scanFindHits();
+  renderFindBar();
+  if (findHits.length > 0) void revealHit(findHits[findCursor]);
+}
+
+async function replaceAllHits() {
+  if (findQuery === '') return;
+  if (isDocLocked()) {
+    toast('已签章 / 已归档的文书不能替换', 'info');
+    return;
+  }
+  await flushEdits();
+  scanFindHits();
+  if (findHits.length === 0) {
+    renderFindBar();
+    return;
+  }
+  const groups = new Map();
+  for (const hit of findHits) {
+    const key = `${hit.field ? 'f' : 't'}:${hit.writeId}`;
+    const found = groups.get(key);
+    if (found) found.count += 1;
+    else groups.set(key, { candidate: hit, count: 1 });
+  }
+  let changed = 0;
+  let last = null;
+  const failures = [];
+  for (const { candidate, count } of groups.values()) {
+    const before = textOfCandidate(candidate);
+    const next = replaceEveryIn(before);
+    if (next === before) continue;
+    const result = await writeCandidate(candidate, next);
+    if (result && result.ok) {
+      changed += count;
+      last = result;
+    } else {
+      failures.push(String((result && (result.code || result.message)) || '未知原因'));
+    }
+  }
+  if (last) await apply(last);
+  scanFindHits();
+  renderFindBar();
+  if (failures.length > 0) {
+    toast(`替换 ${changed} 处，${failures.length} 处未生效（${failures[0]}）`, 'error');
+  } else if (changed > 0) {
+    toast(`已替换 ${changed} 处`, 'ok');
+  }
+}
+
+(() => {
+  const bar = $('findBar');
+  if (!bar) return;
+  const input = $('findInput');
+  if (input) {
+    input.addEventListener('input', () => {
+      findQuery = String(input.value || '');
+      findCursor = 0;
+      scanFindHits();
+      renderFindBar();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        moveFindCursor(event.shiftKey ? -1 : 1);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeFindBar();
+      }
+    });
+  }
+  const replaceInput = $('findReplace');
+  if (replaceInput) {
+    replaceInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); void replaceOneHit(); }
+      else if (event.key === 'Escape') { event.preventDefault(); closeFindBar(); }
+    });
+  }
+  const bind = (id, handler) => {
+    const button = $(id);
+    if (button) button.addEventListener('click', handler);
+  };
+  bind('findPrev', () => moveFindCursor(-1));
+  bind('findNext', () => moveFindCursor(1));
+  bind('findReplaceOne', () => { void replaceOneHit(); });
+  bind('findReplaceAll', () => { void replaceAllHits(); });
+  bind('findClose', () => closeFindBar());
+  const caseButton = $('findCase');
+  if (caseButton) {
+    caseButton.addEventListener('click', () => {
+      findCaseSensitive = !findCaseSensitive;
+      caseButton.setAttribute('aria-pressed', findCaseSensitive ? 'true' : 'false');
+      scanFindHits();
+      renderFindBar();
+    });
+  }
+
+  document.addEventListener('keydown', (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    if (String(event.key).toLowerCase() !== 'f') return;
+    event.preventDefault();
+    openFindBar();
+  });
+})();
+
+const EVIDENCE_KIND_LABEL = {
+  his: 'HIS 取数',
+  lis: '检验（LIS）',
+  pacs: '影像（PACS）',
+  'emr-prior': '既往病历',
+  guideline: '指南 / 规范',
+  terminology: '术语库',
+  template: '模板',
+  'user-input': '人工录入',
+  'external-doc': '外部文档',
+  dictation: '语音转写',
+  patient: '患者自述',
+};
+
+const ORIGIN_LABEL = { human: '人工书写', ai: 'AI 起草', system: '系统带入', imported: '外部导入' };
+
+function openSource(nodeId) {
+  const drawer = $('sourceDrawer');
+  const body = $('sourceBody');
+  if (!drawer || !body) return;
+  const item = (Array.isArray(S.items) ? S.items : []).find((node) => node.id === nodeId);
+  if (!item) {
+    toast('这一处已经不在正文里了', 'info');
+    return;
+  }
+  const evidence = Array.isArray(item.evidence) ? item.evidence : [];
+  const runs = Array.isArray(item.runs) ? item.runs : [];
+  const aiRun = runs.find((run) => run.provenance && run.provenance.origin === 'ai');
+  const modelId = String((aiRun && aiRun.provenance.modelId) || item.modelId || '');
+  const confidence = aiRun && typeof aiRun.provenance.confidence === 'number'
+    ? aiRun.provenance.confidence
+    : (typeof item.confidence === 'number' ? item.confidence : null);
+  const suggestionId = String(item.suggestionId || (aiRun && aiRun.provenance.suggestionId) || '');
+  const originLabel = ORIGIN_LABEL[item.origin] || String(item.origin || '');
+
+  const head = [
+    `<span class="chip">${escapeHtml(originLabel)}</span>`,
+    modelId ? `<span class="muted">模型 ${escapeHtml(modelId)}</span>` : '',
+    typeof confidence === 'number' ? `<span class="muted">置信度 ${confidence.toFixed(2)}</span>` : '',
+    suggestionId ? `<span class="muted">建议 ${escapeHtml(suggestionId)}</span>` : '',
+  ].filter((part) => part !== '').join(' ');
+
+  const rows = evidence.map((ref) => {
+    const kind = EVIDENCE_KIND_LABEL[ref.kind] || String(ref.kind || '来源');
+    const meta = [
+      ref.field ? `字段 ${escapeHtml(String(ref.field))}` : '',
+      ref.capturedAt ? String(ref.capturedAt).replace('T', ' ').slice(0, 16) : '',
+    ].filter((part) => part !== '').join(' · ');
+    return `<div class="src-item">
+      <div class="src-head"><b>${escapeHtml(kind)}</b>${meta === '' ? '' : `<span class="muted">${meta}</span>`}</div>
+      <div class="src-ref">${escapeHtml(String(ref.ref || '（没有编号）'))}</div>
+      ${ref.valueText ? `<div class="src-quote">${escapeHtml(String(ref.valueText))}</div>` : ''}
+      ${ref.quote ? `<div class="src-quote">「${escapeHtml(String(ref.quote))}」</div>` : ''}
+      ${ref.nodeId ? `<button data-goto-node="${escapeHtml(String(ref.nodeId))}">跳到那一处</button>` : ''}
+    </div>`;
+  }).join('');
+
+  const isAiOrigin = item.origin === 'ai';
+  const emptyHtml = isAiOrigin
+    ? '<div class="empty">这条 AI 建议采纳时<b>没有随附依据</b>：模型没有返回来源。'
+      + '<br /><br />服务端会原样保存模型给的依据，所以这里空着意味着"模型没给"，不是"界面取不到"。'
+      + '真实接入的模型应当返回依据；没有依据的句子只能靠人工核对。</div>'
+    : '<div class="empty">这一格是人工录入的，本来就不登记依据 —— 人工输入只记"谁在什么时候改的"，不记来源。'
+      + '<br /><br />会在这里列出来源的只有：模板带入、外部文件导入、语音转写、预问诊、既往文书汇总，'
+      + '它们各自写着模板编号 / 文件摘要 / 录音时间 / 单据号。</div>';
+  body.innerHTML = `<div class="src-top">${head}</div>`
+    + (rows === '' ? emptyHtml : `<div class="src-list">${rows}</div>`);
+
+  if (typeof drawer.showModal === 'function') drawer.showModal();
+  else drawer.setAttribute('open', '');
+  document.documentElement.classList.add('drawer-open');
+  const close = $('sourceClose');
+  if (close) close.focus();
+}
+
+function closeSource() {
+  const drawer = $('sourceDrawer');
+  if (!drawer) return;
+  if (typeof drawer.close === 'function') drawer.close();
+  else drawer.removeAttribute('open');
+  document.documentElement.classList.remove('drawer-open');
+}
+
+document.addEventListener('click', (event) => {
+  const target = event.target && event.target.closest ? event.target : null;
+  if (!target) return;
+  const srcNode = target.closest('[data-src-node]');
+  if (srcNode) {
+    openSource(srcNode.dataset.srcNode);
+    return;
+  }
+  if (target.closest('#sourceClose')) {
+    closeSource();
+    return;
+  }
+  const goto = target.closest('[data-goto-node]');
+  if (goto) {
+    closeSource();
+    const item = (Array.isArray(S.items) ? S.items : []).find((node) => node.id === goto.dataset.gotoNode);
+    if (item) scrollToItem(item);
+    else toast('那一处已经不在正文里了', 'info');
+  }
+});
+
+const sourceDrawerEl = $('sourceDrawer');
+if (sourceDrawerEl) {
+  sourceDrawerEl.addEventListener('click', (event) => {
+    if (event.target === sourceDrawerEl) closeSource();
+  });
+  sourceDrawerEl.addEventListener('close', () => document.documentElement.classList.remove('drawer-open'));
+}
+
+function openMyContent(preferredCaret = null) {
+  const drawer = $('contentDrawer');
+  if (!drawer) return;
+  const preferred = preferredCaret && caretAlive(preferredCaret) ? { ...preferredCaret } : null;
+  const active = capturePaletteCaret();
+  contentTargetCaret = preferred || active || (caretAlive(lastCaret) ? { ...lastCaret } : null);
+  contentContinuous = false;
+  const continuous = $('contentContinuous');
+  if (continuous) continuous.checked = false;
+  contentKeyword = '';
+  contentPage = 1;
+  const search = $('contentSearch');
+  if (search) search.value = '';
+  renderMyContent();
+  void loadMyContent();
+  if (typeof drawer.showModal === 'function') drawer.showModal();
+  else drawer.setAttribute('open', '');
+  document.documentElement.classList.add('drawer-open');
+  const focusTarget = $('contentSearch') || $('contentClose');
+  if (focusTarget) focusTarget.focus();
+}
+
+function closeMyContent() {
+  const drawer = $('contentDrawer');
+  if (!drawer) return;
+  closeContentEditor();
+  if (typeof drawer.close === 'function') drawer.close();
+  else drawer.removeAttribute('open');
+  document.documentElement.classList.remove('drawer-open');
+  /* 关掉即退出连续；勾选框也归零，下次打开看到的和这次一致 */
+  contentContinuous = false;
+  const continuous = $('contentContinuous');
+  if (continuous) continuous.checked = false;
+}
+
+(() => {
+  const drawer = $('contentDrawer');
+  if (!drawer) return;
+  drawer.addEventListener('click', (event) => {
+    if (event.target === drawer) closeMyContent();
+  });
+  drawer.addEventListener('cancel', () => {
+    document.documentElement.classList.remove('drawer-open');
+  });
+  const close = $('contentClose');
+  if (close) close.addEventListener('click', () => closeMyContent());
+  /* 新建入口是标记里那个固定按钮（不随清单重画而重建，否则每次渲染都要重新挂事件） */
+  const newButton = $('btnNewMyPhrase');
+  if (newButton) newButton.addEventListener('click', () => openContentEditor());
+  const sectionButton = $('btnSaveSection');
+  if (sectionButton) sectionButton.addEventListener('click', () => { void saveSectionAsContent(contentTargetCaret); });
+  const continuous = $('contentContinuous');
+  if (continuous) {
+    continuous.addEventListener('change', () => {
+      contentContinuous = continuous.checked === true;
+      renderMyContent();
+    });
+  }
+  const search = $('contentSearch');
+  if (search) {
+    search.addEventListener('input', () => {
+      contentKeyword = String(search.value || '');
+      contentPage = 1;
+      renderMyContent();
+    });
+    search.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || String(search.value || '') === '') return;
+      event.preventDefault();
+      event.stopPropagation();
+      search.value = '';
+      contentKeyword = '';
+      contentPage = 1;
+      renderMyContent();
+    });
+  }
+  const tabs = $('contentTabs');
+  if (tabs) {
+    tabs.addEventListener('click', (event) => {
+      const tab = event.target instanceof Element ? event.target.closest('[data-content-tab]') : null;
+      if (tab) setContentTab(tab.dataset.contentTab);
+    });
+  }
+  const cancelEditor = $('btnContentCancel');
+  if (cancelEditor) cancelEditor.addEventListener('click', () => closeContentEditor());
+  const editorDialog = $('contentEditor');
+  if (editorDialog) {
+    editorDialog.addEventListener('click', (event) => {
+      if (event.target === editorDialog) closeContentEditor();
+    });
+    editorDialog.addEventListener('close', () => {
+      document.documentElement.classList.remove('dialog-open');
+      const opener = contentEditorOpener;
+      contentEditorOpener = null;
+      if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+    });
+  }
+  const editorForm = $('contentEditorForm');
+  if (editorForm) {
+    editorForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void submitContentEditor();
+    });
+  }
+  const editorName = $('contentName');
+  if (editorName) editorName.addEventListener('input', () => { updateContentHint(); scheduleContentSimilar(); });
+  const editorText = $('contentText');
+  if (editorText) editorText.addEventListener('input', () => { updateContentHint(); scheduleContentSimilar(); });
+  const entryButton = $('btnMyContent');
+  if (entryButton) entryButton.addEventListener('click', () => openMyContent());
+  const body = $('contentBody');
+  if (!body) return;
+  body.addEventListener('click', async (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const page = target.closest('[data-content-page]');
+    if (page) {
+      const next = Number(page.dataset.contentPage);
+      if (Number.isFinite(next) && next !== contentPage) {
+        contentPage = next;
+        renderMyContent();
+      }
+      return;
+    }
+    const insert = target.closest('[data-content-insert]');
+    if (insert) {
+      const item = MY_CONTENT.find((candidate) => candidate.id === insert.dataset.contentInsert);
+      if (!item) return;
+      if (!contentTargetCaret || !caretAlive(contentTargetCaret)) {
+        toast('先点进正文某一段，再打开个人模板 —— 没有落点就不猜位置', 'info');
+        return;
+      }
+      const caret = { ...contentTargetCaret };
+      const keepOpen = contentContinuous;
+      if (!keepOpen) closeMyContent();
+      const outcome = await insertMyContent(item, caret, { keepFocus: keepOpen });
+      if (keepOpen && outcome && outcome.ok && outcome.caret) {
+        contentTargetCaret = outcome.caret;
+        renderMyContent();
+      }
+      return;
+    }
+    const pin = target.closest('[data-content-pin]');
+    if (pin) {
+      const item = MY_CONTENT.find((candidate) => candidate.id === pin.dataset.contentPin);
+      if (!item) return;
+      const result = await api('/api/content-pin', { itemId: item.id, pinned: !item.pinned });
+      await apply(result);
+      if (result && result.ok === true) {
+        toast(item.pinned ? '已取消置顶' : '已置顶：以后它排在清单最前面', 'ok');
+        await loadMyContent();
+      }
+      return;
+    }
+    const remove = target.closest('[data-content-delete]');
+    if (remove) {
+      const item = MY_CONTENT.find((candidate) => candidate.id === remove.dataset.contentDelete);
+      if (!item) return;
+      const sure = await askConfirm(`删掉「${item.name}」？\n\n只从个人模板里删掉这一条，已经插进病历的字不受影响。`, {
+        okLabel: '删掉',
+        tone: 'danger',
+      });
+      if (!sure) return;
+      const result = await api('/api/content-delete', { itemId: item.id });
+      await apply(result);
+      if (result && result.ok === true) await loadMyContent();
+    }
+  });
+})();
+
 let paletteCaret = null;
 
-/** 正文里能"定位到"的那一个元素。几种节点各有自己的锚点属性。 */
 function anchorOfNode(item) {
   if (!item || !item.id) return null;
   const body = $('docBody');
@@ -3852,10 +4695,6 @@ function anchorOfNode(item) {
     ? window.CSS.escape(String(value))
     : String(value).replace(/["\\]/g, '\\$&'));
   const pick = (attr, value) => body.querySelector(`[${attr}="${quote(value)}"]`);
-  /* 顺序按"最贴近可写的那一格"排：文本节点的外层 div 也带 `data-node-id`，
-     先取外层就只能高亮、不能把光标放进去。`data-edit` / `data-field` 才是真正能打字的那个元素。
-     章节标题在卡片模式下没有锚点（`doc-view.js` 画的是裸 `.sec`），
-     所以章节一律由调用方换成它下面的第一段 —— 在这里猜一个选择器，只会猜出"点了没反应"。 */
   return pick('data-edit', item.id)
     || pick('data-field', item.id)
     || pick('data-node-id', item.id)
@@ -3871,48 +4710,25 @@ function scrollToItem(item) {
     return;
   }
   if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  /* 高亮画在"整块"上：一个流式段落里可能有好几个节点，只亮那一个 input 说不清是哪一段 */
   const box = (el.closest && (el.closest('.node, .fp, .fcard, .fsec') || el)) || el;
   box.classList.add('node-hit');
   setTimeout(() => box.classList.remove('node-hit'), 1600);
-  /* 跳过去多半是为了接着写，所以顺手把光标放进去 */
   if (el.matches && el.matches('textarea[data-edit]')) {
     el.focus();
     const end = el.value.length;
-    try { el.setSelectionRange(end, end); } catch { /* 只读态不支持，忽略 */ }
+    try { el.setSelectionRange(end, end); } catch { }
   } else if (el.matches && el.matches('input[data-field]')) {
     el.focus();
     if (typeof el.select === 'function') el.select();
   }
 }
 
-/** 打开面板**之前**记下落点：面板一 showModal()，activeElement 就变成它自己的输入框了 */
 function capturePaletteCaret() {
-  const el = document.activeElement;
-  if (el && el.tagName === 'TEXTAREA' && el.dataset && el.dataset.edit) {
-    return {
-      nodeId: el.dataset.edit,
-      start: typeof el.selectionStart === 'number' ? el.selectionStart : null,
-      end: typeof el.selectionEnd === 'number' ? el.selectionEnd : null,
-    };
-  }
-  /* 流式模式：光标在 contenteditable 里，真正的节点是它所在的那个段落块 */
-  if (isFlow()) {
-    const selection = window.getSelection();
-    const anchor = selection && selection.anchorNode ? selection.anchorNode : null;
-    const host = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
-    const block = host && typeof host.closest === 'function' ? host.closest('.fp[data-node-id]') : null;
-    if (block && block.dataset.nodeId) return { nodeId: block.dataset.nodeId, start: null, end: null };
-  }
-  return null;
+  rememberCaret();
+  if (!caretAlive(lastCaret)) return null;
+  return { ...lastCaret };
 }
 
-/**
- * 把一句话写进"打开面板时的那一段"。
- *
- * 为什么不是"插成新段落"：医生打开面板要插入检验值，位置就在他刚写的那句话里；
- * 新建一段会把这个值挪到段尾，而段尾往往已经是"诊疗计划"了。
- */
 async function insertIntoCurrentParagraph(text) {
   const caret = paletteCaret;
   if (!caret) {
@@ -3940,16 +4756,72 @@ async function insertIntoCurrentParagraph(text) {
   if (target) {
     target.focus();
     const position = start + payload.length;
-    try { target.setSelectionRange(position, position); } catch { /* 只读态不支持，忽略 */ }
+    try { target.setSelectionRange(position, position); } catch { }
   }
 }
 
-/**
- * 候选清单：全部从**当前状态**现算，不缓存。
- *
- * 空查询时排在最前的是"命令 + 面板"（它们永远用得上）；一旦输入关键词，
- * 跳段落 / 检验值 / 模板 / 术语都会进入同一份结果里 —— 面板的价值正在于"不用先想这是哪一类"。
- */
+function paletteParagraphTarget() {
+  const caret = paletteCaret;
+  if (!caret || !caret.nodeId) return null;
+  const items = Array.isArray(S.items) ? S.items : [];
+  const item = items.find((node) => node.id === caret.nodeId);
+  if (!item) return null;
+  return { item, nodeId: item.id, paragraphId: item.paragraphId || null };
+}
+
+function pushMyContentCommands(commands) {
+  for (const item of MY_CONTENT) {
+    const isPhrase = item.kind === 'phrase';
+    const scopeLabel = MY_CONTENT_SCOPE[item.scope] || item.scope;
+    const placeholderHint = Array.isArray(item.placeholders) && item.placeholders.length > 0 ? ' · 按病人上下文填' : '';
+    commands.push({
+      group: isPhrase ? '个人模板 · 常用语' : '个人模板 · 内容段落',
+      label: `${isPhrase ? '插入常用语' : '带入内容段落'}：${item.name}`,
+      detail: `${item.pinned ? '置顶 · ' : ''}${scopeLabel}${item.group ? ` · ${item.group}` : ''}${item.trigger ? ` · ;${item.trigger} 空格展开` : ''}${placeholderHint}${item.preview ? ` · ${item.preview}` : ''}`,
+      keywords: `content 内容 常用语 内容段落 模板 ${item.name} ${item.trigger ? `;${item.trigger}` : ''} ${item.group || ''} ${item.anchorHint || ''} ${(Array.isArray(item.paragraphs) ? item.paragraphs.join(' ') : '').slice(0, 400)}`,
+      run: async () => { await insertMyContent(item, paletteCaret); },
+    });
+  }
+  if (MY_CONTENT.length === 0) {
+    commands.push({
+      group: '个人模板',
+      label: '个人模板还是空的：把当前段存进来…',
+      detail: '存一次，以后一键插回',
+      keywords: 'content 内容 常用语 存为 模板',
+      run: async () => { await saveParagraphAsContent('content-paragraph', paletteCaret); },
+    });
+  }
+  commands.push({
+    group: '个人模板',
+    label: '管理个人模板…',
+    detail: MY_CONTENT.length > 0 ? `已有 ${MY_CONTENT.length} 条` : '还没有内容',
+    keywords: 'content 内容 管理 删除 常用语 内容段落',
+    run: () => openMyContent(),
+  });
+  commands.push({
+    group: '个人模板',
+    label: '把当前段存为常用语…',
+    detail: '存进个人模板，写病历时一键插回这一句',
+    keywords: 'content 保存 常用语 存为',
+    run: async () => { await saveParagraphAsContent('phrase', paletteCaret); },
+  });
+  commands.push({
+    group: '个人模板',
+    label: '把当前段存为内容段落…',
+    detail: '存进个人模板，下次整段带入',
+    keywords: 'content 保存 内容段落 存为 模板',
+    run: async () => { await saveParagraphAsContent('content-paragraph', paletteCaret); },
+  });
+  const sectionTitle = paletteCaret ? sectionTitleOf(paletteCaret.nodeId) : '';
+  commands.push({
+    group: '个人模板',
+    label: '把当前章存为内容段落…',
+    detail: sectionTitle !== '' ? `整章「${sectionTitle}」一次存好` : '整章一次存好（光标要落在正文里）',
+    keywords: 'content 保存 整章 章节 另存 内容段落 模板',
+    run: async () => { await saveSectionAsContent(paletteCaret); },
+  });
+}
+
 function paletteCommands() {
   const commands = [];
   const items = Array.isArray(S && S.items) ? S.items : [];
@@ -3958,7 +4830,6 @@ function paletteCommands() {
   const modeLabel = { card: '卡片', flow: '流式' };
   const nextMode = isFlow() ? 'card' : 'flow';
 
-  /* ① 命令：都是"别处有按钮，但找它要动鼠标"的那几件事 */
   commands.push({
     group: '命令',
     label: '保存未落盘的编辑',
@@ -3991,8 +4862,153 @@ function paletteCommands() {
     keywords: 'help 帮助 快捷键',
     run: () => toggleKeysHelp(),
   });
+  commands.push({
+    group: '命令',
+    label: `切换到${theme === 'dark' ? '浅色' : '深色'}主题`,
+    detail: '视图偏好：不改数据、不进留痕',
+    keywords: 'theme 主题 深色 浅色 夜间',
+    run: () => { const button = $('btnTheme'); if (button) button.click(); },
+  });
+  /* 字号的两个方向各一条：命令面板是键盘用户的路，只给"放大"等于让缩小只能靠鼠标 */
+  commands.push({
+    group: '命令',
+    label: '放大正文字号',
+    detail: `当前 ${docFont}px（只作用于病历正文；视图偏好，不进留痕）`,
+    keywords: 'font 字号 字体 放大 正文',
+    run: () => stepDocFont(1),
+  });
+  commands.push({
+    group: '命令',
+    label: '缩小正文字号',
+    detail: `当前 ${docFont}px（最小 14px：比它小的正文不该存在）`,
+    keywords: 'font 字号 字体 缩小 正文',
+    run: () => stepDocFont(-1),
+  });
+  commands.push({
+    group: '命令',
+    label: '打开「定稿与导出」',
+    detail: '提交审核 / 签章 / 导出 OFD 都在那一栏',
+    keywords: 'export 导出 定稿 签章 提交 审核',
+    run: () => { setMoreMenu(false); switchTab('export'); },
+  });
+  commands.push({
+    group: '命令',
+    label: '打开历史版本',
+    detail: '最近 15 次写入，可回到任意一版',
+    keywords: 'history 历史 版本 回滚 撤销',
+    run: () => { const button = $('btnUndo'); if (button && !button.disabled) button.click(); },
+  });
+  commands.push({
+    group: '命令',
+    label: paperMode ? '退出纸张视图' : '纸张视图（A4 预览）',
+    detail: '纸面尺寸与页边距取自导出端的排版参数',
+    keywords: 'paper 纸张 A4 预览 分页 版式',
+    run: () => togglePaper(),
+  });
+  commands.push({
+    group: '命令',
+    label: '打印',
+    detail: '只打印正文；纸张与页边距与导出件同源',
+    keywords: 'print 打印 输出 纸质 纸',
+    run: () => printDoc(),
+  });
 
-  /* ② 面板：与「更多」菜单里那几项同源，标签直接读页签上的字，不另写一份（两份必然漂） */
+  const paraTarget = paletteParagraphTarget();
+  const readOnlyDoc = !!(S.doc && (S.doc.status === 'signed' || S.doc.status === 'archived'));
+  if (paraTarget && !readOnlyDoc) {
+    const preview = String(paraTarget.item.text || paraTarget.item.label || '').replace(/\s+/g, '').slice(0, 12);
+    const where = preview === '' ? '（空段）' : `「${preview}」`;
+    commands.push({
+      group: '当前段',
+      label: '在本段之后插入新段落',
+      detail: `${where} 之后新起一段，光标跟过去`,
+      keywords: 'insert paragraph 插入 新段 段落 加一段',
+      run: async () => {
+        clearTimeout(blurTimer);
+        await flushEdits();
+        const result = await api('/api/insert-paragraph', { nodeId: paraTarget.nodeId });
+        await apply(result);
+        if (result.ok && result.data && result.data.textNodeId) focusEdit(result.data.textNodeId);
+      },
+    });
+    commands.push({
+      group: '当前段',
+      label: '本段上移',
+      detail: `${where} 与上一段交换位置`,
+      keywords: 'move up 上移 段落 排序',
+      run: async () => {
+        clearTimeout(blurTimer);
+        await flushEdits();
+        await apply(await api('/api/move-node', { nodeId: paraTarget.nodeId, direction: 'up' }));
+      },
+    });
+    commands.push({
+      group: '当前段',
+      label: '本段下移',
+      detail: `${where} 与下一段交换位置`,
+      keywords: 'move down 下移 段落 排序',
+      run: async () => {
+        clearTimeout(blurTimer);
+        await flushEdits();
+        await apply(await api('/api/move-node', { nodeId: paraTarget.nodeId, direction: 'down' }));
+      },
+    });
+    if (paraTarget.item.humanConfirmed !== true) {
+      commands.push({
+        group: '当前段',
+        label: '确认本段内容',
+        detail: `${where} 与段尾「确认内容」同一条写路径`,
+        keywords: 'confirm 确认 内容 待确认',
+        run: async () => {
+          clearTimeout(blurTimer);
+          await flushEdits();
+          await apply(await api('/api/confirm', { nodeId: paraTarget.nodeId }));
+        },
+      });
+    }
+    if (paraTarget.paragraphId) {
+      commands.push({
+        group: '当前段',
+        label: '在本段后面贴一张图',
+        detail: 'PNG / JPEG / WebP，上限 8 MB',
+        keywords: 'image 图片 贴图 图',
+        run: async () => {
+          const picked = await uploadPickedImage();
+          if (!picked) return;
+          const inserted = await api('/api/insert-image', {
+            paragraphId: paraTarget.paragraphId,
+            resRef: picked.resource.resRef,
+            altText: picked.name,
+          });
+          await apply(inserted);
+          if (inserted.ok) {
+            docNotice = `已贴图：${picked.resource.width}×${picked.resource.height}，${Math.round((picked.resource.bytes || 0) / 1024)} KB。导出归档件时图会打进 Res/MultiMedia。`;
+            renderDoc();
+          }
+        },
+      });
+    }
+    if (paraTarget.item.kind === 'text' && !paraTarget.item.keyContent) {
+      commands.push({
+        group: '当前段',
+        label: '删除本段（含其中的字段）',
+        detail: '写入留痕，但内容不可恢复（没有撤销）',
+        keywords: 'delete 删除 删段',
+        run: async () => {
+          if (!(await askConfirm(
+            '删除本段（含其中的字段）？\n\n此操作会写入留痕，但内容不可恢复（当前没有撤销）。',
+            { okLabel: '删除本段', tone: 'danger' },
+          ))) return;
+          clearTimeout(blurTimer);
+          await flushEdits();
+          await apply(await api('/api/delete-node', { nodeId: paraTarget.nodeId }));
+        },
+      });
+    }
+  }
+
+  pushMyContentCommands(commands);
+
   TABS.forEach((key, index) => {
     const tab = document.querySelector(`#tabbar [data-tab="${key}"]`);
     if (!tab) return;
@@ -4007,7 +5023,7 @@ function paletteCommands() {
     });
   });
 
-  /* ③ 套模板：只列本次就诊开得出的，理由与「新建」弹框一致（列一份开不出的等于让人点进去再被拒一次） */
+  /* ④ 套模板：只列本次就诊开得出的，理由与「新建」弹框一致（列一份开不出的等于让人点进去再被拒一次） */
   const visitType = (S && S.encounter && S.encounter.visitType) || '';
   for (const tpl of templates) {
     if (!templateFitsVisit(tpl, visitType)) continue;
@@ -4021,7 +5037,6 @@ function paletteCommands() {
     });
   }
 
-  /* ④ 切换文书：当前这一份不必出现（"切到自己"是一次空动作） */
   for (const patient of tree) {
     for (const visit of (Array.isArray(patient.visits) ? patient.visits : [])) {
       for (const doc of (Array.isArray(visit.docs) ? visit.docs : [])) {
@@ -4037,7 +5052,6 @@ function paletteCommands() {
     }
   }
 
-  /* ⑤ 正文：章节 / 段落 / 填写项 / 控件，以及由它们派生出的"术语"与"插入检验值" */
   const terms = new Map();
   let section = '';
   items.forEach((item, index) => {
@@ -4075,7 +5089,6 @@ function paletteCommands() {
         keywords: `${name} ${value} ${unit} 数据元`,
         run: () => scrollToItem(item),
       });
-      /* 只搬"正文里已经有的值"：面板不是取数入口，取数要走 A2 的接口与证据链 */
       if (value !== '') {
         commands.push({
           group: '插入检验值',
@@ -4099,7 +5112,6 @@ function paletteCommands() {
         run: () => scrollToItem(item),
       });
     }
-    /* 术语：同一编码只出一条，跳向它第一次出现的地方 */
     const tags = Array.isArray(item.tags) ? item.tags : [];
     for (const tag of tags) {
       if (!tag || !tag.code) continue;
@@ -4128,31 +5140,21 @@ function openPalette() {
   paletteCaret = capturePaletteCaret();
   window.L0Palette.open({
     commands: paletteCommands(),
-    placeholder: '跳转段落 / 插入检验值 / 套模板 / 查术语',
+    placeholder: '跳转段落 / 插入检验值 / 套模板 / 个人模板 / 查术语',
   });
 }
 
-/* 顶栏入口：不按键的人也要有一条路（发现性不是可选项） */
 document.addEventListener('click', (event) => {
   if (!event.target.closest || !event.target.closest('#btnPalette')) return;
   openPalette();
 });
 
-/* 跨次对比的对象下拉：换一份历史文书就重算一次对照（不写任何东西，纯读） */
 document.addEventListener('change', async (event) => {
   const el = event.target;
   if (!el || el.id !== 'comparePick') return;
   await apply(await api('/api/visit-compare', { previousDocId: el.value }));
 });
 
-/* ---------------------------- 键盘体系 ---------------------------- */
-
-/* 用途：处理几十条建议时，鼠标要点很多次（定位 → 找按钮 → 点）。
-   真实诊室是重度键盘的，没有键盘体系，"批量建议"这个能力就有一半用不出来。
-   三条安全约束，任何一条做漏都会变成事故：
-     ① 输入态一律禁用单键：在文本框里打字时按 a 会采纳建议，那是事故，不是便利；
-     ② 不可逆操作二次确认：拒绝不可逆，单键直拒太危险；
-     ③ 必须有可见选中态：否则 j/k 移动后不知道焦点在哪，等于没有这个功能。 */
 let focusIndex = -1;
 let pendingRejectId = null;
 let pendingRejectTimer = null;
@@ -4177,7 +5179,6 @@ function toggleKeysHelp() {
   help.hidden = !help.hidden;
 }
 
-/** 可键盘操作的建议（只有待处理的能动）；与 `#suggestions .sugg:not(.done)` 同序 */
 function actionableSuggestions() {
   return (S && Array.isArray(S.suggestions) ? S.suggestions : []).filter((item) => item.status === 'pending');
 }
@@ -4231,13 +5232,28 @@ async function rejectFocused() {
 }
 
 document.addEventListener('keydown', (event) => {
-  /* ⓪ Ctrl/⌘+K：命令面板。**必须排在"输入态不拦单键"之前** ——
-     正在正文里写字时按它才是常态，排到后面等于最需要它的那一刻恰好不响应。
-     它也不与单键空间冲突：j/k/a/r 是裸键，这里是组合键。 */
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (event.key === 'k' || event.key === 'K')) {
     event.preventDefault();
     openPalette();
     return;
+  }
+  if (isFlow() && (event.ctrlKey || event.metaKey) && !event.altKey) {
+    const markKey = event.key;
+    if (event.shiftKey && (markKey === 'H' || markKey === 'h')) {
+      event.preventDefault();
+      applyFlowMark('highlight');
+      return;
+    }
+    if (event.shiftKey && (markKey === '+' || markKey === '=')) {
+      event.preventDefault();
+      applyFlowMark('sup');
+      return;
+    }
+    if (!event.shiftKey && markKey === '=') {
+      event.preventDefault();
+      applyFlowMark('sub');
+      return;
+    }
   }
   /* ① 安全底线：输入态一律不拦单键。
      Esc 是唯一例外，且它只做"失焦"，不触发任何写操作。 */
@@ -4245,10 +5261,8 @@ document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && document.activeElement && document.activeElement.blur) document.activeElement.blur();
     return;
   }
-  /* 不抢浏览器 / 系统快捷键 */
   if (event.ctrlKey || event.metaKey) return;
   if (event.altKey) {
-    /* Alt+1..4：四个常驻页签。用组合键而不是单键，避免与将来编辑器自身的按键冲突 */
     if (/^[1-4]$/.test(event.key)) {
       const key = TABS[Number(event.key) - 1];
       if (key) {
@@ -4274,27 +5288,19 @@ document.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('click', async (event) => {
-  /* 「更多」菜单必须先于页签分支处理：图标按钮也带 .tab（复用样式），
-     若放在后面会被 switchTab(undefined) 截住，菜单永远打不开 */
   if (event.target.closest('#btnMoreTabs')) {
     setMoreMenu($('moreMenu').hidden);
     return;
   }
   const tab = event.target.closest('.tab');
   if (tab) {
-    /* 菜单项：选完就收起（不留一个挂着的浮层） */
     if (event.target.closest('#moreMenu')) setMoreMenu(false);
-    /* 再点一次当前页签 = 收起 / 放回这一整块：面板收走之后，页签是唯一还看得见的入口，
-       恢复入口只能是它自己（同一动作再点一下） */
     if (tab.dataset.tab === activeTab) toggleActivePanelCollapse();
     else switchTab(tab.dataset.tab);
     return;
   }
-  /* 点到别处就关掉菜单 */
   if (!$('moreMenu').hidden) setMoreMenu(false);
 
-  /* 面板标题上的折叠按钮只改视图，不是业务动作：必须挡在下面那条"通用按钮"分支之前，
-     否则它会被按成 busy（禁用 + 转圈）、还会先 flush 一次编辑 */
   const phToggle = event.target.closest('[data-ph-toggle]');
   if (phToggle) {
     togglePanelCollapsed(phToggle);
@@ -4310,9 +5316,6 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  /* 清空采集记录：只清**本份病历**的元数据（服务端会再核一次 docId）。
-     要问一次 —— 删掉的是"这次到底录成了没有"的线索，而它不能撤销。
-     音频本来就不留存，所以这里不需要再提醒"录音也会没"。 */
   const captureClear = event.target.closest('[data-capture-clear]');
   if (captureClear) {
     const ok = await askConfirm(
@@ -4332,8 +5335,6 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
-  /* 删除草稿必须挡在 `[data-doc]` 之前：按钮长在病历行内，先走这里才不会顺带切文档。
-     不在这颗按钮上写 `stopPropagation` —— 那会连这条委托一起挡掉（按钮就点了没反应）。 */
   const docDel = event.target.closest('[data-doc-delete]');
   if (docDel) {
     const docId = docDel.dataset.docDelete;
@@ -4361,28 +5362,20 @@ document.addEventListener('click', async (event) => {
 
   const el = event.target.closest('button');
   if (!el) return;
-  /* 动作前先落盘未保存的编辑，并取消失焦防抖，避免"保存重绘把按钮点掉"的竞态 */
   clearTimeout(blurTimer);
   await flushEdits();
-  /* 「新建」先弹一份可选文书清单：这一步是**选**，不是写，所以不进 busy 态 ——
-     清单还开着的时候顶栏挂着"请求中"的进度条，那是谎报。选择走完才发建文书的请求 */
   if (el.id === 'btnTplCreate') {
     const templateId = await pickTemplate();
     if (!templateId) return;
     await apply(await api('/api/template-create', { templateId }));
     return;
   }
-  /* 动作期间按钮进入 busy（disabled + aria-busy）：挡住连续点击，读屏也能感知 */
   el.disabled = true;
   el.setAttribute('aria-busy', 'true');
   try {
-    /* 任何其它动作都把"上次产出被判为重复"的提示清掉：那句话只对刚刚那一下有意义
-       （否则它会一直挂在那里，而这个节点上的待处理建议可能早就被采纳了） */
     if (el.id !== 'btnSuggest' && el.id !== 'btnSuggestBatch') suggestionNotice = '';
     if (el.id !== 'btnUndo') docNotice = '';
     if (el.id === 'btnReloadSidecars') {
-      /* 有后果：放弃本终端尚未落盘的旁挂改动。先说清"影响什么、不影响什么"再问一次，
-         与「忽略质控提示」「删除本段」同一处置口径。 */
       const ok = await askConfirm(
         '重新载入旁挂数据：接受磁盘上那一版建议与注解，放弃本终端尚未落盘的改动。\n\n正文、留痕与签名不受影响。',
         { okLabel: '重新载入', tone: 'danger' },
@@ -4415,15 +5408,14 @@ document.addEventListener('click', async (event) => {
     if (el.id === 'btnKeys') { toggleKeysHelp(); return; }
     if (el.id === 'btnTheme') {
       theme = theme === 'dark' ? 'light' : 'dark';
-      try { localStorage.setItem(THEME_KEY, theme); } catch { /* 隐私模式忽略 */ }
+      try { localStorage.setItem(THEME_KEY, theme); } catch { }
       applyTheme();
       return;
     }
+    if (el.id === 'btnPaper') { togglePaper(); return; }
     if (el.id === 'btnExportWst500') { await apply(await api('/api/export-wst500', {})); return; }
     if (el.id === 'btnExportJson') { await apply(await api('/api/export-json', {})); return; }
     if (el.id === 'btnAudit') { await apply(await api('/api/audit-report', {})); return; }
-    /* 这里没有"签发授权"按钮：本系统不签发阅读授权（授权由院内授权平台签发，
-       经「配置管理 → 受控阅读 → 导入授权凭据」进入）。少一个按钮，就少一条"顺手把病历放出去"的路径。 */
     if (el.id === 'btnImportKey') {
       await apply(await api('/api/recipient-keys/import', {
         label: $('rkLabel').value || '接收方',
@@ -4433,12 +5425,10 @@ document.addEventListener('click', async (event) => {
     }
     if (el.dataset.rkRemove) { await apply(await api('/api/recipient-keys/remove', { keyId: el.dataset.rkRemove })); return; }
     if (el.dataset.rkExport) {
-      /* 导出只做展示（回填到输入框，便于复制给对方）；服务端始终只存 base64 */
       const key = (S.recipientKeys?.keys || []).find((item) => item.keyId === el.dataset.rkExport);
       if (key) $('rkText').value = pemFromBase64(key.spkiBase64);
       return;
     }
-    /* 授权行上的操作按钮是动态渲染的，用 data-* 委托而不是逐个绑监听 */
     if (el.dataset.grantOpen) {
       await apply(await api('/api/reading/open', {
         grantId: el.dataset.grantOpen,
@@ -4449,19 +5439,7 @@ document.addEventListener('click', async (event) => {
     }
     if (el.dataset.grantRevoke) { await apply(await api('/api/reading/revoke', { grantId: el.dataset.grantRevoke })); return; }
     if (el.id === 'btnSuggest') {
-      const r = await api('/api/suggest', {
-        nodeId: $('suggTarget').value,
-        confidence: Number($('confidence').value),
-        mode: $('suggMode').value,
-      });
-      /* 幂等命中（服务端复用了同内容的待处理建议）必须说出来：
-         界面上没有多出一条，不说清就会被当成"点了没反应"（以为系统坏了）。 */
-      const reusedId = r.ok && r.data && r.data.reused === true ? String(r.data.suggestionId || '') : '';
-      suggestionNotice = reusedId === ''
-        ? ''
-        : `已有同样内容的待处理建议（${reusedId}），未重复生成。建议数与采纳/拒绝率不受影响。`;
-      if (reusedId !== '') showProcessedSuggestions = false;
-      await apply(r);
+      await runSuggestFor($('suggTarget').value, $('suggMode').value);
       return;
     }
     if (el.id === 'btnSuggestBatch') {
@@ -4481,16 +5459,12 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.id === 'btnToggleProcessed') {
-      /* 纯显示层切换：不动数据、不发请求（已处理的仍在 state 里，计数行始终摆着三类条数） */
       showProcessedSuggestions = !showProcessedSuggestions;
       renderSuggestions();
       return;
     }
-    /* 能力配置整体搬到管理后台（`/admin`）：医生端不摆配置控件，只给一个入口链接。
-       链接不是权限，权限在管理后台的登录里（服务端 `requireAdminSession`）。 */
     if (el.id === 'btnAdmin') { window.open('/admin', '_blank', 'noopener'); return; }
     if (el.id === 'cfgTest') {
-      /* 测试连接只发一段与病历无关的测试文本：为了验证"配得对不对"而先把病历送出去，是本末倒置 */
       setCfgStatus('测试中…（只发一段与病历无关的测试文本）');
       const r = await api('/api/model-config/test');
       setCfgStatus(r.ok
@@ -4499,9 +5473,6 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.id === 'btnQcContent') {
-      /* 内涵类质控告的是外部引擎（形式类那颗是纯本地）：
-         它会把文书内容送去判定，所以必须是单独一颗按钮，不能与形式类混在一起，
-         否则医生点下去时并不知道"这一下会把内容发出去"。 */
       const r = await api('/api/qc-content-check', {});
       await apply(r);
       const hint = $('qcContentHint');
@@ -4514,7 +5485,6 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.id === 'btnQcContract') {
-      /* 契约是规格，给实现方看：把要点摊在界面上，完整 JSON 在 `/api/qc-content-contract` */
       const r = await api('/api/qc-content-contract');
       const data = (r && r.data) || {};
       const local = data.local || {};
@@ -4527,8 +5497,6 @@ document.addEventListener('click', async (event) => {
     }
     if (el.id === 'btnQcForm') {
       const r = await api('/api/qc-form-check', {});
-      /* 扫描结果报出来：扫了几个节点、命中几条、新增几条、已在册几条。
-         不报数目的话，"跑了但一条没出"与"没跑"在界面上长得一模一样。 */
       if (r.ok && r.data) {
         const d = r.data;
         setCfgStatus(`形式质控：扫描 ${d.scannedNodes} 个节点 / ${d.rules} 条规则，命中 ${d.hits} 条（新增 ${d.created}，已在册 ${d.already}）`);
@@ -4540,10 +5508,6 @@ document.addEventListener('click', async (event) => {
     if (el.id === 'btnDictate') { await apply(await api('/api/dictate', {})); return; }
   if (el.id === 'btnCaptureStart') { await startCapture(); return; }
   if (el.id === 'btnCaptureStop') { await stopCapture(); return; }
-  /* 重新检测本机客户端：只读探测（不打开设备、不发音频）。它不走全局 busy 条
-     （"客户端不在"时探测立刻失败，来回一闪反而像闪屏），但**按钮自己必须给出反应**：
-     点下去立刻转圈并置灰，落定后重画回常态 —— 结果就是那张状态卡的新结论。
-     最短 600ms：探测再快，也要让人看见"这一下被接住了"。 */
   if (el.dataset.clientReprobe) {
     if (reprobeBusy) return;
     reprobeBusy = true;
@@ -4576,20 +5540,15 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.id === 'btnCheckConsistency') { await apply(await api('/api/check-consistency', {})); return; }
-    /* 就诊时间轴：读一次（服务端把本就诊的全部文书摊开，判定复用已启用的时限规则） */
     if (el.id === 'btnVisitTimeline') { await apply(await api('/api/visit-timeline', {})); return; }
-    /* 时间轴上"切到这份"：只换文书，不动正文、不代签。写与签仍然是人的动作 */
     if (el.dataset.openDoc) { await switchDoc(el.dataset.openDoc); return; }
     if (el.id === 'btnCompare') { await apply(await api('/api/visit-compare', {})); return; }
-    /* 预问诊：读一次只读（并留痕）；"生成建议"仍不落笔 —— 患者自述进病历必须有医生签字那一步 */
     if (el.id === 'btnPrevisitRead') { await apply(await api('/api/previsit/read', {})); return; }
     if (el.id === 'btnPrevisitTake') {
       const keys = [...document.querySelectorAll('[data-previsit-key]:checked')].map((input) => input.dataset.previsitKey);
       if (keys.length === 0) { toast('先勾选要生成建议的条目', 'info'); return; }
       const result = await api('/api/previsit/take', { keys });
       await apply(result);
-      /* 缺章节的条目必须**当面说**：否则人会以为"全生成了"，
-         而那几条恰好是患者说得最要紧、文书里却没有位置的内容。 */
       if (result && Array.isArray(result.blocked) && result.blocked.length > 0) {
         toast(`${result.blocked.length} 条因本次文书缺对应章节未生成：${result.blocked.map((item) => item.label).join('、')}`, 'info');
       }
@@ -4604,8 +5563,6 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.dataset.carry) {
-      /* 沿用上次医嘱：只生成建议。落笔与否由人在这份文书上决定 ——
-         一步把上次的方案写进这次，等于让"上一次"替这次签字。 */
       const source = S.visitCompare && S.visitCompare.compare && S.visitCompare.compare.medication;
       const paragraphs = source && Array.isArray(source.paragraphs) ? source.paragraphs : [];
       if (paragraphs.length === 0) { toast('没有可沿用的原文', 'info'); return; }
@@ -4630,7 +5587,6 @@ document.addEventListener('click', async (event) => {
     }
     const annoResolve = el.dataset.annoResolve;
     if (annoResolve) {
-      /* 忽略是有后果的操作（同规则在同一内容上不会再提示），所以必须先说清再确认 */
       if (el.dataset.annoStatus === 'dismissed'
         && !(await askConfirm(
           '标记为误报：同一条规则在「内容未变」时不会再提示。\n\n若误报反复提示，容易形成习惯性忽略，整套质控会失效。',
@@ -4644,8 +5600,6 @@ document.addEventListener('click', async (event) => {
     const acceptGroup = el.dataset.acceptGroup;
     if (acceptGroup) {
       const r = await api('/api/accept-group', { groupId: acceptGroup });
-      /* 部分成功必须说清楚：被拦的条目仍然待处理，医生需要知道是哪几条、
-         以及原因是"置信度不足"而不是"系统出错"。静默处理会让医生以为全都落笔了。 */
       const blocked = (r.data && r.data.blocked) || [];
       if (blocked.length > 0) {
         await askAlert(`本组有 ${blocked.length} 条未落笔（置信度不足，仍待处理）：\n\n` + blocked.map((b) => `${b.suggestionId}：${b.message}`).join('\n'));
@@ -4657,9 +5611,6 @@ document.addEventListener('click', async (event) => {
     if (rejectGroup) { await apply(await api('/api/reject-group', { groupId: rejectGroup })); return; }
     if (el.id === 'btnRefreshMachine') { await apply(await api('/api/refresh-machine', {})); return; }
     if (el.id === 'btnSign') {
-      /* 分级签章：先按默认（不声明）试。
-         若被拒的原因是"未确认的 AI / 导入内容"，再明确询问是否声明已通读；
-         关键内容未确认则不给这个选项（内核也不会放行），界面上不能代用户勾这个声明。 */
       let r = await api('/api/sign', {});
       if (!r.ok && (r.code === 'E_SIGNED_WITH_UNCONFIRMED_AI' || r.code === 'E_IMPORTED_UNCONFIRMED')) {
         const agreed = await askConfirm(
@@ -4669,9 +5620,6 @@ document.addEventListener('click', async (event) => {
         if (agreed) r = await api('/api/sign', { acknowledgeUnconfirmed: true });
       }
       await apply(r);
-      /* 签章单独广播一次：它决定这份病历在院内的效力状态（草稿 / 已签章 / 已归档），
-         工作站顶上的状态章必须跟着变。通用的 state 事件也带 status，但宿主需要一个
-         明确的"签成了"来触发它自己的后续动作（归档、推送、解锁下一步）。 */
       if (r && r.ok) hostEmit('signed', hostSnapshot());
       return;
     }
@@ -4681,11 +5629,7 @@ document.addEventListener('click', async (event) => {
     if (accept) {
       const area = document.querySelector(`[data-sugg-text="${accept}"]`);
       const origin = (Array.isArray(S.suggestions) ? S.suggestions : []).find((item) => item.id === accept);
-      /* 逐句取舍 / 手改之后，落笔的必须是**医生看到的那个文本**；
-         只有与 AI 原稿一字不差时才走"原样采纳"（否则修改率会被记成 0，而人明明改过） */
       const edited = area && origin && area.value !== origin.text ? area.value : undefined;
-      /* 逐句归属只对"按勾选组合出来"的文本可信；手改之后归属不可知，
-         退回整段口径（由内核按 AI 整段标）—— 多标与少标都不该由前端猜。 */
       const review = sentenceReviews.get(accept);
       await apply(await api('/api/accept', {
         suggestionId: accept,
@@ -4698,8 +5642,6 @@ document.addEventListener('click', async (event) => {
     if (reject) { await apply(await api('/api/reject', { suggestionId: reject, reason: '演示拒绝' })); return; }
     const confirm = el.dataset.confirm;
     if (confirm) { await apply(await api('/api/confirm', { nodeId: confirm })); return; }
-    /* 回到某一版：整份内容会被替换，所以要问一次；但不说"不可恢复"——
-       它自己留痕，也能再退回来（这一点与"删除本段"正好相反）。 */
     const revertRev = el.dataset.revertRev;
     if (revertRev) {
       const ok = await askConfirm(`把整份病历的内容回到第 ${revertRev} 版？当前内容会被替换成那一版的样子。`, {
@@ -4708,8 +5650,6 @@ document.addEventListener('click', async (event) => {
       if (!ok) return;
       const result = await api('/api/revert-to', { rev: Number(revertRev) });
       if (!result.ok) {
-        /* 拒绝理由（例如"这段有别人写的内容"）要留在抽屉里：
-           抽屉盖着正文，提示丢在外面等于没说 */
         showHistoryError(result.message || result.code || '未能回到这一版');
         return;
       }
@@ -4717,13 +5657,10 @@ document.addEventListener('click', async (event) => {
       await apply(result);
       return;
     }
-    /* 段落级操作（增 / 移 / 删）：操作单位是段落（服务端从内容节点回溯到段落），
-       所以传的是文本节点 id，否则"移一段"会把它的字段落在原地。 */
     const paraInsert = el.dataset.paraInsert;
     if (paraInsert) {
       const r = await api('/api/insert-paragraph', { nodeId: paraInsert });
       await apply(r);
-      /* 插入后把光标放进新段落：不聚焦的话，用户还得自己在几十段里找刚建好的那一段 */
       if (r.ok && r.data && r.data.textNodeId) focusEdit(r.data.textNodeId);
       return;
     }
@@ -4733,8 +5670,6 @@ document.addEventListener('click', async (event) => {
     if (paraDown) { await apply(await api('/api/move-node', { nodeId: paraDown, direction: 'down' })); return; }
     const paraDelete = el.dataset.paraDelete;
     if (paraDelete) {
-      /* 删除没有撤销（撤销要等 revertTo）：所以问一次，并且直说不可恢复。
-         关键内容的按钮在渲染时就已禁用，这里是第二道（服务端还会拦第三次）。 */
       if (!(await askConfirm(
         '删除本段（含其中的字段）？\n\n此操作会写入留痕，但内容不可恢复（当前没有撤销）。',
         { okLabel: '删除本段', tone: 'danger' },
@@ -4742,10 +5677,6 @@ document.addEventListener('click', async (event) => {
       await apply(await api('/api/delete-node', { nodeId: paraDelete }));
       return;
     }
-    /* 贴图：**先上传拿地址，再插进病历**。
-       为什么分两步而不是一次把字节送进写路径：上传会失败（格式认不出、超过上限），
-       而"失败的半张图"不该先落进病历、再去删它。第二步失败时，字节只是躺在资源目录里
-       （内容寻址：同一张图再贴一次还是那一份），不会留下半截病历。 */
     const imageDelete = el.dataset.imageDelete;
     if (imageDelete) {
       if (!(await askConfirm(
@@ -4755,8 +5686,6 @@ document.addEventListener('click', async (event) => {
       await apply(await api('/api/delete-image', { nodeId: imageDelete }));
       return;
     }
-    /* 图片槽「贴图 / 换图」：改的是**已有**的那个图片节点（模板开出来的空槽）。
-       与下面「＋图」的区别只在最后一步：那个是"新插一张"，这个是"把这一格填上"。 */
     const imageFill = el.dataset.imageFill;
     if (imageFill) {
       const picked = await uploadPickedImage();
@@ -4780,7 +5709,6 @@ document.addEventListener('click', async (event) => {
       const inserted = await api('/api/insert-image', {
         paragraphId: paraImage,
         resRef: picked.resource.resRef,
-        /* 替代文字先用文件名：它至少能回答"这是哪张片子"，总比空着强 */
         altText: picked.name,
       });
       await apply(inserted);
@@ -4791,8 +5719,6 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.id === 'btnUndo') {
-      /* 点「撤销」先给看历史：一次误操作撤最近一笔，和"我要回到三小时前那一版"
-         不是同一个动作。抽屉里两个都在，谁也不会被另一个挡住。 */
       openHistory();
       return;
     }
@@ -4802,10 +5728,6 @@ document.addEventListener('click', async (event) => {
       return;
     }
     if (el.id === 'btnUnlock') {
-      /* 解锁必须填理由（内核也会拦），所以在界面就问出来，事后追责看的就是这句话。
-         不做"默认理由"，也不允许空理由：静默作废一次签章是最不该发生的事之一。 */
-      /* 空理由不再"先关掉再弹一句说明"：留在框里当场说明，人才不用从头点一遍
-         （系统 prompt 是先关掉才告诉他必须填，而那时理由已经没了） */
       const reason = await askText(
         '解锁理由（会写入留痕，事后追责看的就是它）：\n例如：纠正诊断笔误 / 补充既往用药',
         {
@@ -4821,8 +5743,6 @@ document.addEventListener('click', async (event) => {
       await apply(r);
       return;
     }
-    /* 章节级确认（左栏「确认本章」）：一次确认整章子树内的内容节点。
-       范围与条数由服务端写进留痕，因此批量不等于说不清 */
     const confirmSubtree = el.dataset.confirmSubtree;
     if (confirmSubtree) {
       await apply(await api('/api/confirm-subtree', { nodeId: confirmSubtree }));
@@ -4842,6 +5762,12 @@ async function switchDoc(docId) {
   clearTimeout(blurTimer);
   await flushEdits();
   await apply(await api('/api/open', { docId }));
+  lastCaret = null;
+  contentTargetCaret = null;
+}
+
+for (const caretEvent of ['focusin', 'keyup', 'mouseup', 'selectionchange']) {
+  document.addEventListener(caretEvent, rememberCaret, true);
 }
 
 document.addEventListener('input', (event) => {
@@ -4853,38 +5779,12 @@ document.addEventListener('input', (event) => {
   }
   if (el.dataset.edit) markDirty('edit', el.dataset.edit, el.value);
   else if (el.dataset.field) markDirty('field', el.dataset.field, el.value);
-  /* 控件里的一格。勾选框送的是"勾没勾"（它的 `value` 恒为 `on`，送 value 等于没送），
-     其余一律按文本送 —— 转真值（数字 / 是-否）是服务端的事，见 `/api/set-control-field`。 */
   else {
     markDirty('control', el.dataset.controlField, el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value);
   }
   updateDirtyBadge();
 }, true);
 
-/**
- * 多行粘贴：拆成段落（单行不拦截，等价于"在该段里打字"）。
- *
- * 只拦多行文本：换行在模型里不是段落内的字符，而是段落的边界，把多行文本塞进一个
- * text 节点会得到"一段里有多行"，而机读信息、共享文档、OFD 导出全都按段落组织。
- * 单行粘贴保持原生行为：它是"编辑这一段"，不是"新增段落"。
- *
- * 粘贴进来的内容按外来内容处理（标 `imported` + 待确认）：剪贴板不提供来源，
- * 而"未核对的外部内容进了签名"是不可接受的失败方向，代价是医生多确认一次（界面会说明）。
- * 已知边界（写在这里）：从本文档内部复制的单行文字不会被标记，我们分辨不出它与外部内容。
- */
-/**
- * 粘贴落位的一句说明（粘贴后紧跟在"已粘贴 N 段"后面）。
- *
- * 必须说清两件事：**哪几段被挪了、挪到了哪一章**，以及**凭什么**。
- * 落位是猜的，而"系统悄悄把内容放到了别处"是最伤信任的一种失败 ——
- * 医生找不回自己刚粘的东西，还不知道为什么。
- *
- * 三种情形都要有话说，尤其是第三种：
- *   · 落位没启用（策略不适用）→ 说清"为什么这次没用它"，否则医生会以为规则坏了；
- *   · 启用了但没改动任何落点 → 明确说"都落在你粘贴的位置"，
- *     沉默会被读成"它没处理过这件事"；
- *   · 真的挪了 → 逐段列出去向。
- */
 function placementNote(placement) {
   if (!placement) return '';
   const items = Array.isArray(placement.items) ? placement.items : [];
@@ -4900,8 +5800,6 @@ function placementNote(placement) {
     .map((item) => `第 ${item.index} 段 →「${item.sectionTitle}」（命中"${item.matched}"）`)
     .join('；');
   const rest = items.length - moved.length;
-  /* 这一段是拼进 `docNotice` 的，而它是用 `textContent` 渲染的 —— 所以这里**不写 HTML 标签**，
-     写了只会让医生在界面上看到字面的尖括号 */
   return ` ${moved.length} 段被落位规则放到了别的章节：${detail}。`
     + (rest > 0 ? `其余 ${rest} 段落在你粘贴的位置。` : '')
     + '被挪走的段落追加在该章节末尾 —— 落位是猜的，请核对后再确认。';
@@ -4916,13 +5814,9 @@ document.addEventListener('paste', async (event) => {
   const r = await api('/api/paste-text', { nodeId: el.dataset.edit, text });
   if (r.ok) {
     const paragraphs = (r.data && r.data.paragraphs) || 0;
-    /* `placement` 在响应**顶层**（与 `state`、`usage` 同类：它描述"这次调用是怎么做的"，
-       不是"产出了什么"），所以读 `r.placement` 而不是 `r.data.placement` */
     docNotice = `已粘贴 ${paragraphs} 段（按外来内容处理：这些段落需要人工确认后才能签章）。`
       + placementNote(r.placement);
     await apply(r);
-    /* 粘贴是"整段外来内容进来"的两个时机之一（另一个是采纳 AI 建议）：
-       扫完再放光标 —— 自动扫描会重渲染，先把光标放好等于让它白设一次 */
     await autoScanStructuring('粘贴');
     const ids = (r.data && r.data.textNodeIds) || [];
     if (ids.length > 0) focusEdit(ids[0]);
@@ -4939,16 +5833,7 @@ document.addEventListener('blur', (event) => {
   blurTimer = setTimeout(() => { void flushEdits(); }, 250);
 }, true);
 
-/**
- * 落盘待保存的编辑，返回最后一次写的结果（没有待落笔项时为 `null`）。
- *
- * 返回值是给宿主用的：宿主在切换患者 / 关闭面板前要问"能不能走"，而"能不能走"
- * 取决于这一批写是不是都成了 —— 光看"队列空了"会把"写失败但已出队"读成"已保存"。
- */
 async function flushEdits() {
-  /* 流式模式的改动在另一套 DOM 里（整片纸），先落它：
-     卡片模式的待落笔项只能来自输入框，两者不会同时有值，
-     但"点任何按钮之前先落笔"这条纪律必须对两种模式一致。 */
   await flushFlow();
   if (pendingEdits.size === 0) return null;
   const entries = [...pendingEdits.values()];
@@ -4961,8 +5846,6 @@ async function flushEdits() {
     } else if (entry.kind === 'field') {
       last = await api('/api/set-field', { nodeId: entry.id, value: entry.value });
     } else {
-      /* 控件里的一格：`id` 是"节点id:格键"（doc-view 按服务端下发的 `data-control-field` 挂上来的）——
-         这里只做**拆分**，键本身不在这里拼（理由见 doc-view.js 里那段说明）。 */
       const at = String(entry.id).indexOf(':');
       last = await api('/api/set-control-field', {
         nodeId: String(entry.id).slice(0, at),
@@ -4977,29 +5860,14 @@ async function flushEdits() {
 
 function updateDirtyBadge() {
   const el = document.getElementById('dirtyBadge');
-  /* 两种模式的"脏"各有一份来源：卡片是输入框里的待落笔项，流式是动过的可编辑区。
-     只算其中一份的后果是"卡片说没改、纸上却是新打的字"。 */
   const dirty = pendingEdits.size > 0 || flowDirty.size > 0;
   if (el) {
     el.style.display = dirty ? 'inline-flex' : 'none';
     el.textContent = '有未保存编辑（失焦 250ms 自动保存）';
   }
-  /* 脏状态也要同步给宿主：宿主要不要拦住"切换患者"，靠的就是这一条
-     （徽标只是给人看的，宿主看不见它） */
   hostEmit('dirty', { dirty });
 }
 
-/* ====================== 宿主接口（`?host=1` 被嵌入时） ======================
- *
- * 这一节回答三件事：**打开哪一份**（初始化输入）、**现在什么状态**（事件）、
- * **能不能离开**（离开前的最后一次落盘）。
- *
- * 边界还是那条：宿主只拿**状态与寻址**，不拿写能力。真正的写（落笔 / 确认 / 签章）
- * 一律经 `api()` 打到内核 —— 留痕、门控与签章是内核的三条不变量，把它们搬到宿主侧
- * 重实现一次，等于让同一份病历存在两套真相。
- */
-
-/** 给宿主的状态摘要：只给"宿主该据以决定界面"的那几个字段，不给整份 S */
 function hostSnapshot() {
   const p = (S && S.patient) || null;
   const e = (S && S.encounter) || null;
@@ -5015,12 +5883,6 @@ function hostSnapshot() {
   };
 }
 
-/**
- * 宿主注入的初始寻址：`__L0_HOST__.context.docId`。
- *
- * 走 `/api/open` 而不是"只改前端状态"：活动病历是**服务端状态**（它决定写路径落到哪份文档），
- * 前端自己切一份等于让两边对同一件事各持一份答案。
- */
 async function openFromHostContext() {
   const ctx = (hostBridge() || {}).context;
   const docId = ctx && ctx.docId;
@@ -5029,12 +5891,6 @@ async function openFromHostContext() {
   await apply(await api('/api/open', { docId }));
 }
 
-/**
- * 离开前的判定：先落盘，再报告"能不能走"。
- *
- * 宿主切换患者 / 卸载 iframe 前必须问这一句 —— 直接卸载的话，医生正在打的那句话
- * 会在失焦 250ms 的防抖里丢掉，而界面上没有任何痕迹能说明它丢过。
- */
 async function canLeave() {
   clearTimeout(blurTimer);
   const last = await flushEdits();
@@ -5049,12 +5905,6 @@ async function canLeave() {
   };
 }
 
-/**
- * 把能力注册给 `/host-bridge.js`（宿主用 postMessage 调）。
- *
- * 注册的是**函数**而不是数据：这些能力要碰 `S`、要发请求，只有界面脚本知道怎么做，
- * 桥那侧只负责把消息翻成调用。名字就是协议里的 `type`，与桥里的分派一一对应。
- */
 function registerHostApi() {
   const bridge = typeof window === 'undefined' ? null : window.L0Host;
   if (!bridge || typeof bridge.register !== 'function') return;
@@ -5071,38 +5921,11 @@ function registerHostApi() {
   });
 }
 
-/* ============================ 自由流式编辑 ============================
- *
- * 与卡片模式的根本差别：**落笔的单位不是"某个控件"，而是"结构差"**。
- * 卡片模式里每段自带一个输入框，它自己就知道"我改成了什么"；
- * 流式模式整片纸是一个可编辑区，浏览器只交回一棵 DOM 树 ——
- * 所以这里做的是：读 DOM → 与 `S.items`（服务端给的那份状态）比对 → 得出一串写操作，
- * 一次性发给 `/api/apply-edits`（服务端在一个撤销组里执行，见那条路由的说明）。
- *
- * 四条纪律，每条都有现场理由：
- *   ① **一次动作一次落笔**：回车拆段、退格合段、粘一整块都是"一次用户动作"，
- *      必须合成一个撤销单元，否则"撤销"会退成半个动作（拆段只退回了新段，尾巴还留在里面）；
- *   ② **输入法合成期间不落笔**：落笔会重画整片纸，正好把候选框打断 ——
- *      现场表现是"打字打到一半候选框消失、字跑到了别处"；
- *   ③ **落笔后还原光标**：不还原等于"每写完一句就被踢出编辑区"，只能靠鼠标点回去；
- *   ④ **服务端是权威**：被拒的改动随重画消失，并写明为什么被拒 ——
- *      宁可让医生看到"我打的字没了 + 原因"，也不要界面留着一份没落笔的内容。
- */
 let flowDirty = new Set();
 let flowTimer = null;
 let composing = false;
-/** 落笔前记下的光标（`{key, at}`），重画后放回去；只有流式落笔这条路会设它 */
 let pendingCaret = null;
-/** 一批落笔在飞行中：**同一时刻只允许一批**（原因见 flushFlow 里的说明） */
 let flowInflight = false;
-/**
- * 纸上那一屏所基于的 rev（乐观锁基线）。
- *
- * 为什么界面要自己记住它：落笔的请求要告诉服务端"我是基于哪一版改的"，
- * 服务端才能发现"你看的那一版已经不是最新的了"（`E_REV_CONFLICT`）。
- * 基线只在**画纸的时候就确定**（`renderDoc` 的流式分支里赋值），不能临时去读 `S.doc.rev` ——
- * 后者在落笔那一瞬间可能已经被别的动作推进过，那样乐观锁就永远不报冲突，等于没有。
- */
 let flowBaselineRev = null;
 
 function flowHostOf(key) {
@@ -5113,7 +5936,6 @@ function flowHostOf(key) {
   return null;
 }
 
-/** 一个可编辑区里的段落块（顺序即界面顺序） */
 function flowBlocks(host) {
   return Array.from(host.children).filter((el) => el.classList && el.classList.contains('fp'));
 }
@@ -5124,22 +5946,9 @@ function markFlowDirty(host) {
 
 function scheduleFlowFlush(delay) {
   clearTimeout(flowTimer);
-  /* 停手后再落笔：比"每敲一个字发一次"省得多，又不必等到失焦才保存。
-     700ms 是"打字停顿"的量级：太短会把一个词切成两次写入（留痕里多出半句），
-     太长则切走页签时还在等定时器。 */
   flowTimer = setTimeout(() => { void flushFlow(); }, delay === undefined ? 700 : delay);
 }
 
-/**
- * 读当前界面 → 待落笔操作（**可重复调用**）。
- *
- * 为什么要能重复调用：乐观锁冲突之后要按新的基线把差异**重算一次**
- * （见 `flushFlow`），而"读 DOM、比状态、出操作"这件事只有这一处实现，
- * 重算时复用它，才不会出现"第一次和第二次的判据不一样"。
- *
- * `insertOrigin` 给了就把它标在新建段落上（粘贴用它标 `imported`，
- * 因为剪贴板不提供来源，而"未核对的外部内容进了签名"是不可接受的失败方向）。
- */
 function collectFlowOps(keys, insertOrigin) {
   const plan = L0FlowView.planOf(S.items || []);
   const segments = new Map(plan.filter((unit) => unit.type === 'segment').map((unit) => [unit.key, unit]));
@@ -5157,34 +5966,20 @@ function collectFlowOps(keys, insertOrigin) {
     blocked.push(...outcome.blocked);
     if (outcome.ops.length > 0) {
       const caret = L0FlowView.caretOf(host);
-      /* 记下"焦点是否就在这片纸上"：重画（`innerHTML` 整体替换）会把焦点丢到 `body` 上，
-         只还原选区是不够的 —— 选区在没有焦点的元素里不可见，而且**后续按键根本进不来**
-         （现场表现：落笔一次之后接着打字没反应，得先拿鼠标点一下）。
-         但也不能无条件抢焦点：重画可能是右侧面板的动作触发的，那时把焦点抢进正文很粗暴。 */
       if (caret) carets.push({ key, at: caret, focus: host.contains(document.activeElement) });
     }
   });
   return { ops, blocked, carets };
 }
 
-/** 发一批落笔。基线 rev 一起带上，服务端据此判"你看到的还是最新那一版吗" */
 async function sendFlowOps(ops) {
   const request = { ops };
   if (typeof flowBaselineRev === 'number') request.expectedRev = flowBaselineRev;
   return api('/api/apply-edits', request);
 }
 
-/**
- * 把界面上动过的可编辑区落笔。
- *
- * 返回是否真的发了请求：调用方（`flushEdits` / 回车 / 退格）都不需要区分，
- * 但 `null` 与"发了但被拒"在日志里必须能分开看，所以这里不吞返回值。
- */
 async function flushFlow() {
   if (!isFlow() || composing || flowDirty.size === 0) return null;
-  /* 上一批还没回来：**不能并发发出去**。
-     并发的第二批带的是同一条基线 rev，会被乐观锁判成冲突 —— 而那份改动其实是我们自己，
-     于是医生会看到"有人同时改了这份病历"这种莫名其妙的提示，字还可能被回退掉。 */
   if (flowInflight) {
     scheduleFlowFlush(150);
     return null;
@@ -5193,8 +5988,6 @@ async function flushFlow() {
   flowDirty.clear();
   const first = collectFlowOps(keys);
   if (first.blocked.length > 0) {
-    /* 不可落笔的改动（例如填写项被打字删掉了）：**整批不落**并退回原状，
-       把原因说出来。静默丢掉医生打的字，比报错糟得多。 */
     docNotice = `有一处改动没有落笔：${first.blocked[0]}`;
     pendingCaret = null;
     renderDoc();
@@ -5209,9 +6002,6 @@ async function flushFlow() {
   let response = await sendFlowOps(first.ops);
   let carets = first.carets;
   if (!response.ok && response.code === 'E_REV_CONFLICT') {
-    /* 冲突：这一批一个字节都没落笔，而**界面上那些字还在**（这条路上绝不能重画）。
-       处理办法是静默刷新一次状态、按新基线把差异重算一遍再试一次 ——
-       冲突的真实原因通常是别的端刚改过同一份病历，而不是这份改动本身有问题。 */
     const fresh = await api('/api/state');
     if (fresh && fresh.state) {
       S = fresh.state;
@@ -5239,23 +6029,12 @@ async function flushFlow() {
   } else {
     docNotice = `落笔未生效：${(response.message || response.code) || '未知原因'}`;
   }
-  /* 重画前才设光标：冲突重试那条路上没有重画，提前设了会在下一次无关的重画里乱跳 */
   pendingCaret = carets[0] || null;
-  /* 无论成败都按服务端状态重画：成功时它带来新的 rev / 机读陈旧标记，
-     失败时它是唯一能把界面上那份"没落笔的内容"清掉的依据。 */
   await apply(response);
   updateDirtyBadge();
   return response;
 }
 
-/**
- * 回车：把光标之后的内容切到一个新段落里。
- *
- * 为什么不让浏览器自己造一个新块：浏览器在可编辑区里按回车造出来的是它自己的
- * `div` / `br`（各家还不一样），我们再从 DOM 反推"它是新段还是同段的换行"已经晚了 ——
- * 而换行在模型里**只能是段落边界**（见 flow-view.js 文件头第 2 条）。
- * 自己切，语义从一开始就是对的。
- */
 function splitFlowBlock(host) {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return;
@@ -5283,17 +6062,9 @@ function splitFlowBlock(host) {
   selection.addRange(caret);
   markFlowDirty(host);
   updateDirtyBadge();
-  /* 拆段是结构操作，不能等失焦：等下去的话，医生按完回车接着打字，
-     打的字会落进"还没有 id 的新段"，两次改动被并成一批，撤销时一起退掉。 */
   void flushFlow();
 }
 
-/**
- * 段首退格：与上一段合并（这是"合段"在键盘上的唯一表达）。
- *
- * 只在"光标在本段第一个字符处、且本段不是本区第一段"时接管；其余情况一律放给浏览器 ——
- * 抢多了的后果是"想在段中删一个字，结果两段并了"。
- */
 function mergeFlowBlock(host, event) {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return;
@@ -5316,11 +6087,6 @@ function mergeFlowBlock(host, event) {
   void flushFlow();
 }
 
-/* 流式模式的输入 / 回车 / 退格 / 粘贴 / 填写项点击 /
-   输入法合成 —— 全部挂在这个区块里，与卡片模式的处理器互不干扰
-   （卡片那几个只认 `data-edit` / `data-field` / `data-control-field`，
-   而可编辑区的元素一个都不带这些属性）。 */
-
 document.addEventListener('input', (event) => {
   if (!isFlow()) return;
   const host = event.target && event.target.closest ? event.target.closest('[data-flow-seg]') : null;
@@ -5330,7 +6096,6 @@ document.addEventListener('input', (event) => {
   scheduleFlowFlush(700);
 }, true);
 
-/* 输入法：合成期间不落笔（落笔重画会把候选框打断），合成结束再排一次 */
 document.addEventListener('compositionstart', (event) => {
   if (isFlow() && event.target && event.target.closest && event.target.closest('[data-flow-seg]')) composing = true;
 }, true);
@@ -5346,20 +6111,10 @@ document.addEventListener('compositionend', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (!isFlow()) return;
-  /* Ctrl+Z **必须拦下来**，这是流式模式里最容易骗人的一处：
-     不拦的话，按键落到浏览器的原生撤销上 —— 它只改 DOM、不进模型，
-     而且每次落笔重画纸面时原生撤销栈就被清掉了。
-     现场表现是"按了 Ctrl+Z，字变了，可模型没变"，接着一打字，那次改动才被当成新输入写回去。
-     拦下来之后交给撤销按钮那条既有路径（它撤的是"最近一次写入"，
-     并且**再按一次 = 重做** —— 服务端的撤销是可逆的，见该按钮的 title）。
-     Ctrl+Y / Ctrl+Shift+Z 同样是"重做"的常见按法，一并映射过去。 */
   const accel = event.ctrlKey || event.metaKey;
   const target = event.target;
   const inField = !!(target && target.tagName && ['INPUT', 'TEXTAREA', 'SELECT'].indexOf(target.tagName) >= 0);
   const inDialog = !!(target && target.closest && target.closest('[role="dialog"], .dialog, .modal'));
-  /* 判据**不看焦点在不在纸上**：刚打开页面、或刚从左侧树切进来时焦点常在 `body` 上，
-     而医生按 Ctrl+Z 想撤的正是"我刚才在纸上打的那句"。
-     唯一的例外是"正在别的输入框里打字"（右侧面板、弹框）—— 那时原生撤销才是他要的。 */
   if (accel && !event.altKey && !inField && !inDialog
     && (event.key === 'z' || event.key === 'Z' || event.key === 'y' || event.key === 'Y')) {
     event.preventDefault();
@@ -5368,8 +6123,6 @@ document.addEventListener('keydown', (event) => {
       renderDoc();
       return;
     }
-    /* 不再"点按钮"：那个按钮现在打开的是历史版本抽屉。
-       Ctrl+Z 的语义只有一个 —— 撤回刚刚那一笔，别让它变成"弹个窗"。 */
     void doUndo();
     return;
   }
@@ -5399,8 +6152,6 @@ document.addEventListener('paste', async (event) => {
   const host = event.target && event.target.closest ? event.target.closest('[data-flow-seg]') : null;
   if (!host) return;
   const text = (event.clipboardData && event.clipboardData.getData('text/plain')) || '';
-  /* 单行粘贴保持原生：它是"在段内打字"，来源不变（与卡片模式同一条口径）。
-     合成期间也不接管：那时浏览器正在管自己的输入事务。 */
   if (!/[\r\n]/.test(text) || composing) return;
   event.preventDefault();
   const selection = window.getSelection();
@@ -5414,8 +6165,6 @@ document.addEventListener('paste', async (event) => {
   const tail = whole.slice(offset);
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '');
   if (lines.length === 0) return;
-  /* 依次改写本段 + 追加新段（最后一段接上光标后面的原文）。
-     全部合成成一批操作：**粘贴是一件事**，撤销必须一次退掉整块。 */
   const blocks = flowBlocks(host);
   const index = blocks.indexOf(found.el);
   found.el.innerHTML = '';
@@ -5433,23 +6182,11 @@ document.addEventListener('paste', async (event) => {
   L0FlowView.setCaret(host, { index: lastIndex, offset: (lines[lines.length - 1] + tail).length });
   markFlowDirty(host);
   updateDirtyBadge();
-  /* 粘贴进来的内容**按外来内容处理**：新段落走 `origin: 'imported'`，
-     由服务端标成"待确认"（剪贴板不提供来源，而未核对的外部内容进了签名是不可接受的失败方向）。
-     这一段文字在界面上的样子不变，区别在落笔时那条 op 的来源字段 —— 见 flow-view.js 的 diff。 */
   await flushFlowPaste();
 }, true);
 
-/**
- * 粘贴专用：新段落要标 `imported`，所以落笔前把"界面上新出来的段"逐个标上来源。
- *
- * 走的是与 `flushFlow` 同一条路（同一个 `collectFlowOps` / `sendFlowOps`），
- * 差别只有两处：新建段落带来源、以及提示语说的是"粘贴"而不是"落笔"。
- * 冲突**不在这里重试**：粘贴是一次性动作，重试会让"粘了几段"与提示语对不上，
- * 宁可让它退回、把原因说清（那批字还在界面上，可以再按一次 Ctrl+V）。
- */
 async function flushFlowPaste() {
   if (flowInflight) {
-    /* 极端并发（上一次落笔还没回来就粘贴）：退回普通落笔，别插队 */
     await flushFlow();
     return;
   }
@@ -5481,8 +6218,6 @@ async function flushFlowPaste() {
   updateDirtyBadge();
 }
 
-/* 填写项：在流式模式里它是一个行内小格（不是输入框，输入框放进可编辑区会把光标流打断）。
-   点它 → 问一次 → 走与卡片模式**完全相同**的 `/api/set-field` 写路径。 */
 document.addEventListener('click', async (event) => {
   if (!isFlow()) return;
   const chip = event.target && event.target.closest ? event.target.closest('.fe[data-field-node]') : null;
@@ -5504,31 +6239,189 @@ document.addEventListener('click', async (event) => {
   await apply(response);
 }, true);
 
-/* 段内格式：加粗 / 斜体 / 下划线。
-   为什么用 `execCommand`：它产出的就是 `<b>` / `<i>` / `<u>`，正是
-   `flow-view.js` 解析时认得的那几个标签；而"自己实现选区加格式"要处理的
-   选区边界与嵌套，工作量比这个按钮大一个数量级，收益却一样。
-   已知边界（写在这里）：它是废弃 API，在将来某个浏览器里可能被移除，
-   那时这里的表现应当是"按钮失效"，而不是"文档被改坏"（它不改模型）。 */
-document.addEventListener('click', (event) => {
-  const button = event.target && event.target.closest ? event.target.closest('[data-mark]') : null;
-  if (!button || !isFlow()) return;
-  const host = document.querySelector('[data-flow-seg]:focus-within');
+const MARK_COMMAND = {
+  bold: 'bold',
+  italic: 'italic',
+  underline: 'underline',
+  sup: 'superscript',
+  sub: 'subscript',
+};
+
+function toggleInlineTag(tagName) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+  const range = selection.getRangeAt(0);
+  const tag = String(tagName || '').toLowerCase();
+  if (tag === '') return false;
+
+  const root = range.commonAncestorContainer.nodeType === 1
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentNode;
+  if (!root) return false;
+
+  const targets = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.nodeValue || '';
+    if (text === '') continue;
+    if (!range.intersectsNode(node)) continue;
+    let start = 0;
+    let end = text.length;
+    if (node === range.startContainer) start = range.startOffset;
+    if (node === range.endContainer) end = range.endOffset;
+    if (end <= start) continue;
+    targets.push({ node, start, end });
+  }
+  if (targets.length === 0) return false;
+
+  const host = root.closest ? root.closest('[data-flow-seg]') : null;
+  /* 已经整段套着的 → 解开（再点一次就是"取消高亮"，与工具栏按钮的直觉一致） */
+  const wrapped = targets.every((item) => item.node.parentNode
+    && item.node.parentNode.tagName
+    && item.node.parentNode.tagName.toLowerCase() === tag);
+  if (wrapped) {
+    const parents = [];
+    for (const item of targets) {
+      const parent = item.node.parentNode;
+      if (parent && !parents.includes(parent)) parents.push(parent);
+    }
+    for (const parent of parents) {
+      const holder = document.createDocumentFragment();
+      while (parent.firstChild) holder.appendChild(parent.firstChild);
+      parent.replaceWith(holder);
+    }
+    if (host) host.normalize();
+    selection.removeAllRanges();
+    return true;
+  }
+
+  for (let i = targets.length - 1; i >= 0; i -= 1) {
+    const item = targets[i];
+    let node = item.node;
+    if (item.end < (node.nodeValue || '').length) node = node.splitText(item.end);
+    if (item.start > 0) node = node.splitText(item.start);
+    const wrapper = document.createElement(tag);
+    node.parentNode.insertBefore(wrapper, node);
+    wrapper.appendChild(node);
+  }
+  selection.removeAllRanges();
+  return true;
+}
+
+function flowHostOfSelection() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const root = range.commonAncestorContainer.nodeType === 1
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentNode;
+  return root && root.closest ? root.closest('[data-flow-seg]') : null;
+}
+
+/** 把一次格式动作落进写路径（走与打字完全相同的那条路） */
+function applyFlowMark(mark) {
+  const host = document.querySelector('[data-flow-seg]:focus-within') || flowHostOfSelection();
   if (!host) {
     toast('先把光标放进正文，再点格式按钮', 'info');
     return;
   }
-  document.execCommand(button.dataset.mark);
+  if (mark === 'highlight') {
+    if (!toggleInlineTag('mark')) {
+      toast('先选中要标记的字', 'info');
+      return;
+    }
+  } else if (!document.execCommand(MARK_COMMAND[mark] || mark)) {
+    toast('这个格式在当前浏览器里不可用', 'info');
+    return;
+  }
   markFlowDirty(host);
   updateDirtyBadge();
   scheduleFlowFlush(400);
+}
+
+function setFlowToolsFloating(on) {
+  const tools = $('flowTools');
+  if (!tools) return;
+  const spacer = $('flowToolsSpacer');
+  if (!on) {
+    tools.classList.remove('floating');
+    if (spacer) {
+      spacer.hidden = true;
+      spacer.style.height = '0';
+    }
+    return;
+  }
+  if (tools.classList.contains('floating')) return;
+  if (spacer) {
+    spacer.style.height = `${Math.ceil(tools.getBoundingClientRect().height)}px`;
+    spacer.hidden = false;
+  }
+  tools.classList.add('floating');
+}
+
+function positionFlowTools() {
+  const tools = $('flowTools');
+  if (!tools) return;
+  if (!isFlow() || tools.hidden) {
+    setFlowToolsFloating(false);
+    return;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    setFlowToolsFloating(false);
+    return;
+  }
+  const range = selection.getRangeAt(0);
+  const root = range.commonAncestorContainer.nodeType === 1
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentNode;
+  if (!root || !root.closest || !root.closest('[data-flow-seg]')) {
+    setFlowToolsFloating(false);
+    return;
+  }
+  const rect = range.getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) {
+    setFlowToolsFloating(false);
+    return;
+  }
+  setFlowToolsFloating(true);
+  const width = tools.offsetWidth || 300;
+  const height = tools.offsetHeight || 34;
+  const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 8);
+  const above = rect.top - height - 8;
+  const top = above >= 8 ? above : Math.min(rect.bottom + 8, window.innerHeight - height - 8);
+  tools.style.left = `${Math.round(left)}px`;
+  tools.style.top = `${Math.round(top)}px`;
+}
+
+let flowFloatTimer = null;
+document.addEventListener('selectionchange', () => {
+  if (!isFlow()) return;
+  clearTimeout(flowFloatTimer);
+  flowFloatTimer = setTimeout(positionFlowTools, 40);
+});
+window.addEventListener('scroll', () => {
+  const tools = $('flowTools');
+  if (tools && tools.classList.contains('floating')) positionFlowTools();
+}, { passive: true, capture: true });
+window.addEventListener('resize', () => {
+  const tools = $('flowTools');
+  if (tools && tools.classList.contains('floating')) positionFlowTools();
+}, { passive: true });
+/* 点浮条时不让正文失焦：失焦会清掉选区，而"给选中的字加格式"全部依赖那个选区 */
+const flowToolsEl = $('flowTools');
+if (flowToolsEl) {
+  flowToolsEl.addEventListener('mousedown', (event) => {
+    if (event.target && event.target.closest && event.target.closest('[data-mark]')) event.preventDefault();
+  });
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target && event.target.closest ? event.target.closest('[data-mark]') : null;
+  if (!button || !isFlow()) return;
+  applyFlowMark(button.dataset.mark);
 }, true);
 
-/* 置信度滑块已移除：置信度由产出方给出，界面不提供调节。
-   控件本身也删干净了，留着"没人用的监听器"比删掉更容易误导后来人。 */
-
-/* 导入病历文件：读文件 → base64 → 服务端按内容识别格式（OFD 容器 / WS/T 500 XML）
-   → 生成导入草稿 → 切到该病历。故意不按后缀分派：源文件常被改名或没有后缀。 */
 $('fileInput').addEventListener('change', async (event) => {
   const input = event.target;
   const file = input.files && input.files[0];
@@ -5547,17 +6440,11 @@ $('fileInput').addEventListener('change', async (event) => {
   }
 });
 
-/* 本机客户端：它是**唯一**的采集来源。打开页面就检测一次，之后**每 3 秒**再检测一次 ——
-   不论当前是"已连上"还是"连不上"：客户端后启动要能自动接上，中途退出也要在下一次心跳里显示出来。
-   只在已连上时复检，等于"断了就再也不看了"，而那正是最需要显示出来的时刻。
-   检测只打 `/hello`（不打开设备、不发音频）。
-   页面没有客户端地址（不是从客户端打开的）时无从检测：地址与令牌只能由客户端注入，页面不写死。 */
 (function initCaptureLocalDetection() {
   const wave = $('captureLocalWave');
   if (wave && wave.childElementCount === 0) {
     for (let i = 0; i < 14; i += 1) {
       const bar = document.createElement('i');
-      /* 错开相位：同一段音频也能看出"在动"，而不是一排整齐的方块同时跳 */
       bar.style.animationDelay = `-${i * 110}ms`;
       wave.appendChild(bar);
     }
@@ -5568,7 +6455,6 @@ $('fileInput').addEventListener('change', async (event) => {
     if (captureClientOf() === null) return;
     void probeCaptureClient();
   }, CLIENT_HEARTBEAT_MS);
-  /* 切回本页立刻补一次：后台标签页停掉的心跳不该让人白等最多 3 秒 */
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     if (captureClientOf() === null) return;
@@ -5576,19 +6462,6 @@ $('fileInput').addEventListener('change', async (event) => {
   });
 })();
 
-/*
- * 启动链。
- *
- * 被嵌入时（`?host=1`）第一句是**等宿主 init**：能力开关、初始文书、传输方式都由它带来，
- * 早一步取状态就会出现"先按全量画一帧、再被摘掉"的闪烁。独立运行时没有 `L0Host`，
- * 这一段与改造前逐字一致（这也是注入缺失时行为不变的落点）。
- *
- * 顺序不能换：
- *   ① 能力开关必须落在第一次取状态之前（否则被摘掉的页签会先渲染一帧再消失）；
- *   ② 右栏要在能力开关摘完再量（否则会把已摘掉的位置也算进去）；
- *   ③ 初始文书要在取状态之前切好（省一次"先画默认那份"的重绘）；
- *   ④ 能力注册要在宿主能调用之前，事件广播要等界面真的画出来之后。
- */
 void (async () => {
   if (window.L0Host) await window.L0Host.whenReady();
   applyCapabilities();
@@ -5596,8 +6469,7 @@ void (async () => {
   layoutRailTabs();
   registerHostApi();
   await openFromHostContext();
-  /* 启动：取一次状态即可画出整页 —— 本页不再有任何"要先知道身份才能画对"的控件，
-     原先"先问会话、再取状态"的两段式因此收敛成一段（那一段的存在理由是「重置」按钮）。 */
   await refresh();
+  await loadMyContent();
   hostEmit('ready', hostSnapshot());
 })();

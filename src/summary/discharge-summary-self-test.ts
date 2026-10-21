@@ -1,5 +1,3 @@
-// 出院汇总自测（D1~D6）。
-
 import { TestSuite, assert, assertEqual } from '../testing/harness.ts';
 import {
   planDischargeSummary,
@@ -78,7 +76,6 @@ async function main(): Promise<void> {
   await test('D1 多段原文按固定连接符合并，不摘要、不改写', () => {
     const plan = planOf([admission(), progress(), discharge()]);
     const admissionStatus = itemOf(plan, 'admissionStatus');
-    /* 前一段已以句号收尾，不再插入连接符（否则会出现「3天。；患者……」） */
     assertEqual(
       admissionStatus?.text,
       '反复头晕1年，加重3天。患者1年前发现血压升高，最高170/100mmHg。',
