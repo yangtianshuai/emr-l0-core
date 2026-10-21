@@ -9,12 +9,23 @@ export interface AuditGateRejection {
   action?: string;
 }
 
+/** 打印留痕的最小形状：core 不依赖 storage，调用方映射后传进来 */
+export interface AuditPrintRecord {
+  at: string;
+  actorId: string;
+  rev: number;
+  pages: number;
+  status: string;
+  formal: boolean;
+}
+
 export interface AuditInput {
   doc: DocumentModel;
   generatedAt: string;
   gateRejections?: AuditGateRejection[];
   writing?: WritingTiming | null;
   invariants?: string[];
+  prints?: AuditPrintRecord[];
 }
 
 export interface AuditCheck {
@@ -53,6 +64,14 @@ export interface AuditReport {
     acceptedBy?: string;
     confirmedAt?: string;
   }>;
+  printing: {
+    provided: boolean;
+    count: number;
+    formalCount: number;
+    lastAt: string | null;
+    lastActorId: string | null;
+    records: AuditPrintRecord[];
+  };
   signatures: Array<{
     signatureRef: string;
     signerRole?: string;
@@ -136,6 +155,21 @@ export function buildAuditReport(input: AuditInput): AuditReport {
 
   const writing = input.writing ?? readWritingTiming(doc);
 
+  const prints = input.prints ?? [];
+  /* 调用方可能按任意顺序给，最近一次由时间自己算，别依赖数组顺序 */
+  const newestPrint = prints.reduce<AuditPrintRecord | null>(
+    (latest, record) => (latest === null || record.at > latest.at ? record : latest),
+    null,
+  );
+  const badPrints = prints.filter(
+    (record) =>
+      record.actorId.trim() === '' ||
+      record.at.trim() === '' ||
+      !Number.isInteger(record.pages) ||
+      record.pages < 1 ||
+      record.rev > doc.revisions.length,
+  );
+
   const checks: AuditCheck[] = [
     {
       id: 'AI_PROVENANCE_COMPLETE',
@@ -208,6 +242,15 @@ export function buildAuditReport(input: AuditInput): AuditReport {
         .join(', '),
     },
     {
+      id: 'PRINT_TRAIL_CONSISTENT',
+      description: '每条打印留痕都能追到人、时间、页数，且版本号不超过当前留痕数（否则"谁打的第几版"对不上）',
+      pass: badPrints.length === 0,
+      detail:
+        badPrints.length === 0
+          ? `共 ${prints.length} 条（正式件 ${prints.filter((record) => record.formal).length} 条）`
+          : badPrints.map((record) => `${record.at} / ${record.actorId || '（无操作者）'} / ${record.pages} 页 / rev ${record.rev}`).join('；'),
+    },
+    {
       id: 'NO_BROKEN_INVARIANTS',
       description: '文档结构与索引不变量自检通过',
       pass: (input.invariants ?? []).length === 0,
@@ -259,6 +302,14 @@ export function buildAuditReport(input: AuditInput): AuditReport {
         ...(record?.at ? { confirmedAt: record.at } : {}),
       };
     }),
+    printing: {
+      provided: input.prints !== undefined,
+      count: prints.length,
+      formalCount: prints.filter((record) => record.formal).length,
+      lastAt: newestPrint?.at ?? null,
+      lastActorId: newestPrint?.actorId ?? null,
+      records: prints,
+    },
     signatures: (doc.signatureRefs ?? []).map((reference) => ({
       signatureRef: reference.signatureRef,
       ...(reference.signerRole ? { signerRole: reference.signerRole } : {}),
@@ -351,6 +402,11 @@ export function renderAuditReportMarkdown(report: AuditReport): string {
     `| 门控拒绝记录 | ${report.facts.gateLogProvided ? `${report.facts.gateRejectionCount} 条` : '未提供（本次未传入日志）'} |`,
     `| 机读信息 | ${report.machineReadable.present ? `${report.machineReadable.elementCount} 条${report.machineReadable.stale ? '（**陈旧**）' : ''}` : '缺失'} |`,
     `| 签名 | ${report.signatures.length} 个 |`,
+    `| 打印 | ${
+      report.printing.provided
+        ? `${report.printing.count} 次（正式件 ${report.printing.formalCount} 次）${report.printing.lastAt ? `，最近 ${report.printing.lastAt} 由 ${report.printing.lastActorId ?? '—'} 打出` : ''}`
+        : '未提供（本次未传入打印留痕）'
+    } |`,
     `| 书写时长 | ${
       report.writing.present
         ? `${Math.round((report.writing.activeMs ?? 0) / 1000)} 秒（${report.writing.editCount ?? 0} 次书写，剔空闲 ${Math.round((report.writing.idleMs ?? 0) / 1000)} 秒）${report.writing.trusted ? '' : ' —— **不可信**'}`
@@ -364,6 +420,14 @@ export function renderAuditReportMarkdown(report: AuditReport): string {
     ...report.checks.map((check) => `| ${check.description} | ${yn(check.pass)} | ${check.detail || '—'} |`),
     '',
   ];
+
+  if (report.printing.records.length > 0) {
+    lines.push('## 二之一、打印记录', '', '| 时间 | 操作者 | 版本 | 页数 | 状态 | 正式件 |', '|---|---|---|---|---|---|');
+    for (const record of report.printing.records) {
+      lines.push(`| ${record.at} | ${record.actorId} | ${record.rev} | ${record.pages} | ${record.status} | ${record.formal ? '是' : '否'} |`);
+    }
+    lines.push('');
+  }
 
   if (report.aiParticipation.length > 0) {
     lines.push('## 三、AI 参与度明细', '', '| 节点 | 类型 | 标签 | 模型 | 置信度 | 已确认 | 确认人 |', '|---|---|---|---|---|---|---|');

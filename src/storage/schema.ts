@@ -1,7 +1,7 @@
 import type { Migration } from './sqlite.ts';
 
 /** 本程序要求的结构版本。改结构必须同时加一条迁移并把它加一  */
-export const STORAGE_SCHEMA_VERSION = 8;
+export const STORAGE_SCHEMA_VERSION = 9;
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -228,6 +228,24 @@ export const MIGRATIONS: readonly Migration[] = [
        )`,
       `create index revisions_by_time on document_revisions (at)`,
       `create index revisions_by_actor on document_revisions (actor_id)`,
+    ],
+  },
+  {
+    id: '0009-print-log',
+    note: '打印留痕入库：一次打印一行（谁、何时、第几版、几页、是不是正式件）',
+    sql: [
+      `create table print_logs (
+         seq integer primary key autoincrement,
+         doc_id text not null references documents(doc_id) on delete cascade,
+         actor_id text not null,
+         at text not null,
+         rev integer not null,
+         pages integer not null,
+         status text not null,
+         formal integer not null default 0
+       )`,
+      `create index print_logs_by_doc on print_logs (doc_id, seq)`,
+      `create index print_logs_by_at on print_logs (at)`,
     ],
   },
 ];

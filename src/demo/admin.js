@@ -50,8 +50,9 @@ let session = null;
 let S = {};
 
 const VIEW_META = {
-  config: { title: '能力配置', sub: '这里配置的是部署参数：模型接入、语音采集与落位、预问诊、签名服务、授权源。' },
-  master: { title: '基础数据', sub: '整个部署共用的主数据：科室字典、文书类型、以及规则里的「判定方式」（只读清单）。模板的「适用科室」、就诊科室的显示、「新建文书」的类型选项、规则库里的判定方式都读它们。' },
+  config: { title: '能力配置', sub: '这里配置的是部署参数：模型接入、语音采集与落位、预问诊、数据采集、签名服务、授权源。' },
+  knowledge: { title: '知识资产', sub: '医生端能开什么、能听什么、被什么拦住：模板库、表达式控件、专科控件、内容库、规则库、判定方式。' },
+  master: { title: '基础数据', sub: '整个部署共用的主数据：科室字典、文书类型、字段字典。模板的「适用科室」、就诊科室的显示、「新建文书」的类型选项、规则里的字段路径都读它们。' },
   accounts: { title: '账号管理', sub: '谁可以进入后台、以什么角色进入。口令只以哈希保存在数据库，任何位置都不回显。' },
   health: { title: '运行状态', sub: '签名服务与模型探测的留档，以及这台机器上现在有多少东西。' },
   audit: { title: '审计与安全', sub: '谁在什么时候改了配置、从什么改成什么。登录成功与失败也记录在此。' },
@@ -135,6 +136,28 @@ function selectCfgPane(tab) {
   scope.querySelectorAll('[data-cfg-pane]').forEach((pane) => {
     pane.classList.toggle('active', pane.dataset.cfgPane === name);
   });
+}
+
+/** 进入「知识资产」时渲染当前停留的那个页签（页签状态由 selectCfgPane 维护） */
+async function loadKnowledgeView() {
+  const pane = document.querySelector('[data-admin-view-pane="knowledge"]');
+  const active = pane ? pane.querySelector('[data-cfg-tab].active') : null;
+  const name = active ? active.dataset.cfgTab : 'templates';
+  if (name === 'templates') renderTemplatePacks();
+  if (name === 'expressions') renderExprCatalog();
+  if (name === 'ctrlDefs') renderCtrlCatalog();
+  if (name === 'packs') renderKnowledgePacks();
+  if (name === 'contentLib') await loadContentLibrary();
+  if (name === 'predicates') renderPredicates();
+}
+
+/** 进入「能力配置」时渲染当前停留的那个页签（页签状态由 selectCfgPane 维护） */
+function loadConfigView() {
+  const pane = document.querySelector('[data-admin-view-pane="config"]');
+  const active = pane ? pane.querySelector('[data-cfg-tab].active') : null;
+  const name = active ? active.dataset.cfgTab : 'model';
+  if (name === 'intake') renderIntake();
+  if (name === 'previsit') renderPrevisitAccessPanel();
 }
 
 function renderModelPanel() {
@@ -614,7 +637,7 @@ function ruleConditionOptionsHtml(selected) {
 
 function ruleConditionLibraryHintHtml() {
   if (conditionItemsOfState().length > 0) return '';
-  return '<div class="hint">库里还没有判定方式：要么先到「基础数据 · 判定方式」里建一条'
+  return '<div class="hint">库里还没有判定方式：要么先到「知识资产 · 判定方式」里建一条'
     + '（它是一份<b>共用资产</b>：改一处、引它的规则一起变），要么就用下面那个"就地拼一条"。</div>';
 }
 
@@ -1778,6 +1801,11 @@ function renderTplEditForm(item) {
         <span class="tpl-label">适用科室</span>
         <div class="tpl-depts">${tplDeptPickerHtml(item.departments || [])}</div>
       </div>
+      <div class="tpl-field">
+        <span class="tpl-label">外部带入</span>
+        <label class="tpl-check"><input type="checkbox" data-tpl-intake="${esc(item.itemId)}"
+          ${tplIntakeChecked(item) ? 'checked' : ''} /> 参与外部带入</label>
+      </div>
       <div class="hint">${structEditable
         ? '草稿：章节与槽位可以改，顺序也能调（↑ / ↓ 或按住 ⠿ 拖）；发布之后就改不了了 —— 它可能已经开出过病历。'
         : '<b>已发布</b>：章节与槽位不可改、顺序也锁着（改骨架会让"当时按哪一版开的"对不上，要改请先<b>撤稿</b>，撤稿后医生端立刻开不出它）。<b>显示名 / 从系统带入 / 必填 / 单位 / 关键内容 / 默认值 / 参考范围</b>，以及章节的<b>必备章节 / 整章算关键内容 / 说明</b>照旧可以改 —— 它们在开文书那一刻才起作用，不进已开出的病历。'}</div>
@@ -2784,6 +2812,23 @@ document.addEventListener('input', (event) => {
     renderCtrlCatalog();
     return;
   }
+  if (el.id === 'ctxFieldSearch') {
+    CTX_FIELD_FILTER = String(el.value || '');
+    CTX_FIELD_PAGE = 1;
+    renderContextFields(null);
+    return;
+  }
+  if (el.closest && el.closest('#ctxFieldBody')) {
+    const index = ctxFieldIndexOf(el);
+    const item = index >= 0 && Array.isArray(CTX_FIELD_DRAFT) ? CTX_FIELD_DRAFT[index] : null;
+    if (!item) return;
+    const value = String(el.value || '');
+    if (el.dataset.ctxfieldPath !== undefined) item.path = value;
+    else if (el.dataset.ctxfieldLabel !== undefined) item.label = value;
+    else if (el.dataset.ctxfieldGroup !== undefined) item.group = value;
+    else if (el.dataset.ctxfieldSource !== undefined) item.source = value;
+    return;
+  }
   if (el.id === 'ctrlNewShape') {
     readCtrlForm();
     if (CTRL_DRAFT) CTRL_DRAFT.shape = String(el.value || 'scale');
@@ -3271,15 +3316,26 @@ async function loadAdminView(name) {
     else setLoginStatus(`读取审计失败：${r.message || r.code || '未知原因'}`, true);
     return;
   }
+  if (name === 'knowledge') {
+    await loadKnowledgeView();
+    return;
+  }
+  if (name === 'config') {
+    loadConfigView();
+    return;
+  }
   if (name === 'master') {
-    const [dept, docTypes] = await Promise.all([api('/api/departments'), api('/api/doc-types')]);
+    const [dept, docTypes, ctxFields] = await Promise.all([
+      api('/api/departments'),
+      api('/api/doc-types'),
+      api('/api/context-fields'),
+    ]);
     if (dept.ok) renderDepartments(dept.data);
     else setLoginStatus(`读取科室字典失败：${dept.message || dept.code || '未知原因'}`, true);
     if (docTypes.ok) renderDocTypes(docTypes.data);
     else setLoginStatus(`读取文书类型失败：${docTypes.message || docTypes.code || '未知原因'}`, true);
-    renderPredicates();
-    renderExprCatalog();
-    renderCtrlCatalog();
+    if (ctxFields.ok) renderContextFields(ctxFields.data, true);
+    else setLoginStatus(`读取字段字典失败：${ctxFields.message || ctxFields.code || '未知原因'}`, true);
     return;
   }
   if (name === 'system') {
@@ -3792,6 +3848,268 @@ function readDocTypeRows() {
     out.push({ system, code, display, enabled: enabledEl ? Boolean(enabledEl.checked) : true });
   }
   return out;
+}
+
+let CTX_FIELD_DRAFT = null;
+let CTX_FIELD_FILTER = '';
+let CTX_FIELD_SOURCE = '';
+let CTX_FIELD_GROUP = '';
+let CTX_FIELD_PAGE = 1;
+const CTX_FIELD_PAGE_SIZE = 20;
+const CTX_FIELD_PATH_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)*$/;
+
+function renderContextFields(data, reset = false) {
+  const view = data && typeof data === 'object' ? data : { items: [], source: 'builtin', error: null };
+  if (reset || !Array.isArray(CTX_FIELD_DRAFT)) {
+    CTX_FIELD_DRAFT = (Array.isArray(view.items) ? view.items : []).map((item) => ({
+      path: String(item.path || ''),
+      label: String(item.label || ''),
+      group: String(item.group || ''),
+      source: String(item.source || ''),
+      enabled: item.enabled !== false,
+    }));
+    CTX_FIELD_PAGE = 1;
+  }
+  const items = CTX_FIELD_DRAFT;
+  const enabled = items.filter((item) => item.enabled).length;
+
+  const chip = $('ctxFieldChip');
+  if (chip) {
+    chip.textContent = view.error ? '读不出来' : `${items.length} 个（启用 ${enabled}）`;
+    chip.className = `chip${view.error ? ' danger' : items.length === 0 ? ' warn' : ' ok'}`;
+  }
+  const summary = $('ctxFieldSummary');
+  if (summary) {
+    summary.innerHTML = chips([
+      ['来源', view.source === 'store' ? '数据库' : '内置（还没改过）', view.source === 'store' ? 'ok' : 'warn'],
+      ['最近改动', view.updatedBy ? `${view.updatedBy} · ${fmtShort(view.updatedAt)}` : '—', 'mono'],
+      ['读库情况', view.error || '正常', view.error ? 'danger' : 'ok'],
+    ]);
+  }
+
+  const sources = [...new Set(items.map((item) => item.source).filter((value) => value !== ''))].sort();
+  const groups = [...new Set(items.map((item) => item.group).filter((value) => value !== ''))].sort();
+  if (CTX_FIELD_SOURCE !== '' && !sources.includes(CTX_FIELD_SOURCE)) CTX_FIELD_SOURCE = '';
+  if (CTX_FIELD_GROUP !== '' && !groups.includes(CTX_FIELD_GROUP)) CTX_FIELD_GROUP = '';
+  fillCtxFieldFilter($('ctxFieldSourceFilter'), CTX_FIELD_SOURCE, '全部来源', sources);
+  fillCtxFieldFilter($('ctxFieldGroupFilter'), CTX_FIELD_GROUP, '全部分组', groups);
+
+  const body = $('ctxFieldBody');
+  if (!body) return;
+  if (items.length === 0) {
+    body.innerHTML = '<div class="muted">还没有字段。点「批量导入」贴一批。</div>';
+    return;
+  }
+  const keyword = CTX_FIELD_FILTER.trim().toLowerCase();
+  const shown = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => (CTX_FIELD_SOURCE === '' || item.source === CTX_FIELD_SOURCE)
+      && (CTX_FIELD_GROUP === '' || item.group === CTX_FIELD_GROUP)
+      && (keyword === ''
+        || [item.path, item.label, item.group, item.source].join(' ').toLowerCase().includes(keyword)));
+  if (shown.length === 0) {
+    body.innerHTML = `<div class="muted">没有匹配的字段（共 ${items.length} 个）。清空筛选即可看全部。</div>`;
+    return;
+  }
+  const pageCount = Math.max(1, Math.ceil(shown.length / CTX_FIELD_PAGE_SIZE));
+  if (CTX_FIELD_PAGE > pageCount) CTX_FIELD_PAGE = pageCount;
+  if (CTX_FIELD_PAGE < 1) CTX_FIELD_PAGE = 1;
+  const start = (CTX_FIELD_PAGE - 1) * CTX_FIELD_PAGE_SIZE;
+  const pageRows = shown.slice(start, start + CTX_FIELD_PAGE_SIZE);
+  body.innerHTML = pageRows.map(({ item, index }) => ctxFieldRowHtml(item, index)).join('')
+    + `<div class="tpl-pager">
+      <span class="muted">第 ${CTX_FIELD_PAGE} / ${pageCount} 页 · 本页 ${pageRows.length} 个
+        （筛出 ${shown.length} / 共 ${items.length} 个，每页 ${CTX_FIELD_PAGE_SIZE} 个）</span>
+      <span class="tpl-pager-btns">
+        <button class="secondary" data-ctxfield-page="${CTX_FIELD_PAGE - 1}"
+          ${CTX_FIELD_PAGE <= 1 ? 'disabled' : ''}>上一页</button>
+        <button class="secondary" data-ctxfield-page="${CTX_FIELD_PAGE + 1}"
+          ${CTX_FIELD_PAGE >= pageCount ? 'disabled' : ''}>下一页</button>
+      </span>
+    </div>`;
+}
+
+function fillCtxFieldFilter(select, current, allLabel, values) {
+  if (!select) return;
+  select.innerHTML = [`<option value="">${esc(allLabel)}</option>`]
+    .concat(values.map((value) => `<option value="${esc(value)}"${value === current ? ' selected' : ''}>${esc(value)}</option>`))
+    .join('');
+}
+
+function ctxFieldIndexOf(el) {
+  const row = el && el.closest ? el.closest('.dept-row[data-ctxfield-row]') : null;
+  const index = row ? Number(row.dataset.ctxfieldRow) : NaN;
+  return Number.isFinite(index) ? index : -1;
+}
+
+function ctxFieldRowHtml(item, index) {
+  return `
+    <div class="dept-row${item.enabled ? '' : ' off'}" data-ctxfield-row="${index}">
+      <input type="text" data-ctxfield-path value="${esc(item.path || '')}" placeholder="patient.nameMasked" />
+      <input type="text" data-ctxfield-label value="${esc(item.label || '')}" placeholder="显示名" />
+      <input type="text" data-ctxfield-group value="${esc(item.group || '')}" placeholder="分组" />
+      <input type="text" data-ctxfield-source value="${esc(item.source || '')}" placeholder="来源系统" />
+      <label class="check"><input type="checkbox" data-ctxfield-enabled ${item.enabled ? 'checked' : ''} /> 启用</label>
+      <button class="danger" data-ctxfield-del="1" data-ctxfield-row="${index}">删除</button>
+    </div>`;
+}
+
+function setCtxFieldStatus(text) {
+  const box = $('ctxFieldStatus');
+  if (box) box.innerHTML = text;
+}
+
+function readContextFieldRows() {
+  const list = Array.isArray(CTX_FIELD_DRAFT) ? CTX_FIELD_DRAFT : [];
+  return list.map((item) => ({
+    path: String(item.path || '').trim(),
+    label: String(item.label || '').trim(),
+    group: String(item.group || '').trim(),
+    source: String(item.source || '').trim(),
+    enabled: item.enabled !== false,
+  }));
+}
+
+/** 一行一条：path,显示名,分组,来源系统,启用；逗号或 Tab 分隔，首行表头可省 */
+function parseContextFieldCsv(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== '');
+  if (lines.length === 0) return { items: [], errors: ['没有可导入的行'] };
+  const rows = lines.map((line) => (line.includes('\t') ? line.split('\t') : line.split(','))
+    .map((cell) => cell.trim().replace(/^"(.*)"$/, '$1').trim()));
+  const offset = String(rows[0][0] || '').toLowerCase() === 'path' ? 1 : 0;
+  const items = [];
+  const errors = [];
+  for (let i = offset; i < rows.length; i += 1) {
+    const [path = '', label = '', group = '', source = '', enabled = ''] = rows[i];
+    if (path === '') {
+      errors.push(`第 ${i + 1} 行缺 path`);
+      continue;
+    }
+    if (!CTX_FIELD_PATH_PATTERN.test(path)) {
+      errors.push(`第 ${i + 1} 行路径「${path}」不合法`);
+      continue;
+    }
+    items.push({
+      path,
+      label: label || path,
+      group,
+      source: source || '本机',
+      enabled: !['0', 'false', 'no', '否', '停用'].includes(enabled.toLowerCase()),
+    });
+  }
+  return { items, errors };
+}
+
+function closeCtxFieldImport() {
+  const panel = $('ctxFieldImport');
+  if (panel) panel.hidden = true;
+  const box = $('ctxFieldImportText');
+  if (box) box.value = '';
+}
+
+function applyContextFieldImport() {
+  const box = $('ctxFieldImportText');
+  const parsed = parseContextFieldCsv(box ? box.value : '');
+  if (parsed.errors.length > 0) {
+    setCtxFieldStatus(`未导入：${parsed.errors.slice(0, 3).join('；')}`
+      + (parsed.errors.length > 3 ? `（另有 ${parsed.errors.length - 3} 处）` : ''));
+    return;
+  }
+  if (!Array.isArray(CTX_FIELD_DRAFT)) CTX_FIELD_DRAFT = [];
+  const at = new Map(CTX_FIELD_DRAFT.map((item, index) => [item.path, index]));
+  let added = 0;
+  let replaced = 0;
+  for (const item of parsed.items) {
+    const hit = at.get(item.path);
+    if (hit === undefined) {
+      at.set(item.path, CTX_FIELD_DRAFT.length);
+      CTX_FIELD_DRAFT.push(item);
+      added += 1;
+    } else {
+      CTX_FIELD_DRAFT[hit] = item;
+      replaced += 1;
+    }
+  }
+  closeCtxFieldImport();
+  CTX_FIELD_PAGE = 1;
+  renderContextFields(null);
+  setCtxFieldStatus(`已导入 ${added} 条${replaced > 0 ? `，覆盖同路径 ${replaced} 条` : ''}，点「保存」写库`);
+}
+
+function tplIntakeChecked(item) {
+  const list = S && S.intake && Array.isArray(S.intake.templates) ? S.intake.templates : [];
+  return list.some((ref) => ref.itemId === item.itemId && ref.packId === item.packId);
+}
+
+function renderIntake() {
+  const view = (S && S.intake) || {};
+  const templates = Array.isArray(view.templates) ? view.templates : [];
+  const catalog = Array.isArray(S && S.templateCatalog) ? S.templateCatalog : [];
+
+  const chip = $('intakeChip');
+  if (chip) {
+    const healthy = view.enabled && (view.requireKey === false || view.keyPresent);
+    chip.textContent = view.error ? '读不出来' : !view.enabled ? '未开启' : healthy ? '已开启' : '配置不完整';
+    chip.className = `chip${view.error ? ' danger' : healthy ? ' ok' : ' warn'}`;
+  }
+  const summary = $('intakeSummary');
+  if (summary) {
+    summary.innerHTML = chips([
+      ['接口', view.enabled ? '开' : '关', view.enabled ? 'ok' : 'warn'],
+      ['密钥', view.requireKey === false ? '不校验' : view.keyPresent ? '已设置' : '缺失', view.requireKey === false ? 'warn' : view.keyPresent ? 'ok' : 'danger'],
+      ['最近改动', view.updatedBy ? `${view.updatedBy} · ${fmtShort(view.updatedAt)}` : '—', 'mono'],
+    ]);
+  }
+  const enabledSel = $('cfgIntakeEnabled');
+  if (enabledSel) enabledSel.value = view.enabled ? 'true' : 'false';
+  const requireSel = $('cfgIntakeRequireKey');
+  if (requireSel) requireSel.value = view.requireKey === false ? 'false' : 'true';
+  const keyInput = $('cfgIntakeKey');
+  if (keyInput) keyInput.value = '';
+  setIntakeStatus(view.note || '');
+
+  const tchip = $('intakeTemplatesChip');
+  if (tchip) tchip.textContent = `${templates.length} 份`;
+  const tbody = $('intakeTemplatesBody');
+  if (tbody) {
+    tbody.innerHTML = templates.length === 0
+      ? '<div class="muted">还没有模板参与：在「模板库」里打开一份模板，勾选「参与外部带入」。</div>'
+      : templates.map((ref) => {
+        const item = catalog.find((entry) => entry.itemId === ref.itemId && entry.packId === ref.packId);
+        return `<div class="dept-row"><span>${esc(item ? item.name : ref.itemId)}</span>`
+          + `<span class="mono">${esc(ref.packId)}#${esc(ref.itemId)}</span></div>`;
+      }).join('');
+  }
+
+  const rows = [];
+  for (const item of catalog) {
+    const on = templates.some((ref) => ref.itemId === item.itemId && ref.packId === item.packId);
+    for (const section of Array.isArray(item.sections) ? item.sections : []) {
+      for (const slot of Array.isArray(section.slots) ? section.slots : []) {
+        if (slot.kind !== 'field' || !slot.from) continue;
+        rows.push({ template: item.name, on, slot: slot.key, from: slot.from, dataType: slot.dataType });
+      }
+    }
+  }
+  const kchip = $('intakeKeysChip');
+  if (kchip) kchip.textContent = `${rows.length} 个槽位`;
+  const kbody = $('intakeKeysBody');
+  if (kbody) {
+    kbody.innerHTML = rows.length === 0
+      ? '<div class="muted">模板里还没有标「从系统带入」的槽位。</div>'
+      : rows.map((row) => `<div class="dept-row">
+          <span>${esc(row.template)}</span>
+          <span class="mono">${esc(row.slot)}</span>
+          <span class="mono">${esc(row.from)}</span>
+          <span class="muted">${esc(row.dataType)}</span>
+          <span class="chip${row.on ? ' ok' : ''}">${row.on ? '已勾选' : '未勾选'}</span>
+        </div>`).join('');
+  }
+}
+
+function setIntakeStatus(text) {
+  const box = $('cfgIntakeStatus');
+  if (box) box.innerHTML = text;
 }
 
 const CONTENT_KIND_TEXT = { phrase: '常用语', 'content-paragraph': '内容段落' };
@@ -4648,14 +4966,27 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  if (el && el.dataset && el.dataset.ctxfieldPage) {
+    const next = Number(el.dataset.ctxfieldPage);
+    if (Number.isFinite(next) && next >= 1) {
+      CTX_FIELD_PAGE = next;
+      renderContextFields(null);
+    }
+    return;
+  }
+
   const tab = event.target && event.target.closest ? event.target.closest('[data-cfg-tab]') : null;
   if (tab) {
     selectCfgPane(tab);
     if (tab.dataset.cfgTab === 'predicates') renderPredicates();
     if (tab.dataset.cfgTab === 'expressions') renderExprCatalog();
     if (tab.dataset.cfgTab === 'ctrlDefs') renderCtrlCatalog();
-    if (tab.dataset.cfgTab === 'contentLib') void loadContentLibrary();
     if (tab.dataset.cfgTab === 'previsit') renderPrevisitAccessPanel();
+    if (tab.dataset.cfgTab === 'intake') renderIntake();
+    if (tab.dataset.cfgTab === 'templates') renderTemplatePacks();
+    if (tab.dataset.cfgTab === 'packs') renderKnowledgePacks();
+    if (tab.dataset.cfgTab === 'contentLib') void loadContentLibrary();
+    if (tab.dataset.cfgTab === 'contextFields') renderContextFields(S.contextFieldCatalog || { items: [], source: 'builtin' });
     return;
   }
   if (!el) return;
@@ -5376,6 +5707,28 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  if (el.dataset && el.dataset.tplIntake) {
+    if (!(await requireSession())) return;
+    const itemId = String(el.dataset.tplIntake);
+    const item = tplItemOf(itemId);
+    if (!item) return;
+    const list = (S && S.intake && Array.isArray(S.intake.templates) ? S.intake.templates : []).slice();
+    const rest = list.filter((ref) => !(ref.itemId === itemId && ref.packId === item.packId));
+    const templates = el.checked ? [...rest, { packId: item.packId, itemId }] : rest;
+    const r = await api('/api/intake-config', { templates });
+    if (r && r.state) S = r.state;
+    if (r && !r.ok) {
+      el.checked = !el.checked;
+      setTplDrawerStatus(`未能保存：${(r && (r.message || r.code)) || '未知原因'}`);
+      return;
+    }
+    renderIntake();
+    setTplDrawerStatus(el.checked
+      ? '已加入「参与外部带入」：去「能力配置 · 数据采集」开启接口并设置密钥'
+      : '已移出「参与外部带入」');
+    return;
+  }
+
   if (el.dataset && el.dataset.tplDelete) {
     if (!(await requireSession())) return;
     const [packId, itemId] = String(el.dataset.tplDelete).split('|');
@@ -5664,7 +6017,7 @@ document.addEventListener('click', async (event) => {
 
   if (el.id === 'ctrlCatalogRefresh') { await refresh(); return; }
 
-  if (el.id === 'conditionLibRefresh') { await loadAdminView('master'); return; }
+  if (el.id === 'conditionLibRefresh') { await refresh(); renderPredicates(); return; }
 
   if (el.id === 'btnCreateCondition') {
     renderConditionCreateForm();
@@ -5782,6 +6135,70 @@ document.addEventListener('click', async (event) => {
       : `未能删除「${label}」：${(r && (r.message || r.code)) || '未知原因'}`);
     return;
   }
+  if (el.id === 'ctxFieldRefresh') { await loadAdminView('master'); return; }
+  if (el.id === 'ctxFieldImportOpen') {
+    const panel = $('ctxFieldImport');
+    if (panel) {
+      panel.hidden = false;
+      const box = $('ctxFieldImportText');
+      if (box) box.focus();
+    }
+    return;
+  }
+  if (el.id === 'ctxFieldImportCancel') { closeCtxFieldImport(); return; }
+  if (el.id === 'ctxFieldImportApply') { applyContextFieldImport(); return; }
+  if (el.dataset && el.dataset.ctxfieldDel) {
+    const index = Number(el.dataset.ctxfieldRow);
+    if (Array.isArray(CTX_FIELD_DRAFT) && Number.isFinite(index)) {
+      CTX_FIELD_DRAFT.splice(index, 1);
+      renderContextFields(null);
+    }
+    return;
+  }
+  if (el.id === 'ctxFieldSave') {
+    if (!(await requireSession())) return;
+    const items = readContextFieldRows();
+    const r = await api('/api/context-fields', { items });
+    if (r && r.state) {
+      S = r.state;
+      renderModelPanel();
+    }
+    if (r && r.ok) renderContextFields(r.data, true);
+    setCtxFieldStatus(r && r.ok
+      ? `已保存 ${items.length} 个字段`
+      : `保存失败：${(r && (r.message || r.code)) || '未知原因'}`);
+    return;
+  }
+
+  if (el.id === 'cfgIntakeSave') {
+    if (!(await requireSession())) return;
+    const enabled = $('cfgIntakeEnabled').value === 'true';
+    const requireKey = $('cfgIntakeRequireKey').value === 'true';
+    const key = String($('cfgIntakeKey').value || '').trim();
+    const r = await api('/api/intake-config', {
+      enabled,
+      requireKey,
+      ...(key === '' ? {} : { key }),
+    });
+    if (r && r.state) S = r.state;
+    renderIntake();
+    setIntakeStatus(r && r.ok
+      ? `已保存${r.data && r.data.keyAction === 'set' ? '，密钥已更新' : ''}`
+      : `保存失败：${(r && (r.message || r.code)) || '未知原因'}`);
+    return;
+  }
+  if (el.id === 'cfgIntakeClearKey') {
+    if (!(await askConfirm(
+      '清除外部带入口令？\n\n若仍要求校验，外部系统会立刻写不进来。没有撤销。',
+      { okLabel: '清除', tone: 'danger' },
+    ))) return;
+    const r = await api('/api/intake-config', { key: null });
+    if (r && r.state) S = r.state;
+    renderIntake();
+    setIntakeStatus(r && r.ok ? '已清除密钥' : `清除失败：${(r && (r.message || r.code)) || '未知原因'}`);
+    return;
+  }
+
   if (el.id === 'deptAdd') {
     const body = $('deptBody');
     if (body) {
@@ -5932,6 +6349,33 @@ document.addEventListener('click', async (event) => {
 
 document.addEventListener('change', async (event) => {
   const el = event.target;
+  if (el && el.id === 'ctxFieldSourceFilter') {
+    CTX_FIELD_SOURCE = String(el.value || '');
+    CTX_FIELD_PAGE = 1;
+    renderContextFields(null);
+    return;
+  }
+  if (el && el.id === 'ctxFieldGroupFilter') {
+    CTX_FIELD_GROUP = String(el.value || '');
+    CTX_FIELD_PAGE = 1;
+    renderContextFields(null);
+    return;
+  }
+  if (el && el.dataset && el.dataset.ctxfieldEnabled !== undefined) {
+    const index = ctxFieldIndexOf(el);
+    const item = index >= 0 && Array.isArray(CTX_FIELD_DRAFT) ? CTX_FIELD_DRAFT[index] : null;
+    if (item) {
+      item.enabled = Boolean(el.checked);
+      const row = el.closest ? el.closest('.dept-row') : null;
+      if (row) row.classList.toggle('off', !item.enabled);
+      const chip = $('ctxFieldChip');
+      if (chip && !chip.classList.contains('danger')) {
+        chip.textContent = `${CTX_FIELD_DRAFT.length} 个`
+          + `（启用 ${CTX_FIELD_DRAFT.filter((entry) => entry.enabled).length}）`;
+      }
+    }
+    return;
+  }
   if (el && el.id === 'contentLibDept') {
     CONTENT_LIB_DEPT = String(el.value || '');
     await loadContentLibrary();

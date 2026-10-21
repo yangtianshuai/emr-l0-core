@@ -300,7 +300,7 @@ function withResolvedCondition(
     throw new RulePackError(
       'E_RULE_CONDITION_UNKNOWN',
       `${label} 引用了库里没有的判定方式「${conditionId}」：可用的是 ${available === '' ? '（库里一条都没有）' : available}。`
-        + '判定方式是**库级资产**（管理后台「基础数据 · 判定方式」里维护），规则引用它时写的那个编码必须在库里存在；'
+        + '判定方式是**库级资产**（管理后台「知识资产 · 判定方式」里维护），规则引用它时写的那个编码必须在库里存在；'
         + '悬空引用会让这条规则什么都判不了，而它在界面上仍然列着、看着一切正常。',
     );
   }

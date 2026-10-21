@@ -121,7 +121,69 @@ header {
 .patient-card .meta { font-size: var(--fs-xs); opacity: .9; }
 .patient-card .divider { width: 1px; height: 26px; background: rgba(255, 255, 255, .25); }
 .patient-card .doc-title { font-size: 13px; font-weight: 600; }
-.hdr-actions { margin-left: auto; display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.hdr-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* 换行以组为单位，避免按钮被逐个拆散 */
+.hdr-group { display: flex; align-items: center; gap: var(--s2); flex-wrap: nowrap; }
+.hdr-group + .hdr-group { padding-left: 10px; border-left: 1px solid rgba(255, 255, 255, .22); }
+.hdr-menu { position: relative; }
+.hdr-menu > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 32px; padding: 5px 12px; font-size: var(--fs-sm); font-weight: 500;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .9); color: #1f2937;
+  transition: background var(--t), transform var(--t);
+}
+.hdr-menu > summary:hover { transform: translateY(-1px); }
+.hdr-menu > summary.icon-btn { width: 32px; min-width: 32px; padding: 5px 0; justify-content: center; font-size: 14px; }
+.hdr-menu > summary::-webkit-details-marker { display: none; }
+.hdr-menu > summary:hover,
+.hdr-menu[open] > summary { background: #fff; }
+.hdr-caret { font-size: 9px; opacity: .55; transition: transform var(--t); }
+.hdr-menu[open] .hdr-caret { transform: rotate(180deg); }
+.hdr-menu-list {
+  position: absolute; z-index: 70; top: calc(100% + 8px); left: 0; min-width: 178px;
+  max-width: calc(100vw - 32px);
+  display: flex; flex-direction: column; gap: 1px; padding: 5px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .10), 0 18px 42px rgba(15, 23, 42, .26);
+  animation: hdr-menu-in 140ms cubic-bezier(.2, .8, .3, 1) both;
+}
+@keyframes hdr-menu-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: none; }
+}
+.hdr-menu-end > .hdr-menu-list { left: auto; right: 0; }
+/* 收起时必须显式隐藏：作者样式里的 display:flex 会盖掉 UA 的收起行为 */
+.hdr-menu:not([open]) > .hdr-menu-list { display: none; }
+.hdr-menu-list button {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; min-height: 34px; padding: 6px 10px; text-align: left;
+  font-size: 13px; font-weight: 500;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  /* 不能继承：header 的文字是白色，落到白底弹层上就成了白字白底 */
+  color: var(--text);
+  transition: background var(--t), color var(--t);
+}
+.hdr-menu-list button:hover:not(:disabled) {
+  background: var(--tint-primary-bg); color: var(--tint-primary-tx);
+  border-color: transparent; transform: none;
+}
+.hdr-menu-list button[aria-pressed="true"] {
+  background: var(--tint-primary-bg); color: var(--tint-primary-tx); box-shadow: none;
+}
+.hdr-menu-list button[aria-pressed="true"]::after { content: "✓"; margin-left: auto; font-size: 12px; }
+.hdr-menu-sep { flex: none; height: 1px; margin: 4px 8px; background: var(--line); }
+.hdr-menu-list .mi-icon {
+  flex: none; width: 16px; text-align: center; font-size: 12px; opacity: .55;
+}
+.hdr-menu-list button:hover .mi-icon,
+.hdr-menu-list button[aria-pressed="true"] .mi-icon { opacity: .95; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hdr-menu-list { animation: none; }
+  .hdr-menu > summary, .hdr-caret { transition: none; }
+}
 header select {
   font: inherit; font-size: 12.5px; padding: 6px 9px; border-radius: var(--radius-xs);
   border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .14); color: #fff;
@@ -862,6 +924,7 @@ html.dialog-open { overflow: hidden; }
 .cfg-pane { display: none; }
 .cfg-pane.active { display: block; }
 
+
 .cfg-group {
   border: 1px solid var(--line); border-radius: var(--radius); padding: 26px 28px; margin-bottom: 24px;
   background: var(--card);
@@ -1049,7 +1112,16 @@ html.dialog-open { overflow: hidden; }
 .dept-row:last-child { border-bottom: 0; }
 .dept-row input[type="text"] { min-width: 170px; }
 .dept-row label.check { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.dept-row.off { opacity: .66; }
 .doc-type-row select { min-width: 110px; }
+
+#ctxFieldSourceFilter, #ctxFieldGroupFilter { min-width: 132px; }
+#ctxFieldImport { margin: 10px 0 4px; }
+#ctxFieldImport textarea {
+  width: 100%; box-sizing: border-box; min-height: 140px; resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.7;
+}
+#ctxFieldBody .tpl-pager { border-top: 0; }
 /* 共享内容库的作用域切换：两层是并列的两份资产，不是同一条的筛选条件，
    所以用一组按下态按钮；下拉只承载"哪一层"之后的科室。 */
 .contentlib-scope { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
@@ -1339,16 +1411,13 @@ input[type=range] { width: 100%; }
 .ftools button { min-width: 30px; padding: 2px 8px; }
 .ftools .muted { font-size: var(--fs-sm); }
 
-.ftools.floating {
-  position: fixed; z-index: 60; flex-wrap: nowrap;
-  padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px;
+/* 选中文字时贴到选区旁的那一条：只放按钮，不带文字说明 */
+.ftools-float {
+  position: fixed; z-index: 61; flex-wrap: nowrap;
+  padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--card); box-shadow: 0 6px 20px rgba(0, 0, 0, .16);
-  border-bottom: 1px solid var(--line);
 }
-.ftools.floating .muted { display: none; }
-
-.ftools-spacer { height: 0; }
-.ftools-spacer[hidden] { display: none; }
+.ftools-float[hidden] { display: none; }
 
 .fbody {
   background: var(--card); border: 1px solid transparent; border-radius: var(--radius-sm);

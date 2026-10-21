@@ -33,6 +33,7 @@
 
     <nav class="side-nav" role="tablist" aria-label="管理后台分区">
       <button class="side-btn active" role="tab" data-admin-view="config" aria-selected="true">能力配置</button>
+      <button class="side-btn" role="tab" data-admin-view="knowledge" aria-selected="false">知识资产</button>
       <button class="side-btn" role="tab" data-admin-view="master" aria-selected="false">基础数据</button>
       <button class="side-btn" role="tab" data-admin-view="accounts" aria-selected="false">账号管理</button>
       <button class="side-btn" role="tab" data-admin-view="health" aria-selected="false">运行状态</button>
@@ -69,9 +70,7 @@
       <button class="cfg-tab active" role="tab" data-cfg-tab="model" id="cfgTabModel" aria-controls="cfgPaneModel" aria-selected="true">模型接入</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="voice" id="cfgTabVoice" aria-controls="cfgPaneVoice" aria-selected="false">语音</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="previsit" id="cfgTabPrevisit" aria-controls="cfgPanePrevisit" aria-selected="false">预问诊</button>
-      <button class="cfg-tab" role="tab" data-cfg-tab="templates" id="cfgTabTemplates" aria-controls="cfgPaneTemplates" aria-selected="false">模板库</button>
-      <button class="cfg-tab" role="tab" data-cfg-tab="contentLib" id="cfgTabContentLib" aria-controls="cfgPaneContentLib" aria-selected="false">内容库</button>
-      <button class="cfg-tab" role="tab" data-cfg-tab="packs" id="cfgTabPacks" aria-controls="cfgPanePacks" aria-selected="false">规则库</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="intake" id="cfgTabIntake" aria-controls="cfgPaneIntake" aria-selected="false">数据采集</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="qc" id="cfgTabQc" aria-controls="cfgPaneQc" aria-selected="false">质控</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="sign" id="cfgTabSign" aria-controls="cfgPaneSign" aria-selected="false">电子签名</button>
       <button class="cfg-tab" role="tab" data-cfg-tab="reading" id="cfgTabReading" aria-controls="cfgPaneReading" aria-selected="false">受控阅读</button>
@@ -184,54 +183,42 @@
     </div>
     </div>
 
-    <div class="cfg-pane" data-cfg-pane="templates" role="tabpanel" id="cfgPaneTemplates" aria-labelledby="cfgTabTemplates">
+    <div class="cfg-pane" data-cfg-pane="intake" role="tabpanel" id="cfgPaneIntake" aria-labelledby="cfgTabIntake">
     <div class="cfg-group">
-      <div class="cfg-head"><b>模板库</b><span class="chip">库是唯一来源</span></div>
-      <div class="row mt6 tpl-toolbar">
-        <span>模板名称</span>
-        <input type="search" id="tplSearchName" placeholder="按名称筛选（不区分大小写）"
-          title="按模板名称筛：留空 = 全列。科室与状态是给人读的列，不做条件。" />
-        <button class="primary" id="btnCreateTemplate" title="新建一份文书骨架：默认是草稿，定稿后在行上点「发布」">新建文书</button>
+      <div class="cfg-head"><b>外部带入</b><span class="chip" id="intakeChip">—</span></div>
+      <div class="chiplines" id="intakeSummary"></div>
+      <div class="cfg-grid">
+        <span>写入接口</span>
+        <select id="cfgIntakeEnabled">
+          <option value="true">开启</option>
+          <option value="false">关闭（一律拒绝）</option>
+        </select>
+        <span>校验</span>
+        <select id="cfgIntakeRequireKey">
+          <option value="true">要求密钥</option>
+          <option value="false">不校验（谁都能写）</option>
+        </select>
+        <span>接入密钥</span>
+        <input id="cfgIntakeKey" type="password" placeholder="留空 = 不修改" />
       </div>
-      <div id="tplPackItems"></div>
+      <div class="cfg-grid">
+        <span>接口</span>
+        <span class="mono">POST /api/intake/values · X-Intake-Key</span>
+      </div>
+      <div id="cfgIntakeStatus" class="muted cfg-status" aria-live="polite"></div>
+      <div class="form-actions">
+        <button class="primary" id="cfgIntakeSave">保存</button>
+        <button class="danger" id="cfgIntakeClearKey">清除密钥</button>
+      </div>
     </div>
-    <div class="form-actions"><span class="muted" id="tplPackStatus"></span></div>
-    </div>
-
-    <div class="cfg-pane" data-cfg-pane="contentLib" role="tabpanel" id="cfgPaneContentLib" aria-labelledby="cfgTabContentLib">
     <div class="cfg-group">
-      <div class="cfg-head"><b>共享内容库</b><span class="chip" id="contentLibChip">—</span>
-        <button class="push" id="contentLibRefresh">刷新</button>
-        <button class="primary" id="btnCreateContentLib"
-          title="新建一条共享内容：全院级对所有科室可见，科室级只对选中科室可见">新建</button></div>
-      <div class="chiplines" id="contentLibSummary"></div>
-      <div class="contentlib-scope" id="contentLibScope">
-        <button class="secondary" data-contentlib-scope="hospital" aria-pressed="true">全院</button>
-        <button class="secondary" data-contentlib-scope="dept" aria-pressed="false">科室</button>
-        <select id="contentLibDept" aria-label="科室" hidden></select>
-        <span class="muted" id="contentLibScopeHint">全院条目对所有科室可见</span>
-      </div>
-      <div id="contentLibBody"></div>
-      <div class="form-actions"><span class="muted cfg-status" id="contentLibStatus" aria-live="polite"></span></div>
+      <div class="cfg-head"><b>参与外部带入的模板</b><span class="chip" id="intakeTemplatesChip">—</span></div>
+      <div id="intakeTemplatesBody"></div>
     </div>
-    </div>
-
-    <div class="cfg-pane" data-cfg-pane="packs" role="tabpanel" id="cfgPanePacks" aria-labelledby="cfgTabPacks">
     <div class="cfg-group">
-      <div class="cfg-head"><b>规则库</b><span class="chip">库是唯一来源</span></div>
-           <div class="muted" id="qcPackSummary"></div>
-
-      <div class="row mt6 tpl-toolbar">
-        <span>规则名称 / 规则号</span>
-        <input type="search" id="ruleSearchKeyword" placeholder="按标题或规则号筛选（不区分大小写）"
-          title="按标题或规则号筛：留空 = 全列。级别与判定方式是给人读的列，不做条件。" />
-        <button class="primary" id="btnCreateRule"
-          title="新建一条规则：新建出来默认停用（下一轮质控不跑它），确认无误后在那一行点「启用」">新建规则</button>
-      </div>
-      <div id="qcPackItems"></div>
+      <div class="cfg-head"><b>对接键</b><span class="chip" id="intakeKeysChip">—</span></div>
+      <div id="intakeKeysBody"></div>
     </div>
-
-    <div class="form-actions"><span class="muted" id="qcPackStatus"></span></div>
     </div>
 
     <div class="cfg-pane" data-cfg-pane="qc" role="tabpanel" id="cfgPaneQc" aria-labelledby="cfgTabQc">
@@ -350,13 +337,111 @@
 
     </div>
 
+    <div class="admin-view" data-admin-view-pane="knowledge">
+    <div class="cfg-tabs" role="tablist" aria-label="知识资产分类">
+      <button class="cfg-tab active" role="tab" data-cfg-tab="templates" id="cfgTabTemplates" aria-controls="cfgPaneTemplates" aria-selected="true">模板库</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="expressions" id="cfgTabExpressions" aria-controls="cfgPaneExpressions" aria-selected="false">表达式控件</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="ctrlDefs" id="cfgTabCtrlDefs" aria-controls="cfgPaneCtrlDefs" aria-selected="false">专科控件</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="contentLib" id="cfgTabContentLib" aria-controls="cfgPaneContentLib" aria-selected="false">内容库</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="packs" id="cfgTabPacks" aria-controls="cfgPanePacks" aria-selected="false">规则库</button>
+      <button class="cfg-tab" role="tab" data-cfg-tab="predicates" id="cfgTabPredicates" aria-controls="cfgPanePredicates" aria-selected="false">判定方式</button>
+    </div>
+
+    <div class="cfg-pane active" data-cfg-pane="templates" role="tabpanel" id="cfgPaneTemplates" aria-labelledby="cfgTabTemplates">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>模板库</b><span class="chip">库是唯一来源</span></div>
+      <div class="row mt6 tpl-toolbar">
+        <span>模板名称</span>
+        <input type="search" id="tplSearchName" placeholder="按名称筛选（不区分大小写）"
+          title="按模板名称筛：留空 = 全列。科室与状态是给人读的列，不做条件。" />
+        <button class="primary" id="btnCreateTemplate" title="新建一份文书骨架：默认是草稿，定稿后在行上点「发布」">新建文书</button>
+      </div>
+      <div id="tplPackItems"></div>
+    </div>
+    <div class="form-actions"><span class="muted" id="tplPackStatus"></span></div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="expressions" role="tabpanel" id="cfgPaneExpressions" aria-labelledby="cfgTabExpressions">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>表达式控件</b><span class="chip" id="exprCatalogSummary">—</span>
+        <button class="push" id="exprCatalogRefresh">刷新</button>
+        <button class="primary" id="btnNewExpression"
+          title="新建一个医学表达式控件：公式在这里是结构（选函数 / 选填写项 / 填数字），不是文本">新建</button></div>
+      <div id="exprCatalogBody"></div>
+      <div class="form-actions"><span class="muted cfg-status" id="exprCatalogStatus" aria-live="polite"></span></div>
+    </div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="ctrlDefs" role="tabpanel" id="cfgPaneCtrlDefs" aria-labelledby="cfgTabCtrlDefs">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>专科控件</b><span class="chip" id="ctrlCatalogSummary">—</span>
+        <button class="push" id="ctrlCatalogRefresh">刷新</button>
+        <button class="primary" id="btnNewControl"
+          title="新建一个专科控件：形状决定用哪个渲染器（量表评分 / 时序 / 行列表 / 勾选清单），字段决定填什么 —— 要算的格子引用「表达式控件」里的那一份">新建</button></div>
+      <div id="ctrlCatalogBody"></div>
+      <div class="form-actions"><span class="muted cfg-status" id="ctrlCatalogStatus" aria-live="polite"></span></div>
+    </div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="contentLib" role="tabpanel" id="cfgPaneContentLib" aria-labelledby="cfgTabContentLib">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>共享内容库</b><span class="chip" id="contentLibChip">—</span>
+        <button class="push" id="contentLibRefresh">刷新</button>
+        <button class="primary" id="btnCreateContentLib"
+          title="新建一条共享内容：全院级对所有科室可见，科室级只对选中科室可见">新建</button></div>
+      <div class="chiplines" id="contentLibSummary"></div>
+      <div class="contentlib-scope" id="contentLibScope">
+        <button class="secondary" data-contentlib-scope="hospital" aria-pressed="true">全院</button>
+        <button class="secondary" data-contentlib-scope="dept" aria-pressed="false">科室</button>
+        <select id="contentLibDept" aria-label="科室" hidden></select>
+        <span class="muted" id="contentLibScopeHint">全院条目对所有科室可见</span>
+      </div>
+      <div id="contentLibBody"></div>
+      <div class="form-actions"><span class="muted cfg-status" id="contentLibStatus" aria-live="polite"></span></div>
+    </div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="packs" role="tabpanel" id="cfgPanePacks" aria-labelledby="cfgTabPacks">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>规则库</b><span class="chip">库是唯一来源</span></div>
+           <div class="muted" id="qcPackSummary"></div>
+
+      <div class="row mt6 tpl-toolbar">
+        <span>规则名称 / 规则号</span>
+        <input type="search" id="ruleSearchKeyword" placeholder="按标题或规则号筛选（不区分大小写）"
+          title="按标题或规则号筛：留空 = 全列。级别与判定方式是给人读的列，不做条件。" />
+        <button class="primary" id="btnCreateRule"
+          title="新建一条规则：新建出来默认停用（下一轮质控不跑它），确认无误后在那一行点「启用」">新建规则</button>
+      </div>
+      <div id="qcPackItems"></div>
+    </div>
+
+    <div class="form-actions"><span class="muted" id="qcPackStatus"></span></div>
+    </div>
+
+    <div class="cfg-pane" data-cfg-pane="predicates" role="tabpanel" id="cfgPanePredicates" aria-labelledby="cfgTabPredicates">
+    <div class="cfg-group">
+      <div class="cfg-head"><b>判定方式</b><span class="chip" id="conditionLibChip">—</span>
+        <button class="push" id="conditionLibRefresh">刷新</button>
+        <button class="primary" id="btnCreateCondition"
+          title="新建一条判定方式：它是一份被多条规则引用的资产 —— 改一处，引它的规则一起变">新建</button></div>
+      <div class="chiplines" id="conditionLibSummary"></div>
+      <div id="conditionLibraryBody"></div>
+      <div class="form-actions"><span class="muted cfg-status" id="conditionLibStatus" aria-live="polite"></span></div>
+    </div>
+    <div class="cfg-group">
+      <div class="cfg-head"><b>自定义条件能拼哪些格</b><span class="chip" id="conditionChip">—</span></div>
+      <div id="conditionBody"></div>
+    </div>
+    </div>
+
+</div>
+
     <div class="admin-view" data-admin-view-pane="master">
       <div class="cfg-tabs" role="tablist" aria-label="基础数据分类">
         <button class="cfg-tab active" role="tab" data-cfg-tab="dept" id="cfgTabDept" aria-controls="cfgPaneDept" aria-selected="true">科室字典</button>
         <button class="cfg-tab" role="tab" data-cfg-tab="docTypes" id="cfgTabDocTypes" aria-controls="cfgPaneDocTypes" aria-selected="false">文书类型</button>
-        <button class="cfg-tab" role="tab" data-cfg-tab="expressions" id="cfgTabExpressions" aria-controls="cfgPaneExpressions" aria-selected="false">表达式控件</button>
-        <button class="cfg-tab" role="tab" data-cfg-tab="ctrlDefs" id="cfgTabCtrlDefs" aria-controls="cfgPaneCtrlDefs" aria-selected="false">专科控件</button>
-        <button class="cfg-tab" role="tab" data-cfg-tab="predicates" id="cfgTabPredicates" aria-controls="cfgPanePredicates" aria-selected="false">判定方式</button>
+        <button class="cfg-tab" role="tab" data-cfg-tab="contextFields" id="cfgTabContextFields" aria-controls="cfgPaneContextFields" aria-selected="false">字段字典</button>
       </div>
 
       <div class="cfg-pane active" data-cfg-pane="dept" role="tabpanel" id="cfgPaneDept" aria-labelledby="cfgTabDept">
@@ -387,41 +472,30 @@
       </div>
       </div>
 
-      <div class="cfg-pane" data-cfg-pane="expressions" role="tabpanel" id="cfgPaneExpressions" aria-labelledby="cfgTabExpressions">
+      <div class="cfg-pane" data-cfg-pane="contextFields" role="tabpanel" id="cfgPaneContextFields" aria-labelledby="cfgTabContextFields">
       <div class="cfg-group">
-        <div class="cfg-head"><b>表达式控件</b><span class="chip" id="exprCatalogSummary">—</span>
-          <button class="push" id="exprCatalogRefresh">刷新</button>
-          <button class="primary" id="btnNewExpression"
-            title="新建一个医学表达式控件：公式在这里是结构（选函数 / 选填写项 / 填数字），不是文本">新建</button></div>
-        <div id="exprCatalogBody"></div>
-        <div class="form-actions"><span class="muted cfg-status" id="exprCatalogStatus" aria-live="polite"></span></div>
-      </div>
-      </div>
-
-      <div class="cfg-pane" data-cfg-pane="ctrlDefs" role="tabpanel" id="cfgPaneCtrlDefs" aria-labelledby="cfgTabCtrlDefs">
-      <div class="cfg-group">
-        <div class="cfg-head"><b>专科控件</b><span class="chip" id="ctrlCatalogSummary">—</span>
-          <button class="push" id="ctrlCatalogRefresh">刷新</button>
-          <button class="primary" id="btnNewControl"
-            title="新建一个专科控件：形状决定用哪个渲染器（量表评分 / 时序 / 行列表 / 勾选清单），字段决定填什么 —— 要算的格子引用「表达式控件」里的那一份">新建</button></div>
-        <div id="ctrlCatalogBody"></div>
-        <div class="form-actions"><span class="muted cfg-status" id="ctrlCatalogStatus" aria-live="polite"></span></div>
-      </div>
-      </div>
-
-      <div class="cfg-pane" data-cfg-pane="predicates" role="tabpanel" id="cfgPanePredicates" aria-labelledby="cfgTabPredicates">
-      <div class="cfg-group">
-        <div class="cfg-head"><b>判定方式</b><span class="chip" id="conditionLibChip">—</span>
-          <button class="push" id="conditionLibRefresh">刷新</button>
-          <button class="primary" id="btnCreateCondition"
-            title="新建一条判定方式：它是一份被多条规则引用的资产 —— 改一处，引它的规则一起变">新建</button></div>
-        <div class="chiplines" id="conditionLibSummary"></div>
-        <div id="conditionLibraryBody"></div>
-        <div class="form-actions"><span class="muted cfg-status" id="conditionLibStatus" aria-live="polite"></span></div>
-      </div>
-      <div class="cfg-group">
-        <div class="cfg-head"><b>自定义条件能拼哪些格</b><span class="chip" id="conditionChip">—</span></div>
-        <div id="conditionBody"></div>
+        <div class="cfg-head"><b>字段字典</b><span class="chip" id="ctxFieldChip">—</span>
+          <button class="push" id="ctxFieldRefresh">刷新</button></div>
+        <div class="chiplines" id="ctxFieldSummary"></div>
+        <div class="row mt6 tpl-toolbar">
+          <input type="search" id="ctxFieldSearch" placeholder="按路径 / 显示名 / 分组筛" />
+          <select id="ctxFieldSourceFilter" aria-label="来源系统"></select>
+          <select id="ctxFieldGroupFilter" aria-label="分组"></select>
+          <button class="secondary" id="ctxFieldImportOpen">批量导入</button>
+        </div>
+        <div id="ctxFieldImport" hidden>
+          <textarea id="ctxFieldImportText" rows="6" spellcheck="false"
+            placeholder="path,显示名,分组,来源系统,启用"></textarea>
+          <div class="form-actions">
+            <button class="primary" id="ctxFieldImportApply">导入</button>
+            <button class="secondary" id="ctxFieldImportCancel">取消</button>
+          </div>
+        </div>
+        <div id="ctxFieldBody"></div>
+        <div class="form-actions">
+          <button class="primary" id="ctxFieldSave">保存</button>
+          <span class="muted cfg-status" id="ctxFieldStatus" aria-live="polite"></span>
+        </div>
       </div>
       </div>
 

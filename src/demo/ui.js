@@ -31,7 +31,10 @@ let theme = (() => {
 function applyTheme() {
   document.documentElement.dataset.theme = theme;
   const button = $('btnTheme');
-  if (button) button.textContent = theme === 'dark' ? '☀' : '◐';
+  if (!button) return;
+  const icon = button.querySelector('.mi-icon');
+  if (icon) icon.textContent = theme === 'dark' ? '☀' : '◐';
+  else button.textContent = theme === 'dark' ? '☀' : '◐';
 }
 applyTheme();
 
@@ -101,6 +104,24 @@ function togglePaper() {
   }
 }
 
+function closeHdrMenu(node) {
+  const menu = node ? node.closest('details.hdr-menu') : null;
+  if (menu) menu.open = false;
+}
+
+// 下拉互斥：点开另一个时关掉前一个，点页面空白处全关
+document.addEventListener('pointerdown', (event) => {
+  const own = event.target.closest('details.hdr-menu');
+  document.querySelectorAll('details.hdr-menu[open]').forEach((menu) => {
+    if (menu !== own) menu.open = false;
+  });
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  document.querySelectorAll('details.hdr-menu[open]').forEach((menu) => { menu.open = false; });
+});
+
 function ensurePrintPageRule() {
   const paper = (S && S.paper) || {};
   const width = Number(paper.widthPt) || 595;
@@ -118,6 +139,7 @@ function printDoc() {
 }
 
 let previewLayout = null;
+let previewPrints = null;
 
 function ensurePreviewPageRule() {
   const style = $('printPageRule');
@@ -186,7 +208,11 @@ function renderPreview() {
   }
 
   const meta = $('previewMeta');
-  if (meta) meta.textContent = `${layout.pages.length} 页 · 正文 ${layout.stats.lines} 行 · 纸面 ${layout.widthPt}×${layout.heightPt}pt`;
+  const prints = previewPrints ?? layout.prints;
+  if (meta) {
+    const trail = prints ? ` · 已打印 ${prints.count} 次${prints.formalCount > 0 ? `（正式件 ${prints.formalCount} 次）` : ''}` : '';
+    meta.textContent = `${layout.pages.length} 页 · 正文 ${layout.stats.lines} 行 · 纸面 ${layout.widthPt}×${layout.heightPt}pt${trail}`;
+  }
   const chip = $('previewState');
   if (chip) {
     chip.className = formal ? 'chip ok' : 'chip warn';
@@ -203,6 +229,7 @@ async function openPreview() {
     return;
   }
   previewLayout = res.data;
+  previewPrints = previewLayout.prints ?? null;
   renderPreview();
   if (!dialog.open) dialog.showModal();
   document.body.classList.add('preview-open');
@@ -216,11 +243,22 @@ function closePreview() {
   if (dialog.open) dialog.close();
   document.body.classList.remove('preview-open');
   const opener = $('btnPreview');
-  if (opener) opener.focus();
+  if (opener) {
+    // 预览入口收在「视图」菜单里，关掉浮层后焦点要回到菜单标题上，否则落在隐藏元素上
+    const menu = opener.closest('details.hdr-menu');
+    (menu ? menu.querySelector('summary') : opener).focus();
+  }
 }
 
-function printPreview() {
+async function printPreview() {
   if (!previewLayout) return;
+  const log = await api('/api/print-log', { pages: previewLayout.pages.length });
+  if (!log || log.ok !== true) {
+    toast(`打印被拦下：留痕没记上（${(log && (log.code || log.message)) || '接口无响应'}）。不记留痕就不出纸`, 'danger');
+    return;
+  }
+  previewPrints = log.data ?? null;
+  renderPreview();
   ensurePreviewPageRule();
   document.body.classList.add('printing-preview');
   window.print();
@@ -2916,10 +2954,17 @@ function renderAudit() {
     : `<span class="chip danger">机器可判定项 ${audit.passed}/${audit.total} 通过</span>`;
   const failed = (audit.failed || []).map((item) => `
     <div class="muted ml8">❌ ${esc(item.description)}${item.detail ? ` · 证据：<code>${esc(item.detail)}</code>` : ''}</div>`).join('');
+  const printing = audit.printing || null;
+  const printLine = printing
+    ? `<div class="muted mt4">打印留痕：${printing.count} 次（正式件 ${printing.formalCount} 次）${
+        printing.lastAt ? ` · 最近一次 ${esc(printing.lastAt.slice(0, 19))} 由 ${esc(printing.lastActorId || '—')} 打出` : ' · 尚未打印'
+      }</div>`
+    : '';
   body.innerHTML = `
     <div class="mb4">${chip} <span class="muted">生成于 ${esc((audit.generatedAt || '').slice(0, 19))}</span></div>
     <div class="muted">报告指纹 <code>${esc(audit.reportDigest || '')}</code></div>
     <div class="muted">Markdown <code>${esc(audit.mdPath || '')}</code><br />JSON <code>${esc(audit.jsonPath || '')}</code></div>
+    ${printLine}
     ${failed}`;
 }
 
@@ -3294,7 +3339,8 @@ function renderAll() {
   syncEditMode();
   const tools = $('flowTools');
   if (tools) tools.hidden = !isFlow();
-  if (!isFlow()) setFlowToolsFloating(false);
+  const floatTools = $('flowToolsFloat');
+  if (floatTools && !isFlow()) floatTools.hidden = true;
   renderImport();
   renderMachine();
   if (panelAlive('export')) renderExport();
@@ -3752,6 +3798,7 @@ function placeSelectionBar(caret) {
   if (top + size.height > height - 8) top = Math.max(8, height - size.height - 8);
   bar.style.left = `${Math.round(left)}px`;
   bar.style.top = `${Math.round(top)}px`;
+  positionFlowToolsFloat();
 }
 
 function hideSelectionBar() {
@@ -5502,6 +5549,7 @@ document.addEventListener('click', async (event) => {
 
   const el = event.target.closest('button');
   if (!el) return;
+  closeHdrMenu(el);
   clearTimeout(blurTimer);
   await flushEdits();
   if (el.id === 'btnTplCreate') {
@@ -6479,79 +6527,79 @@ function applyFlowMark(mark) {
   scheduleFlowFlush(400);
 }
 
-function setFlowToolsFloating(on) {
-  const tools = $('flowTools');
-  if (!tools) return;
-  const spacer = $('flowToolsSpacer');
-  if (!on) {
-    tools.classList.remove('floating');
-    if (spacer) {
-      spacer.hidden = true;
-      spacer.style.height = '0';
-    }
-    return;
-  }
-  if (tools.classList.contains('floating')) return;
-  if (spacer) {
-    spacer.style.height = `${Math.ceil(tools.getBoundingClientRect().height)}px`;
-    spacer.hidden = false;
-  }
-  tools.classList.add('floating');
+/* 段内格式两处：头部那条常驻不动，选中文字时选区旁再浮一条同样的按钮 */
+const flowToolsEl = $('flowTools');
+const flowToolsFloat = $('flowToolsFloat');
+if (flowToolsEl && flowToolsFloat) {
+  flowToolsFloat.innerHTML = [...flowToolsEl.querySelectorAll('[data-mark]')]
+    .map((button) => button.outerHTML).join('');
 }
 
-function positionFlowTools() {
-  const tools = $('flowTools');
-  if (!tools) return;
-  if (!isFlow() || tools.hidden) {
-    setFlowToolsFloating(false);
-    return;
-  }
+function hideFlowToolsFloat() {
+  if (flowToolsFloat) flowToolsFloat.hidden = true;
+}
+
+let flowFloatTimer = null;
+
+function positionFlowToolsFloat() {
+  if (!flowToolsFloat) return;
   const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-    setFlowToolsFloating(false);
+  if (!isFlow() || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    hideFlowToolsFloat();
     return;
   }
   const range = selection.getRangeAt(0);
-  const root = range.commonAncestorContainer.nodeType === 1
-    ? range.commonAncestorContainer
-    : range.commonAncestorContainer.parentNode;
-  if (!root || !root.closest || !root.closest('[data-flow-seg]')) {
-    setFlowToolsFloating(false);
+  const anchor = range.commonAncestorContainer;
+  const host = anchor && (anchor.nodeType === 1 ? anchor : anchor.parentElement);
+  if (!host || !host.closest || !host.closest('[data-flow-seg]')) {
+    hideFlowToolsFloat();
     return;
   }
   const rect = range.getBoundingClientRect();
   if (!rect || (rect.width === 0 && rect.height === 0)) {
-    setFlowToolsFloating(false);
+    hideFlowToolsFloat();
     return;
   }
-  setFlowToolsFloating(true);
-  const width = tools.offsetWidth || 300;
-  const height = tools.offsetHeight || 34;
-  const left = Math.min(Math.max(8, rect.left + rect.width / 2 - width / 2), window.innerWidth - width - 8);
-  const above = rect.top - height - 8;
-  const top = above >= 8 ? above : Math.min(rect.bottom + 8, window.innerHeight - height - 8);
-  tools.style.left = `${Math.round(left)}px`;
-  tools.style.top = `${Math.round(top)}px`;
+  flowToolsFloat.hidden = false;
+  const size = flowToolsFloat.getBoundingClientRect();
+  const maxTop = window.innerHeight - size.height - 8;
+  const left = Math.max(8, Math.min(
+    rect.left + rect.width / 2 - size.width / 2,
+    window.innerWidth - size.width - 8,
+  ));
+  let top = rect.bottom + 8;
+  if (top > maxTop) top = rect.top - size.height - 8;
+  /* 与"存为常用语"那条错开：撞了就排到它下面，下面放不下再排到它上面 */
+  const selBar = $('selBar');
+  if (selBar && !selBar.hidden) {
+    const other = selBar.getBoundingClientRect();
+    const clash = left < other.right && left + size.width > other.left
+      && top < other.bottom && top + size.height > other.top;
+    if (clash) {
+      const below = other.bottom + 6;
+      top = below + size.height <= maxTop ? below : other.top - size.height - 6;
+    }
+  }
+  flowToolsFloat.style.left = `${Math.round(left)}px`;
+  flowToolsFloat.style.top = `${Math.round(Math.max(8, Math.min(top, maxTop)))}px`;
 }
 
-let flowFloatTimer = null;
 document.addEventListener('selectionchange', () => {
   if (!isFlow()) return;
   clearTimeout(flowFloatTimer);
-  flowFloatTimer = setTimeout(positionFlowTools, 40);
+  flowFloatTimer = setTimeout(positionFlowToolsFloat, 40);
 });
 window.addEventListener('scroll', () => {
-  const tools = $('flowTools');
-  if (tools && tools.classList.contains('floating')) positionFlowTools();
+  if (flowToolsFloat && !flowToolsFloat.hidden) positionFlowToolsFloat();
 }, { passive: true, capture: true });
 window.addEventListener('resize', () => {
-  const tools = $('flowTools');
-  if (tools && tools.classList.contains('floating')) positionFlowTools();
+  if (flowToolsFloat && !flowToolsFloat.hidden) positionFlowToolsFloat();
 }, { passive: true });
-/* 点浮条时不让正文失焦：失焦会清掉选区，而"给选中的字加格式"全部依赖那个选区 */
-const flowToolsEl = $('flowTools');
-if (flowToolsEl) {
-  flowToolsEl.addEventListener('mousedown', (event) => {
+
+/* 点格式条时不让正文失焦：失焦会清掉选区，而"给选中的字加格式"全部依赖那个选区 */
+for (const bar of [flowToolsEl, flowToolsFloat]) {
+  if (!bar) continue;
+  bar.addEventListener('mousedown', (event) => {
     if (event.target && event.target.closest && event.target.closest('[data-mark]')) event.preventDefault();
   });
 }

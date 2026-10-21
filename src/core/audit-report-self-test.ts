@@ -340,6 +340,43 @@ async function main(): Promise<void> {
     assertEqual(verifyAuditReport(report).ok, true, '报告指纹应自洽');
   });
 
+  await test('P1 打印留痕：不传要如实标注"未提供"；传了就进事实统计与 Markdown 明细', () => {
+    const doc = withNodes(() => {});
+    const without = buildAuditReport({ doc, generatedAt: AT });
+    assertEqual(without.printing.provided, false, '未传打印留痕应标记未提供');
+    assert(renderAuditReportMarkdown(without).includes('未提供'), '报告要如实写"未提供"，不能装作没打印过');
+
+    const prints = [
+      { at: AT, actorId: 'DR_A', rev: doc.revisions.length, pages: 3, status: 'draft', formal: false },
+      { at: '2026-10-15T09:00:00.000Z', actorId: 'DR_B', rev: doc.revisions.length, pages: 2, status: 'signed', formal: true },
+    ];
+    const report = buildAuditReport({ doc, generatedAt: AT, prints });
+    assertEqual(report.printing.count, 2, '打印次数应一致');
+    assertEqual(report.printing.formalCount, 1, '正式件次数应单列');
+    assertEqual(report.printing.lastActorId, 'DR_B', '最近一次的操作者要能追');
+    const check = report.checks.find((item) => item.id === 'PRINT_TRAIL_CONSISTENT');
+    assert(!!check && check.pass, '留痕完整时应通过');
+    const markdown = renderAuditReportMarkdown(report);
+    assert(markdown.includes('## 二之一、打印记录'), 'Markdown 要有打印明细小节');
+    assertEqual(verifyAuditReport(report).ok, true, '加了打印留痕后报告指纹仍应自洽');
+  });
+
+  await test('P2 打印留痕不完整必须判失败：缺操作者 / 页数为 0 / 版本超出留痕数', () => {
+    const doc = withNodes(() => {});
+    const report = buildAuditReport({
+      doc,
+      generatedAt: AT,
+      prints: [
+        { at: AT, actorId: '', rev: 0, pages: 3, status: 'draft', formal: false },
+        { at: AT, actorId: 'DR_A', rev: 0, pages: 0, status: 'draft', formal: false },
+        { at: AT, actorId: 'DR_A', rev: doc.revisions.length + 5, pages: 2, status: 'draft', formal: false },
+      ],
+    });
+    const check = report.checks.find((item) => item.id === 'PRINT_TRAIL_CONSISTENT');
+    assert(!!check && check.pass === false, '留痕不完整必须判失败');
+    assert(/无操作者/.test(check!.detail), `证据要点名哪里不对：${check!.detail}`);
+  });
+
   await test('E2 患者姓名为空时报告仍可生成（不得出现 undefined）', () => {
     const doc = withNodes(() => {});
     delete (doc.patient as { nameMasked?: string }).nameMasked;

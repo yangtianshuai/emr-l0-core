@@ -79,6 +79,8 @@ export interface RenderLine {
   nodeId: NodeId;
   blockKind?: BlockKind;
   image?: RenderImage;
+  /** 「这一条不许和下文拆开」：标题默认如此，模板也可在段落上显式声明 */
+  keepWithNext?: boolean;
 }
 
 export interface RenderLinePlan {
@@ -366,6 +368,12 @@ export function renderLines(doc: DocumentModel, plan: RenderLinePlan = {}): Rend
         break;
     }
   }
+  /* 标题天然"不许和下文拆开"，节点上显式声明时也生效：以前这个字段声明了没人消费 */
+  for (const line of lines) {
+    const node = nodes[line.nodeId];
+    const declared = node?.presentation?.keepWithNext === true;
+    if (declared || line.blockKind === 'title') line.keepWithNext = true;
+  }
   return lines;
 }
 
@@ -412,48 +420,87 @@ export function paginatePages(
     return pages[index] as PlacedLine[];
   };
 
-  for (const line of lines) {
-    if (breakBefore.has(line.nodeId) && y > area.top + 0.01) {
-      page += 1;
-      y = area.top;
-    }
+  const broken = new Set<NodeId>();
+  const newPage = (): void => {
+    page += 1;
+    y = area.top;
+  };
+  /* 换行宽度受首行缩进影响：先按"这一段是否页首"定缩进，再算行数 */
+  const layoutOf = (line: RenderLine): { atPageTop: boolean; blockChanged: boolean; gap: number; indent: number; segments: string[]; height: number } => {
     const atPageTop = y <= area.top + 0.01;
     const blockChanged = previousBlock !== null && previousBlock !== line.nodeId;
-    if (blockChanged && !atPageTop) {
-      y += line.blockKind === 'title' ? layout.paragraphGapPt * 1.5 : layout.paragraphGapPt;
-    }
+    const gap = blockChanged && !atPageTop
+      ? (line.blockKind === 'title' ? layout.paragraphGapPt * 1.5 : layout.paragraphGapPt)
+      : 0;
     const indent = line.blockKind === 'body' && blockChanged && !atPageTop ? layout.firstLineIndentPt : 0;
+    const segments = wrapLine(line.text, line.fontSize, area.maxWidth - indent);
+    return { atPageTop, blockChanged, gap, indent, segments, height: segments.length * layout.lineHeightPt };
+  };
+
+  for (const [index, line] of lines.entries()) {
+    /* 一个节点只断一次：段落换行后仍是同一个 nodeId，逐行判会把它拆成多页 */
+    if (breakBefore.has(line.nodeId) && !broken.has(line.nodeId)) {
+      broken.add(line.nodeId);
+      if (y > area.top + 0.01) newPage();
+    }
 
     if (line.image) {
+      const gap = previousBlock !== null && previousBlock !== line.nodeId && y > area.top + 0.01 ? layout.paragraphGapPt : 0;
       const usable = area.bottom - area.top;
       const height = Math.min(line.image.heightPt, usable);
       const width = height === line.image.heightPt
         ? line.image.widthPt
         : line.image.widthPt * (height / line.image.heightPt);
-      if (y + height > area.bottom + 0.01 && y > area.top + 0.01) {
-        page += 1;
-        y = area.top;
-      }
+      if (y + gap + height > area.bottom + 0.01 && y > area.top + 0.01) newPage();
       rowOf(page).push({ ...line, image: { ...line.image, widthPt: width, heightPt: height }, x: area.left, y, page });
       y += height + layout.paragraphGapPt;
       previousBlock = line.nodeId;
       continue;
     }
 
-    /* 孤行控制：标题与其后两行必须同页，否则整块下移 */
-    if (line.blockKind === 'title' && y > area.bottom - layout.lineHeightPt * 2) {
-      page += 1;
-      y = area.top;
-    }
+    let placed = false;
+    for (let attempt = 0; attempt < 2 && !placed; attempt += 1) {
+      const plan = layoutOf(line);
+      const fits = y + plan.gap + plan.height <= area.bottom + 0.01;
 
-    const segments = wrapLine(line.text, line.fontSize, area.maxWidth - indent);
-    for (const [index, segment] of segments.entries()) {
-      if (y > area.bottom) {
-        page += 1;
-        y = area.top;
+      /* 孤行寡行：一段被拆开时，两侧各留不住两行就整段下移（中文病历默认这么排） */
+      let needBreak = false;
+      if (!fits && !plan.atPageTop) {
+        if (plan.segments.length >= 2) {
+          const fitLines = Math.floor((area.bottom - y - plan.gap) / layout.lineHeightPt);
+          needBreak = !(fitLines >= 2 && plan.segments.length - fitLines >= 2);
+        } else {
+          needBreak = true;
+        }
       }
-      rowOf(page).push({ ...line, text: segment, x: area.left + (index === 0 ? indent : 0), y, page });
-      y += layout.lineHeightPt;
+
+      /* 与下文同页：标题默认带这个约束，段落可在模板里声明 */
+      if (!needBreak && line.keepWithNext === true && !plan.atPageTop) {
+        const next = lines[index + 1];
+        if (next !== undefined && next.nodeId !== line.nodeId) {
+          const nextLines = Math.min(2, wrapLine(next.text, next.fontSize, area.maxWidth).length);
+          const need = y + plan.gap + plan.height + layout.paragraphGapPt + nextLines * layout.lineHeightPt;
+          needBreak = need > area.bottom + 0.01;
+        }
+      }
+
+      if (needBreak && attempt === 0) {
+        newPage();
+        continue;
+      }
+
+      for (const [segmentIndex, segment] of plan.segments.entries()) {
+        if (y > area.bottom) newPage();
+        rowOf(page).push({
+          ...line,
+          text: segment,
+          x: area.left + (segmentIndex === 0 ? plan.indent : 0),
+          y,
+          page,
+        });
+        y += layout.lineHeightPt;
+      }
+      placed = true;
     }
     previousBlock = line.nodeId;
   }

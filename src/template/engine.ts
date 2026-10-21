@@ -56,6 +56,20 @@ export const CONTEXT_FIELDS: readonly ContextField[] = [
 
 export const KNOWN_CONTEXT_PATHS: readonly string[] = CONTEXT_FIELDS.map((field) => field.path);
 
+/* 部署期登记的额外取值路径（来自「基础数据 · 字段字典」）：只扩展已知集合，内置那 12 个不受影响 */
+let extraContextPaths: readonly string[] = [];
+
+export function registerExtraContextPaths(paths: readonly string[]): void {
+  const next = paths
+    .map((path) => String(path).trim())
+    .filter((path) => path !== '' && !KNOWN_CONTEXT_PATHS.includes(path));
+  extraContextPaths = [...new Set(next)];
+}
+
+function knownContextPathList(): string[] {
+  return [...KNOWN_CONTEXT_PATHS, ...extraContextPaths];
+}
+
 export type TemplateErrorCode =
   | 'E_TPL_PACK_INVALID'
   | 'E_TPL_TEMPLATE_UNKNOWN'
@@ -353,6 +367,7 @@ export function validateTemplateSections(
 ): string[] {
   const label = ownerLabel;
   const issues: string[] = [];
+  const knownPaths = knownContextPathList();
 
   const keys = new Map<string, TemplateSlot>();
   sections.forEach((section, sectionIndex) => {
@@ -393,9 +408,9 @@ export function validateTemplateSections(
       if (slot.slot === 'field' && slot.from !== undefined) {
         if (typeof slot.from !== 'string' || slot.from.trim() === '') {
           issues.push(`${slotLabel}.from：取值路径必须是非空字符串（要"从系统带入"就给路径，不要这里就删掉这个字段）`);
-        } else if (!KNOWN_CONTEXT_PATHS.includes(slot.from)) {
+        } else if (!knownPaths.includes(slot.from)) {
           issues.push(
-            `${slotLabel}.from：上下文里没有「${slot.from}」（可用：${KNOWN_CONTEXT_PATHS.join(' / ')}）`
+            `${slotLabel}.from：上下文里没有「${slot.from}」（可用：${knownPaths.join(' / ')}）`
               + '；写错的路径会让这一格永远空着，所以这里直接拒绝',
           );
         }
@@ -497,7 +512,7 @@ export function validateTemplateSections(
         }
       }
       for (const path of refs.context) {
-        if (!KNOWN_CONTEXT_PATHS.includes(path)) {
+        if (!knownPaths.includes(path)) {
           issues.push(`${slotLabel}：控件「${slot.useExpression}」引用了未登记的上下文「${path}」（可用的见 KNOWN_CONTEXT_PATHS）`);
         }
       }
@@ -883,6 +898,9 @@ export function instantiateTemplate(pack: TemplatePack, input: InstantiateInput)
           dataType: slot.dataType,
           value,
           valueText,
+          /* 槽位名要留在节点上：人工填写会重写 provenance（模板 evidence 随之消失），
+             而外部写入仍要按「模板 + 槽位名」找到这一格 */
+          sourceKey: slot.key,
           ...(slot.unit ? { unit: slot.unit } : {}),
           ...(slot.tags ? { tags: slot.tags } : {}),
           ...(slot.keyContent ? { keyContent: true } : {}),

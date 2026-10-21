@@ -190,9 +190,23 @@ import {
   type DocTypeItem,
   type LoadedDocTypes,
 } from '../storage/doc-type-store.ts';
+import {
+  describeContextFields,
+  loadContextFields,
+  saveContextFields,
+  type LoadedContextFields,
+} from '../storage/context-field-store.ts';
+import {
+  checkIntakeAccess,
+  describeIntake,
+  INTAKE_KEY_HEADER,
+  loadIntakeConfig,
+  saveIntakeConfig,
+  templateRefKey,
+} from '../storage/intake-store.ts';
 import type { ControlKind, DocTypeRef, JsonValue } from '../model/types.ts';
 import type { ControlDefinition, ControlFieldDef, ControlShape, ExprNode, ExpressionDefinition, TemplateDefinition, TemplatePack, TemplateSection } from '../template/types.ts';
-import { buildContext, CONTEXT_FIELDS, instantiateTemplate, substituteContext } from '../template/engine.ts';
+import { buildContext, instantiateTemplate, registerExtraContextPaths, substituteContext } from '../template/engine.ts';
 import { describeExpression, EXPR_FUNCTIONS } from '../template/expression.ts';
 import { planRecompute } from '../template/recompute.ts';
 import {
@@ -297,6 +311,8 @@ import {
 import { minimalEditSpan } from '../core/text-runs.ts';
 import { DEFAULT_FURNITURE, DEFAULT_LAYOUT, type OfdExportPlan } from '../export/ofd.ts';
 import { contentArea, imageBoxResolver, layoutDocument } from '../layout/page-layout.ts';
+import { breakBeforeOf } from '../model/presentation.ts';
+import { appendPrintLog, listPrintLogs, loadPrintStats } from '../storage/print-log-store.ts';
 import { buildWorkspace, DEPARTMENTS, DOC_TYPES, type DemoWorkspace, type WorkspacePatient, type WorkspaceVisit } from './demo-doc.ts';
 import { compareVisits, type VisitCompare } from '../compare/visit-compare.ts';
 
@@ -328,7 +344,7 @@ import {
   type ReadingView,
 } from '../core/controlled-reading.ts';
 import { openSealedForReading } from '../core/encrypted-reading.ts';
-import { buildAuditReport, renderAuditReportMarkdown } from '../core/audit-report.ts';
+import { buildAuditReport, renderAuditReportMarkdown, type AuditReport } from '../core/audit-report.ts';
 import { demoKeyPair } from '../crypto/provider.ts';
 import { publicKeyFingerprint } from '../crypto/sm2.ts';
 import type { Envelope } from '../crypto/envelope.ts';
@@ -441,6 +457,8 @@ const ROUTE_ACTIONS: Record<string, Action> = {
   '/api/knowledge-pack-load': 'pack.toggle',
   '/api/departments': 'config.write',
   '/api/doc-types': 'config.write',
+  '/api/context-fields': 'config.write',
+  '/api/intake-config': 'config.write',
   '/api/template-item-update': 'pack.toggle',
   '/api/expression-item-create': 'pack.toggle',
   '/api/expression-item-update': 'pack.toggle',
@@ -471,6 +489,9 @@ const DOC_STATUS_TEXT: Record<string, string> = {
 };
 
 const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
+  /* 预览与打印留痕是医生侧动作：open 模式不拦，strict 模式按导出权限判 */
+  '/api/layout': 'doc.export',
+  '/api/print-log': 'doc.export',
   '/api/set-field': 'doc.write',
   '/api/set-control-field': 'doc.write',
   '/api/edit': 'doc.write',
@@ -523,7 +544,6 @@ const DOCTOR_ROUTE_ACTIONS: Record<string, Action> = {
   '/api/sign': 'doc.sign',
   '/api/unlock': 'doc.sign',
   '/api/export': 'doc.export',
-  '/api/layout': 'doc.export',
   '/api/export-json': 'doc.export',
   '/api/export-wst500': 'doc.export',
   '/api/qc-form-check': 'qc.run',
@@ -1143,6 +1163,7 @@ interface AuditSummary {
   passed: number;
   total: number;
   reportDigest: string;
+  printing: AuditReport['printing'];
   failed: Array<{ id: string; description: string; detail: string }>;
 }
 
@@ -1678,8 +1699,71 @@ function fromRefOf(node: DocNode): string | undefined {
   return ref && ref.startsWith('ctx:') ? ref.slice('ctx:'.length) : undefined;
 }
 
+function contextFieldsNow(): LoadedContextFields {
+  try {
+    return loadContextFields(CONFIG_KV);
+  } catch {
+    return { items: [], source: 'builtin' };
+  }
+}
+
+/** 字段字典是模板校验的已知路径来源：读库失败时按空扩展，内置 12 个照旧 */
+function registerContextPathsNow(loaded: LoadedContextFields = contextFieldsNow()): void {
+  registerExtraContextPaths(loaded.items.filter((item) => item.enabled).map((item) => item.path));
+}
+
 function contextLabelOf(path: string): string {
-  return CONTEXT_FIELDS.find((field) => field.path === path)?.label ?? path;
+  return contextFieldsNow().items.find((field) => field.path === path)?.label ?? path;
+}
+
+/** 按「模板 + 槽位名」在已开出的病历里找那一格 */
+function fieldNodeOfSlot(doc: DocumentModel, templateId: string, slotKey: string): DocNode | null {
+  const fields = Object.values(doc.nodes).filter((node) => node.type === 'field');
+  /* 根节点带的是这份文书的模板来源：人工填写不会碰它 */
+  const rootRef = (doc.nodes[doc.rootId]?.provenance.evidence ?? []).find((item) => item.kind === 'template')?.ref;
+  if (String(rootRef ?? '').includes(`#${templateId}@`)) {
+    return fields.find((node) => (node.provenance.evidence ?? []).some(
+      (item) => item.kind === 'template' && item.field === slotKey,
+    )) ?? fields.find((node) => node.sourceKey === slotKey) ?? null;
+  }
+  return fields.find((node) => (node.provenance.evidence ?? []).some(
+    (item) => item.kind === 'template' && item.field === slotKey && String(item.ref ?? '').includes(`#${templateId}@`),
+  )) ?? null;
+}
+
+/** 槽位声明的取值路径：外部写入的 evidence 沿用它，医生端才说得清「从哪儿带入的」 */
+function slotFromOf(templateId: string, slotKey: string): string | undefined {
+  for (const entry of templateCatalogOf(packRegistry)) {
+    if (entry.itemId !== templateId) continue;
+    for (const section of entry.sections) {
+      for (const slot of section.slots) {
+        if (slot.key === slotKey && slot.kind === 'field') return slot.from;
+      }
+    }
+  }
+  return undefined;
+}
+
+function coerceIntakeValue(
+  node: Extract<DocNode, { type: 'field' }>,
+  raw: unknown,
+): { value: JsonValue; valueText: string } | { error: string } {
+  const dataType = String(node.dataType ?? 'text');
+  if (dataType === 'number') {
+    const num = typeof raw === 'number' ? raw : Number(String(raw).trim());
+    if (!Number.isFinite(num)) return { error: `不是数字：「${String(raw)}」` };
+    return { value: num, valueText: String(num) };
+  }
+  if (dataType === 'boolean') {
+    const text = String(raw).trim().toLowerCase();
+    const yes = raw === true || ['true', '1', '是'].includes(text);
+    const no = raw === false || ['false', '0', '否'].includes(text);
+    if (!yes && !no) return { error: `不是布尔值：「${String(raw)}」（用 true / false）` };
+    return { value: yes, valueText: yes ? '是' : '否' };
+  }
+  const text = typeof raw === 'string' ? raw : raw === null || raw === undefined ? '' : String(raw);
+  if (text.trim() === '') return { error: '空值不写：留空由医生填' };
+  return { value: text, valueText: text };
 }
 
 interface ViewTableCell {
@@ -1749,11 +1833,8 @@ function sourceOf(node: DocNode): { evidence?: EvidenceRef[]; suggestionId?: str
   };
 }
 
-function presentationOf(doc: DocumentModel, node: DocNode): { pageBreakBefore?: boolean } {
-  const parent = node.parentId ? doc.nodes[node.parentId] : null;
-  const self = node.presentation?.pageBreakBefore === true;
-  const fromParent = parent != null && parent.presentation?.pageBreakBefore === true;
-  return self || fromParent ? { pageBreakBefore: true } : {};
+function presentationOf(breaks: ReadonlySet<NodeId>, node: DocNode): { pageBreakBefore?: boolean } {
+  return breaks.has(node.id) ? { pageBreakBefore: true } : {};
 }
 
 function buildItems(session: WriteSession): ViewItem[] {
@@ -1828,6 +1909,7 @@ function cellViewOf(cell: Extract<DocNode, { type: 'tableCell' }>, kidsOf: (id: 
 
 function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
   const items: ViewItem[] = [];
+  const breaks = breakBeforeOf(doc);
   const childMap: Record<NodeId, DocNode[]> = {};
   for (const node of Object.values(doc.nodes)) {
     if (!node || node.parentId === null || node.parentId === undefined) continue;
@@ -1899,7 +1981,7 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
         origin: node.provenance.origin,
         ...(templateRefOf(node) ? { templateRef: templateRefOf(node) } : {}),
         ...sourceOf(node),
-        ...presentationOf(doc, node),
+        ...presentationOf(breaks, node),
         keyContent: node.keyContent === true,
         humanConfirmed: node.humanConfirmed === true,
         rev: node.rev,
@@ -1921,7 +2003,7 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
         ...(typeof node.provenance.confidence === 'number' ? { confidence: node.provenance.confidence } : {}),
         ...(node.provenance.acceptedBy ? { acceptedBy: node.provenance.acceptedBy } : {}),
         ...sourceOf(node),
-        ...presentationOf(doc, node),
+        ...presentationOf(breaks, node),
         keyContent: node.keyContent === true,
         humanConfirmed: node.humanConfirmed === true,
         ...((node.unconfirmedTags ?? []).length > 0 ? { unconfirmedTags: node.unconfirmedTags } : {}),
@@ -1969,7 +2051,7 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
         ...(node.altText ? { altText: node.altText } : {}),
         ...(node.caption ? { caption: node.caption } : {}),
         ...sourceOf(node),
-        ...presentationOf(doc, node),
+        ...presentationOf(breaks, node),
         tags: node.tags ?? [],
         origin: node.provenance.origin,
         keyContent: node.keyContent === true,
@@ -1992,7 +2074,7 @@ function buildItemsOfDocument(doc: DocumentModel): ViewItem[] {
         ...(fromRefOf(node) ? { fromRef: fromRefOf(node), fromLabel: contextLabelOf(String(fromRefOf(node))) } : {}),
         ...(typeof node.provenance.confidence === 'number' ? { confidence: node.provenance.confidence } : {}),
         ...sourceOf(node),
-        ...presentationOf(doc, node),
+        ...presentationOf(breaks, node),
         keyContent: node.keyContent === true,
         humanConfirmed: node.humanConfirmed === true,
         rev: node.rev,
@@ -2447,7 +2529,7 @@ function sameDataElement(a: DataElementTag, b: DataElementTag): boolean {
 }
 
 const DOCTOR_HIDDEN_STATE_KEYS = [
-  'templateCatalog', 'contextFields', 'expressionFunctions', 'departments', 'docTypes',
+  'templateCatalog', 'contextFields', 'contextFieldCatalog', 'intake', 'expressionFunctions', 'departments', 'docTypes',
   'expressionControls', 'database', 'invariants',
   'placement', 'signBackend',
 ] as const;
@@ -2482,6 +2564,13 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
     previsitAccessView = describeAccess(loadAccess(CONFIG_KV), AUTH_MODE);
   } catch (err) {
     previsitAccessView = { error: (err as Error).message };
+  }
+  const contextFieldsView = describeContextFields(contextFieldsNow());
+  let intakeView: unknown = null;
+  try {
+    intakeView = describeIntake(loadIntakeConfig(CONFIG_KV));
+  } catch (err) {
+    intakeView = { error: (err as Error).message };
   }
 
   const full: Record<string, unknown> = {
@@ -2616,7 +2705,12 @@ function buildState(scope: 'doctor' | 'admin' = 'doctor'): Record<string, unknow
     fragments: listFragments(packRegistry),
     departments: { ...describeDepartments(departments.loaded), error: departments.error },
     docTypes: { ...describeDocTypes(docTypes.loaded), error: docTypes.error },
-    contextFields: CONTEXT_FIELDS.map((field) => ({ path: field.path, label: field.label, group: field.group })),
+    /* 模板下拉只认启用的字段：把它钉成数组，界面沿用它原有的取值方式 */
+    contextFields: (contextFieldsView.items as Array<Record<string, unknown>>)
+      .filter((item) => item.enabled !== false)
+      .map((item) => ({ path: item.path, label: item.label, group: item.group })),
+    contextFieldCatalog: wantAdmin ? contextFieldsView : null,
+    intake: wantAdmin ? intakeView : null,
     expressionFunctions: Object.values(EXPR_FUNCTIONS).map((fn) => ({
       name: fn.name,
       minArgs: fn.minArgs,
@@ -2800,6 +2894,9 @@ function readSamplePacks(): unknown[] {
   return packs;
 }
 
+/* 模板装载时就要认字段字典里的自定义路径，所以注册必须在 openPackStore 之前 */
+registerContextPathsNow();
+
 let conditionState: LoadedConditions = loadConditions(CONFIG_KV);
 
 function conditionLibrary(): ConditionLibrary {
@@ -2848,7 +2945,7 @@ function seedConditionsOnce(): void {
   markConditionsSeeded(CONFIG_KV);
   console.log(missing.length === 0
     ? '[判定方式] 库里已有出厂那几条 —— 这一格不再播'
-    : `[判定方式] 已把 ${missing.length} 条出厂种子写进判定方式库（管理后台「基础数据 · 判定方式」可改可删；删掉后不会自己回来）`);
+    : `[判定方式] 已把 ${missing.length} 条出厂种子写进判定方式库（管理后台「知识资产 · 判定方式」可改可删；删掉后不会自己回来）`);
 }
 
 seedConditionsOnce();
@@ -4041,15 +4138,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
 
   if (req.method === 'GET' && path === '/api/layout') {
-    try {
-      guard(req, 'doc.export');
-    } catch (err) {
-      json(res, 200, {
-        ok: false,
-        code: (err as { code?: string }).code ?? 'E_AUTH_REQUIRED',
-        message: (err as Error).message,
-      });
-      return;
+    if (AUTH_MODE === 'strict') {
+      try {
+        guard(req, 'doc.export');
+      } catch (err) {
+        json(res, 200, {
+          ok: false,
+          code: (err as { code?: string }).code ?? 'E_AUTH_REQUIRED',
+          message: (err as Error).message,
+        });
+        return;
+      }
     }
     const entry = current();
     const plan = { furniture: { header: DEFAULT_FURNITURE.header, footer: DEFAULT_FURNITURE.footer } };
@@ -4064,6 +4163,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         docId: entry.docId,
         status: entry.session.document.status,
         rev: entry.session.document.revisions.length,
+        prints: loadPrintStats(STORAGE.db, entry.docId),
       },
     });
     return;
@@ -4120,6 +4220,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const { loaded, error } = docTypesSafe();
       return { ...describeDocTypes(loaded), error };
     },
+    '/api/context-fields': () => describeContextFields(contextFieldsNow()),
+    '/api/intake-config': () => describeIntake(loadIntakeConfig(CONFIG_KV)),
   };
   const configView = req.method === 'GET' ? configViews[path] : undefined;
   if (configView) {
@@ -5039,6 +5141,164 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           state: stateFor(req),
         });
       }
+      return;
+    }
+
+    case '/api/context-fields': {
+      const entry = current();
+      try {
+        const by = requireAdminSession(req, entry, '字段字典');
+        const before = describeContextFields(contextFieldsNow());
+        const loaded = saveContextFields(CONFIG_KV, body.items, by);
+        /* 保存后立刻生效：之后的模板装载/保存按新路径校验 */
+        registerContextPathsNow(loaded);
+        const after = describeContextFields(loaded);
+        recordAdminAudit({ actor: by, subject: '字段字典', kind: '变更', before, after });
+        json(res, 200, { ok: true, data: after, state: stateFor(req) });
+      } catch (err) {
+        json(res, 200, {
+          ok: false,
+          code: (err as { code?: string }).code ?? 'E_CONFIG_REJECTED',
+          message: (err as Error).message,
+          state: stateFor(req),
+        });
+      }
+      return;
+    }
+
+    case '/api/intake-config': {
+      const entry = current();
+      try {
+        const by = requireAdminSession(req, entry, '外部带入');
+        const before = describeIntake(loadIntakeConfig(CONFIG_KV));
+        const { record, keyAction } = saveIntakeConfig(
+          CONFIG_KV,
+          {
+            ...(body.enabled === undefined ? {} : { enabled: body.enabled === true || body.enabled === 'true' }),
+            ...(body.requireKey === undefined ? {} : { requireKey: body.requireKey === true || body.requireKey === 'true' }),
+            ...(body.key === undefined ? {} : { key: body.key === null ? null : String(body.key) }),
+            ...(body.templates === undefined ? {} : { templates: body.templates }),
+          },
+          by,
+          new Date().toISOString(),
+        );
+        const after = describeIntake(record);
+        recordAdminAudit({ actor: by, subject: '外部带入', kind: '变更', before, after: { ...after, keyAction } });
+        json(res, 200, { ok: true, data: { ...after, keyAction }, state: stateFor(req) });
+      } catch (err) {
+        json(res, 200, {
+          ok: false,
+          code: (err as { code?: string }).code ?? 'E_CONFIG_REJECTED',
+          message: (err as Error).message,
+          state: stateFor(req),
+        });
+      }
+      return;
+    }
+
+    case '/api/intake/values': {
+      const config = loadIntakeConfig(CONFIG_KV);
+      const access = checkIntakeAccess(config, headerOf(req, INTAKE_KEY_HEADER));
+      if (!access.ok) {
+        recordAdminAudit({ actor: actorLabelOf(req), subject: '外部带入', kind: '动作', note: `拒绝（${access.code}）：${access.message}` });
+        json(res, 200, { ok: false, code: access.code, message: access.message });
+        return;
+      }
+      const entry = current();
+      const doc = entry.session.document;
+      if ((doc.signatureRefs?.length ?? 0) > 0) {
+        json(res, 200, { ok: false, code: 'E_INTAKE_DOC_SIGNED', message: '这份病历已经签章：外部带入只写编辑中的病历，已签内容不再回写' });
+        return;
+      }
+      const templateId = String(body.templateId ?? '').trim();
+      if (templateId === '') {
+        json(res, 200, { ok: false, code: 'E_INTAKE_TEMPLATE_REQUIRED', message: '缺少 templateId' });
+        return;
+      }
+      const allowed = (config?.templates ?? []).find((item) => item.itemId === templateId);
+      if (!allowed) {
+        json(res, 200, { ok: false, code: 'E_INTAKE_TEMPLATE_NOT_ALLOWED', message: `模板「${templateId}」没在模板库里勾选「参与外部带入」` });
+        return;
+      }
+      if (body.docId !== undefined && String(body.docId) !== doc.docId) {
+        json(res, 200, { ok: false, code: 'E_INTAKE_DOC_MISMATCH', message: `只能写当前打开的病历（${doc.docId}），收到的是 ${String(body.docId)}` });
+        return;
+      }
+      const values = body.values && typeof body.values === 'object' && !Array.isArray(body.values)
+        ? body.values as Record<string, unknown>
+        : {};
+      const slots = Object.entries(values);
+      if (slots.length === 0) {
+        json(res, 200, { ok: false, code: 'E_INTAKE_EMPTY', message: 'values 是空的：没有要写入的槽位' });
+        return;
+      }
+
+      const applied: Array<{ slot: string; nodeId: NodeId; valueText: string }> = [];
+      const conflicts: Array<{ slot: string; reason: string }> = [];
+      const unknown: string[] = [];
+      const invalid: Array<{ slot: string; reason: string }> = [];
+      const items: Array<{ nodeId: NodeId; value: JsonValue; valueText: string; evidence: EvidenceRef[] }> = [];
+
+      for (const [slotKey, raw] of slots) {
+        const node = fieldNodeOfSlot(doc, templateId, slotKey);
+        if (!node || node.type !== 'field') {
+          unknown.push(slotKey);
+          continue;
+        }
+        if (node.provenance.origin === 'human' || node.humanConfirmed === true) {
+          conflicts.push({ slot: slotKey, reason: `已有「${node.valueText ?? String(node.value ?? '')}」，不覆盖人工填写/确认的内容` });
+          continue;
+        }
+        const coerced = coerceIntakeValue(node, raw);
+        if ('error' in coerced) {
+          invalid.push({ slot: slotKey, reason: coerced.error });
+          continue;
+        }
+        const from = slotFromOf(templateId, slotKey);
+        const evidence: EvidenceRef = {
+          kind: 'his',
+          ref: from ? `ctx:${from}` : `intake:${templateId}/${slotKey}`,
+          field: slotKey,
+          valueText: coerced.valueText,
+        };
+        items.push({
+          nodeId: node.id,
+          value: coerced.value,
+          valueText: coerced.valueText,
+          evidence: [evidence],
+        });
+        applied.push({ slot: slotKey, nodeId: node.id, valueText: coerced.valueText });
+      }
+
+      if (items.length === 0) {
+        json(res, 200, {
+          ok: true,
+          data: { applied: [], conflicts, unknown, invalid },
+          auth: access.mode,
+          state: stateFor(req),
+        });
+        return;
+      }
+      const sourceLabel = String(body.source ?? '外部系统').slice(0, 60);
+      const result = act(entry, `外部带入（${sourceLabel} · ${items.length} 项 · ${templateId}）`, () =>
+        entry.session.applyExternalData({ items }, { id: `intake:${sourceLabel}`, kind: 'system' }),
+      );
+      if (!result.ok) {
+        json(res, 200, { ...result, data: { conflicts, unknown, invalid }, auth: access.mode });
+        return;
+      }
+      json(res, 200, {
+        ok: true,
+        data: {
+          applied: result.data.applied,
+          skipped: result.data.skipped,
+          conflicts,
+          unknown,
+          invalid,
+        },
+        auth: access.mode,
+        state: stateFor(req),
+      });
       return;
     }
 
@@ -9956,6 +10216,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
           .map((item) => ({ at: item.at, code: item.code as string, ...(item.action ? { action: item.action } : {}) })),
         invariants: entry.session.verifyInvariants(),
         writing: entry.session.timing(),
+        prints: listPrintLogs(STORAGE.db, entry.docId, 50),
       });
       const jsonPath = join(ARTIFACTS, `${entry.docId}.audit.json`);
       const mdPath = join(ARTIFACTS, `${entry.docId}.audit.md`);
@@ -9970,6 +10231,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         passed: report.checks.length - failed.length,
         total: report.checks.length,
         reportDigest: report.reportDigest,
+        printing: report.printing,
         failed: failed.map((check) => ({ id: check.id, description: check.description, detail: check.detail })),
       };
       entry.log.push({
@@ -10361,6 +10623,28 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
         return entry.session.sign({ acknowledgeUnconfirmed: body.acknowledgeUnconfirmed === true }, writeActor(req, entry));
       });
       json(res, 200, { ...result, state: stateFor(req) });
+      return;
+    }
+
+    case '/api/print-log': {
+      const entry = current();
+      const pages = Number(body.pages ?? 0);
+      if (!Number.isInteger(pages) || pages < 1) {
+        json(res, 200, { ok: false, code: 'E_PRINT_PAGES', message: '打印页数必须是从 1 开始的整数' });
+        return;
+      }
+      const actor = writeActor(req, entry);
+      const status = entry.session.document.status;
+      appendPrintLog(STORAGE.db, {
+        docId: entry.docId,
+        actorId: actor.id,
+        at: new Date().toISOString(),
+        rev: entry.session.document.revisions.length,
+        pages,
+        status,
+        formal: status === 'signed' || status === 'archived',
+      });
+      json(res, 200, { ok: true, data: loadPrintStats(STORAGE.db, entry.docId) });
       return;
     }
 

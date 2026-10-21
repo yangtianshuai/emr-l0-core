@@ -1,6 +1,6 @@
 {
   "name": "emr-l0-core",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "license": "PolyForm-Noncommercial-1.0.0",
   "author": "宏医AI",
@@ -10,7 +10,7 @@
     "node": ">=22.9"
   },
   "scripts": {
-    "test": "npm run test:model && npm run test:indexes && npm run test:session && npm run test:timing && npm run test:review && npm run test:revert && npm run test:suggestion && npm run test:machine && npm run test:crypto && npm run test:crypto-envelope && npm run test:sealed-reading && npm run test:recipient-keys && npm run test:audit && npm run test:signature && npm run test:reading && npm run test:authority && npm run test:ai-context && npm run test:confirm && npm run test:ingest && npm run test:annotation && npm run test:ai-model && npm run test:ai-silence && npm run test:qc && npm run test:content-engine && npm run test:content-engine-http && npm run test:time-limit && npm run test:visit-limit && npm run test:visit-timeline && npm run test:discharge-summary && npm run test:previsit && npm run test:previsit-access && npm run test:knowledge && npm run test:pack-store && npm run test:condition && npm run test:condition-library && npm run test:rule-pack && npm run test:plugin && npm run test:template && npm run test:admin-audit && npm run test:audit-anchor && npm run test:auth && npm run test:users && npm run test:concurrency && npm run test:runtime-dir && npm run test:config-kv && npm run test:server-config && npm run test:system-config && npm run test:department-store && npm run test:content-store && npm run test:content-insert && npm run test:doc-type-store && npm run test:recipient-keys-store && npm run test:qc-content-store && npm run test:rekey && npm run test:reading-grants-store && npm run test:storage && npm run test:dictation && npm run test:placement && npm run test:structuring && npm run test:capture && npm run test:sign && npm run test:trend && npm run test:consistency && npm run test:identity && npm run test:persistence && npm run test:store && npm run test:export && npm run test:page-layout && npm run test:wst500-export && npm run test:import && npm run test:layout && npm run test:wst500 && npm run test:external && npm run test:phi-scan && npm run test:patch-plan && npm run test:ui && npm run test:http",
+    "test": "npm run test:model && npm run test:indexes && npm run test:session && npm run test:timing && npm run test:review && npm run test:revert && npm run test:suggestion && npm run test:machine && npm run test:crypto && npm run test:crypto-envelope && npm run test:sealed-reading && npm run test:recipient-keys && npm run test:audit && npm run test:signature && npm run test:reading && npm run test:authority && npm run test:ai-context && npm run test:confirm && npm run test:ingest && npm run test:annotation && npm run test:ai-model && npm run test:ai-silence && npm run test:qc && npm run test:content-engine && npm run test:content-engine-http && npm run test:time-limit && npm run test:visit-limit && npm run test:visit-timeline && npm run test:discharge-summary && npm run test:previsit && npm run test:previsit-access && npm run test:knowledge && npm run test:pack-store && npm run test:condition && npm run test:condition-library && npm run test:rule-pack && npm run test:plugin && npm run test:template && npm run test:admin-audit && npm run test:audit-anchor && npm run test:auth && npm run test:users && npm run test:concurrency && npm run test:runtime-dir && npm run test:config-kv && npm run test:server-config && npm run test:system-config && npm run test:department-store && npm run test:content-store && npm run test:content-insert && npm run test:doc-type-store && npm run test:intake-store && npm run test:recipient-keys-store && npm run test:qc-content-store && npm run test:rekey && npm run test:reading-grants-store && npm run test:storage && npm run test:dictation && npm run test:placement && npm run test:structuring && npm run test:capture && npm run test:sign && npm run test:trend && npm run test:consistency && npm run test:identity && npm run test:persistence && npm run test:store && npm run test:export && npm run test:page-layout && npm run test:wst500-export && npm run test:import && npm run test:layout && npm run test:wst500 && npm run test:external && npm run test:phi-scan && npm run test:patch-plan && npm run test:ui && npm run test:http",
     "test:model": "node src/model/self-test.ts",
     "test:crypto": "node src/crypto/crypto-self-test.ts",
     "test:signature": "node src/core/signature-self-test.ts",
@@ -38,6 +38,7 @@
     "test:content-store": "node src/content/content-store-self-test.ts",
     "test:content-insert": "node src/content/content-insert-self-test.ts",
     "test:doc-type-store": "node src/storage/doc-type-store-self-test.ts",
+    "test:intake-store": "node src/storage/intake-store-self-test.ts",
     "test:recipient-keys-store": "node src/storage/recipient-key-store-self-test.ts",
     "test:qc-content-store": "node src/qc/qc-content-store-self-test.ts",
     "test:rekey": "node src/storage/rekey-self-test.ts",
@@ -109,6 +110,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "demo": "node --env-file-if-exists=.env src/demo/demo-server.ts --port 8787",
     "verify:ofd": "node tools/ofd-check/ofd-roundtrip-check.mjs artifacts/demo-signed.ofd --expect artifacts/demo-signed.machine.json",
+    "verify:layout": "node tools/layout-check/layout-check.mjs artifacts/page-layout-sample.ofd --layout artifacts/page-layout-sample.layout.json --json artifacts/page-layout-sample.report.json",
     "perf": "node tools/model-check/perf-check.mjs",
     "perf:1000p": "node tools/model-check/perf-check.mjs --pages 1000 --iter 8 --batch 60 --baseline tools/model-check/samples/perf-baseline-1000p.json --tolerance 0.6"
   }

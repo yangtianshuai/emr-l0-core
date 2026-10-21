@@ -1495,6 +1495,10 @@ async function main(): Promise<void> {
       const block = adminMarkup.slice(start, next === -1 ? adminMarkup.length : next);
       assert(/class="cfg-group"/.test(block), `面板 ${match[1]} 里一张卡都没有：加了页签却忘了把内容搬进来`);
     }
+    const views = [...adminMarkup.matchAll(/data-admin-view="([^"]+)"/g)].map((match) => match[1]);
+    const viewPanes = [...adminMarkup.matchAll(/data-admin-view-pane="([^"]+)"/g)].map((match) => match[1]);
+    assertEqual(views.slice().sort(), viewPanes.slice().sort(), '每个左侧分区都应有对应视图');
+    assertEqual(views.indexOf('knowledge'), views.indexOf('config') + 1, '「知识资产」应是紧邻「能力配置」的顶级分区');
   });
 
   await test('A24 管理后台 id 唯一：搬动面板不得留下重复 id', () => {
@@ -1576,13 +1580,13 @@ async function main(): Promise<void> {
     );
     assert(pane.includes('id="tplSearchName"'), '「模板库」面板里应有按模板名称查询的输入框');
     assert(pane.includes('id="btnCreateTemplate"'), '「模板库」面板里应有新建文书入口');
-    assert(!pane.includes('id="btnOpenExpressions"'), '「模板库」面板里不应再有表达式控件入口（它已是「基础数据」的子页签）');
+    assert(!pane.includes('id="btnOpenExpressions"'), '「模板库」面板里不应再有表达式控件入口（它已是「知识资产」的子页签）');
     assert(
       adminMarkup.slice(
+        adminMarkup.indexOf('data-admin-view-pane="knowledge"'),
         adminMarkup.indexOf('data-admin-view-pane="master"'),
-        adminMarkup.indexOf('data-admin-view-pane="accounts"'),
       ).includes('data-cfg-tab="expressions"'),
-      '表达式控件应作为「基础数据」的一个子页签',
+      '表达式控件应作为「知识资产」的一个子页签',
     );
     assert(/<table class="mini tpl-table">/.test(adminScript), '模板库应以表格渲染');
     assert(/<th>模板名称<\/th>/.test(adminScript), '表里应有「模板名称」这一列');
@@ -1611,7 +1615,7 @@ async function main(): Promise<void> {
     );
   });
 
-  await test('A28 表达式控件表格页（基础数据子页签）：按控件名称查询 + 分页（与模板库同一套做法）', () => {
+  await test('A28 表达式控件表格页（知识资产子页签）：按控件名称查询 + 分页（与模板库同一套做法）', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const pane = adminMarkup.slice(
@@ -1639,7 +1643,7 @@ async function main(): Promise<void> {
     assert(/没有名称含/.test(adminScript), '控件表筛空了要说清"是筛没了"而不是"控件没了"');
   });
 
-  await test('A35 基础数据·专科控件：页签紧随表达式控件；清单按形状展示；不预置内置控件（空态要说清）', () => {
+  await test('A35 知识资产·专科控件：页签紧随表达式控件；清单按形状展示；不预置内置控件（空态要说清）', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const tabs = [...adminMarkup.matchAll(/data-cfg-tab="([^"]+)"/g)].map((match) => match[1]);
@@ -1709,7 +1713,7 @@ async function main(): Promise<void> {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const paneStart = adminMarkup.indexOf('data-cfg-pane="packs"');
-    const pane = adminMarkup.slice(paneStart, adminMarkup.indexOf('data-cfg-pane="qc"'));
+    const pane = adminMarkup.slice(paneStart, adminMarkup.indexOf('data-admin-view-pane="master"'));
     assert(pane.includes('id="ruleSearchKeyword"'), '「规则库」面板里应有查询框');
     assert(pane.includes('id="btnCreateRule"'), '「规则库」面板里应有新建规则入口');
     assert(!pane.includes('id="qcPackLoad"'), '不应再有整包载入入口（规则只在库里新建与修改，不从别处贴 JSON 搬进来）');
@@ -1790,7 +1794,14 @@ async function main(): Promise<void> {
       adminMarkup.indexOf('data-cfg-pane="packs"'),
     );
     const tabs = [...adminMarkup.matchAll(/data-cfg-tab="([^"]+)"/g)].map((match) => match[1]);
-    assertEqual(tabs.indexOf('contentLib'), tabs.indexOf('templates') + 1, '「内容库」页签要紧随「模板库」之后');
+    assert(
+      adminMarkup.slice(
+        adminMarkup.indexOf('data-admin-view-pane="config"'),
+        adminMarkup.indexOf('data-admin-view-pane="knowledge"'),
+      ).includes('data-cfg-tab="intake"'),
+      '「数据采集」应是「能力配置」的子页签',
+    );
+    assertEqual(tabs.indexOf('contentLib'), tabs.indexOf('ctrlDefs') + 1, '「内容库」页签要紧随「专科控件」之后');
     assert(pane.includes('id="contentLibBody"'), '面板里要有清单挂载的容器');
     assert(pane.includes('id="contentLibChip"'), '要有一格显示"已用 / 上限"（等第 201 条才报错，等于没提示）');
     assert(pane.includes('id="contentLibStatus"'), '面板里要有自己的状态行（写在别的页签上等于写在看不见的地方）');
@@ -1824,32 +1835,32 @@ async function main(): Promise<void> {
     );
   });
 
-  await test('A34 基础数据·判定方式：内置只读 + 本院自建（一张表两组，列出字段表与算子表），规则库按判定方式造规则', () => {
+  await test('A34 知识资产·判定方式：内置只读 + 本院自建（一张表两组，列出字段表与算子表），规则库按判定方式造规则', () => {
     const adminMarkup = readFileSync(join(ROOT, 'src', 'demo', 'admin.html'), 'utf8');
     const adminScript = readFileSync(join(ROOT, 'src', 'demo', 'admin.js'), 'utf8');
     const adminCss = readFileSync(join(ROOT, 'src', 'demo', 'ui.css'), 'utf8');
-    const master = adminMarkup.slice(
+    const asset = adminMarkup.slice(
+      adminMarkup.indexOf('data-admin-view-pane="knowledge"'),
       adminMarkup.indexOf('data-admin-view-pane="master"'),
-      adminMarkup.indexOf('data-admin-view-pane="accounts"'),
     );
-    const masterText = master.replace(/<!--[\s\S]*?-->/g, '');
-    assert(master.includes('data-cfg-tab="predicates"'), '「基础数据」里应有「判定方式」子页签');
-    assert(master.includes('data-cfg-pane="predicates"'), '子页签要有对应的面板');
-    assert(master.includes('id="conditionLibraryBody"'), '面板里要有判定方式那张表的容器');
-    assert(master.includes('id="conditionLibChip"'), '要有一格显示"几条判定方式 · 分布在几个包"');
-    assert(master.includes('id="conditionLibRefresh"'), '面板里要有刷新按钮（"谁在用它"会随规则库变化）');
+    const assetText = asset.replace(/<!--[\s\S]*?-->/g, '');
+    assert(asset.includes('data-cfg-tab="predicates"'), '「知识资产」里应有「判定方式」子页签');
+    assert(asset.includes('data-cfg-pane="predicates"'), '子页签要有对应的面板');
+    assert(asset.includes('id="conditionLibraryBody"'), '面板里要有判定方式那张表的容器');
+    assert(asset.includes('id="conditionLibChip"'), '要有一格显示"几条判定方式 · 分布在几个包"');
+    assert(asset.includes('id="conditionLibRefresh"'), '面板里要有刷新按钮（"谁在用它"会随规则库变化）');
     assert(
-      !/内核判法/.test(masterText) && !/id="predicateBody"/.test(master) && !/id="predicateRefresh"/.test(master)
-      && !/id="predicateChip"/.test(master) && !/id="predicateSummary"/.test(master),
+      !/内核判法/.test(assetText) && !/id="predicateBody"/.test(asset) && !/id="predicateRefresh"/.test(asset)
+      && !/id="predicateChip"/.test(asset) && !/id="predicateSummary"/.test(asset),
       '页面上不该再有"内核判法"这一组（它与内置判定方式是同一件事的两处摆法），它的容器 / 计数 / 刷新按钮一并撤掉',
     );
-    assert(!/id="predicate(Save|Add|New)"/.test(master), '判定方式页不许再有"内核判法"那一层的新增入口（判定方式本身在下面那张表里建）');
+    assert(!/id="predicate(Save|Add|New)"/.test(asset), '判定方式页不许再有"内核判法"那一层的新增入口（判定方式本身在下面那张表里建）');
     assert(
-      !/库级资产/.test(masterText) && !/一律可改可删/.test(masterText) && !/复制用于改口径前先留一份/.test(masterText),
+      !/库级资产/.test(assetText) && !/一律可改可删/.test(assetText) && !/复制用于改口径前先留一份/.test(assetText),
       '这一页不再摆那一大段说明文字（判定方式的交付形态与"复制用来干什么"由表的列与抽屉里的话承担）',
     );
-    assert(master.includes('id="conditionBody"'), '面板里要有字段 / 算子清单的容器');
-    assert(master.includes('id="conditionChip"'), '要有一格显示"几个字段 · 几个算子"');
+    assert(asset.includes('id="conditionBody"'), '面板里要有字段 / 算子清单的容器');
+    assert(asset.includes('id="conditionChip"'), '要有一格显示"几个字段 · 几个算子"');
     assert(/function renderConditionCatalog\(\)/.test(adminScript), '要有字段表与算子表的渲染');
     assert(
       /function conditionCatalogOf\(\)/.test(adminScript) && /S\.qcCondition/.test(adminScript),
@@ -1885,7 +1896,7 @@ async function main(): Promise<void> {
     assert(/el\.id === 'conditionLibRefresh'/.test(adminScript), '刷新按钮要接上事件');
     assert(/\.predicate-card\s*\{/.test(adminCss), '清单条目要有样式（每一组一块）');
     assert(
-      master.includes('id="conditionLibraryBody"') && master.includes('id="btnCreateCondition"'),
+      asset.includes('id="conditionLibraryBody"') && asset.includes('id="btnCreateCondition"'),
       '「判定方式」页要有那张表与新建入口',
     );
     assert(/id="conditionDrawer"/.test(adminMarkup), '判定方式的新建 / 编辑同样走抽屉（单开一个，不与规则抽屉复用）');
@@ -2700,7 +2711,7 @@ async function main(): Promise<void> {
     assertEqual(generated.ok, true, `生成应成功（${generated.code ?? ''} ${generated.message ?? ''}）`);
     const audit = generated.state!.lastAudit!;
     assert(!!audit, 'state 应记录最近一次审计报告摘要');
-    assertEqual(audit.total, 8, '应有 8 项机器可判定检查');
+    assertEqual(audit.total, 9, '应有 9 项机器可判定检查（新增打印留痕完整性）');
     assertEqual(audit.passed + audit.failed.length, audit.total, '通过数 + 失败数应等于总数');
     assertEqual(String(audit.reportDigest).length, 64, '报告应带 64 位指纹');
     assert(existsSync(audit.jsonPath), `JSON 应落盘：${audit.jsonPath}`);
@@ -2894,7 +2905,7 @@ async function main(): Promise<void> {
     assert(/data-node-id/.test(fallbackBranch), '兜底的填写项节点也必须带 data-node-id');
   });
 
-  await test('B79 编辑器手感：六种行内格式 / 浮条跟选区 / 字数从节点算 / 命令面板的段落级动作', async () => {
+  await test('B79 编辑器手感：六种行内格式 / 格式条常驻 / 字数从节点算 / 命令面板的段落级动作', async () => {
     const script = readFileSync(UI_JS, 'utf8');
     const pageHtml = readFileSync(UI_HTML, 'utf8');
     const css = readFileSync(UI_CSS, 'utf8');
@@ -2910,16 +2921,15 @@ async function main(): Promise<void> {
       '上下标必须映射成 superscript / subscript');
     assert(/function flowHostOfSelection/.test(script), '取格式目标要能回落到选区所在的段（点浮条时焦点可能已飘）');
 
-    assert(/function positionFlowTools/.test(script), '应有浮条定位函数');
-    assert(/\.ftools\.floating/.test(css), '浮条的样式必须在样式表里（否则它只是"飞出去的一行按钮"）');
-    assert(/selectionchange/.test(script), '浮条要跟选区走（只认一次点击会停在过期的位置）');
+    assert(/id="flowTools"/.test(pageHtml), '段内格式那一行必须在页面上');
+    assert(!/id="flowToolsSpacer"/.test(pageHtml) && !/\.ftools\.floating\b/.test(css),
+      '头部那条常驻正文上方，不能被浮起挪走（落笔重绘会换掉选区，浮条随之消失）');
+    assert(/id="flowToolsFloat"/.test(pageHtml) && /\.ftools-float/.test(css),
+      '选中文字时选区旁要再浮一条格式按钮（头部那条不动，两处都能点）');
+    assert(/function positionFlowToolsFloat/.test(script) && /selectionchange/.test(script),
+      '浮动的那条要跟选区走（否则会停在过期的位置）');
     assert(/closest\('\[data-mark\]'\)\)\s*event\.preventDefault/.test(script),
-      '点浮条不能把正文焦点弄丢（丢了选区就没了，格式无从施加）');
-    assert(/id="flowToolsSpacer"/.test(pageHtml) && /\.ftools-spacer/.test(css),
-      '浮条必须带一块占位（否则选中文字时正文会往上跳一行）');
-    assert(/function setFlowToolsFloating/.test(script) && !/classList\.(add|remove)\('floating'\)/.test(
-      script.replace(/function setFlowToolsFloating[\s\S]*?\n}/, '')),
-      '浮起 / 落位只能走 setFlowToolsFloating（class 与占位必须一起切换）');
+      '点格式条不能把正文焦点弄丢（丢了选区就没了，格式无从施加）');
 
     assert(/function docStatsSuffix/.test(script), '应有字数统计');
     assert(/docStatsSuffix\(\)/.test(script), '字数必须真的被标题行用上');
@@ -2970,10 +2980,18 @@ async function main(): Promise<void> {
       '服务端必须从导出端取纸张参数（屏幕 / 打印 / 导出三处不能各写一套）');
     assert(/paper: \{/.test(serverSource) && /widthPt: DEFAULT_LAYOUT\.pageWidthPt/.test(serverSource),
       'state 必须下发 paper（宽高与页边距）');
-    assert(/function presentationOf\(doc: DocumentModel, node: DocNode\)/.test(serverSource),
-      '分页意图要看父节点一层（医生说的是"这一段另起一页"）');
-    const presCount = (serverSource.match(/\.\.\.presentationOf\(doc, node\)/g) || []).length;
+    const presentationSource = readFileSync(join(ROOT, 'src', 'model', 'presentation.ts'), 'utf8');
+    assert(/export function breakBeforeOf/.test(presentationSource),
+      '断页意图只能有一个判定入口（breakBeforeOf），屏幕 / 预览 / 打印 / 导出都从它取');
+    assert(!/parentId/.test(presentationSource),
+      '断页不向下继承：继承了会让该章每一段各起一页，把一章拆成一串单行纸');
+    assert(/presentationOf\(breaks, node\)/.test(serverSource),
+      '界面标记必须复用 breakBeforeOf 的结果，不能自己再看父节点一层');
+    const presCount = (serverSource.match(/\.\.\.presentationOf\(breaks, node\)/g) || []).length;
     assert(presCount >= 3, `text / field / image 都应带上分页意图（实际 ${presCount} 处）`);
+    const exportSource = readFileSync(join(ROOT, 'src', 'export', 'ofd.ts'), 'utf8');
+    assert(/paginatePages\(lines, layout, pageArea, breakBeforeOf\(doc\)\)/.test(exportSource),
+      '归档件必须消费同一份断页意图，否则屏幕断了、纸上不断');
 
     assert(/if \(item\.pageBreakBefore\) classes\.push\('pb-before'\)/.test(docSource), '卡片模式要消费分页意图');
     assert(/textItem\.pageBreakBefore \? ' pb-before'/.test(flowSource), '流式模式要消费分页意图');
@@ -3028,6 +3046,60 @@ async function main(): Promise<void> {
     assert(/第 1 页/.test(pages?.[0]?.footer ?? ''), '页脚要有真实页码');
     const line = pages?.[0]?.lines.find((item) => item.text.length > 0);
     assert(!!line && typeof line.x === 'number' && typeof line.y === 'number', '行必须带纸面坐标与文字');
+
+    /* 预览是医生侧动作：演示模式（未登录）点得开，否则界面一进来就被"请先登录"挡住 */
+    const anonymous = await get('/api/layout');
+    assert(anonymous.ok === true, `演示模式下不登录也应能预览：${anonymous.code ?? ''} ${anonymous.message ?? ''}`);
+  });
+
+  await test('B84 打印留痕：打印前先落痕，落不上就不出纸；次数与正式件标记可查', async () => {
+    const script = readFileSync(UI_JS, 'utf8');
+    const printBody = /async function printPreview\(\)[\s\S]*?\n\}/.exec(script)?.[0] ?? '';
+    assert(printBody.length > 0, '前置：界面必须有 printPreview');
+    const logAt = printBody.indexOf('/api/print-log');
+    const printAt = printBody.indexOf('window.print');
+    assert(logAt >= 0 && printAt > logAt, '必须先记留痕再出纸，顺序反了就等于没记');
+    assert(/if \(!log \|\| log\.ok !== true\)/.test(printBody) && /return;/.test(printBody),
+      '留痕失败必须拦下打印（fail-closed），不能"先打再说"');
+
+    const before = (await getAuth('/api/layout')) as {
+      data?: { status?: string; prints?: { count?: number } };
+    };
+    const status = before.data?.status ?? '';
+    const startCount = before.data?.prints?.count ?? 0;
+
+    const first = await post('/api/print-log', { pages: 3 });
+    assert(first.ok === true, `打印留痕应写入成功：${first.code ?? ''} ${first.message ?? ''}`);
+    const second = await post('/api/print-log', { pages: 3 });
+    assert(second.ok === true, '第二次打印也要能记上');
+
+    const after = (await getAuth('/api/layout')) as {
+      data?: { prints?: { count?: number; formalCount?: number; lastActorId?: string | null } };
+    };
+    const prints = after.data?.prints;
+    assertEqual(prints?.count, startCount + 2, '次数必须按文书累加');
+    assert(!!prints?.lastActorId, '留痕必须能追到人（lastActorId 为空等于没记）');
+    const formal = status === 'signed' || status === 'archived';
+    assertEqual(prints?.formalCount, formal ? 2 : 0, '正式件次数只在已签名/已归档时计数');
+
+    const bad = await post('/api/print-log', { pages: 0 });
+    assert(bad.ok === false && bad.code === 'E_PRINT_PAGES', '页数不合法要明说，不能默默记一条');
+
+    /* 医生端在演示模式不登录；打印若被"请先登录"拦住，留痕就会退化成"没人能打" */
+    const anonymous = await postNoAuth('/api/print-log', { pages: 2 });
+    assert(anonymous.ok === true, `演示模式下不登录也应能打印并留痕：${anonymous.code ?? ''} ${anonymous.message ?? ''}`);
+
+    const auditRes = await post('/api/audit-report', {});
+    assert(auditRes.ok === true, `审计报告应能生成：${auditRes.code ?? ''} ${auditRes.message ?? ''}`);
+    const auditData = auditRes.data as unknown as {
+      report?: {
+        printing?: { count?: number; formalCount?: number };
+        checks?: Array<{ id: string; pass: boolean; detail: string }>;
+      };
+    };
+    assertEqual(auditData.report?.printing?.count, startCount + 3, '审计报告里的打印次数必须与留痕一致（含未登录那一次）');
+    const printCheck = auditData.report?.checks?.find((check) => check.id === 'PRINT_TRAIL_CONSISTENT');
+    assert(printCheck?.pass === true, `留痕完整性应通过（实际：${printCheck?.detail ?? '无此项'}）`);
   });
 
   await test('B20 语音落点确认：未落位不生成建议，医生指定落点后才提交（门控不松）', async () => {

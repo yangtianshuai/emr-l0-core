@@ -17,25 +17,51 @@
 <body>
 <header>
   <div class="patient-card" id="patientCard"></div>
+  <span class="badge-status" id="docStatus">加载中…</span>
   <div class="hdr-actions">
     <select id="viewMode" title="演示模式显示内部标识与错误码，供评审与排查；临床模式只显示医生需要的信息。数据均为虚构。">
       <option value="demo">演示模式</option>
       <option value="clinical">临床模式</option>
     </select>
-    <span class="badge-status" id="docStatus">加载中…</span>
+
+    <div class="hdr-group">
+      <details class="hdr-menu">
+        <summary class="hdr-btn" title="新建文书 / 导入病历文件">新建<span class="hdr-caret" aria-hidden="true">▾</span></summary>
+        <div class="hdr-menu-list">
+          <button id="btnTplCreate" title="新建一份文书：先选文书类型，模板只提供章节骨架与数据元绑定，正文由医生填写"><span class="mi-icon" aria-hidden="true">+</span>新建文书</button>
+          <button id="btnImport" data-capability="import" title="从 OFD-H / XML 导入外部病历文件"><span class="mi-icon" aria-hidden="true">⇩</span>导入病历文件</button>
+        </div>
+      </details>
+      <button id="btnSaveAll" class="primary" title="把还没保存的编辑立刻落盘（平时失焦 250ms 会自动保存，这里是手动兜底）">保存</button>
+      <button id="btnUndo" title="撤销 / 历史版本（最近 15 次，可回到任意一版）">撤销</button>
+    </div>
+
+    <div class="hdr-group">
+      <button id="btnMyContent" title="个人模板：常用语与内容段落（常用语插进当前这一句，内容段落整段带入）">个人模板</button>
+      <button id="btnPalette" title="命令面板：跳转段落 / 插入检验值 / 套模板 / 查术语（Ctrl+K）">命令</button>
+    </div>
+
+    <div class="hdr-group">
+      <details class="hdr-menu hdr-menu-end">
+        <summary class="hdr-btn icon-btn" title="视图：纸张视图 / 分页预览" aria-label="视图">▤</summary>
+        <div class="hdr-menu-list">
+          <button id="btnPaper" title="纸张视图：按 A4 纸面预览（再点一次回到普通视图）"
+            aria-pressed="false"><span class="mi-icon" aria-hidden="true">▤</span>纸张视图</button>
+          <button id="btnPreview" title="分页预览：按排版引擎算出的页与行画纸面（打印走这一份，浏览器不再重排）"><span class="mi-icon" aria-hidden="true">▥</span>分页预览</button>
+        </div>
+      </details>
+      <details class="hdr-menu hdr-menu-end">
+        <summary class="hdr-btn icon-btn" title="更多：快捷键 / 主题 / 管理后台" aria-label="更多">⋯</summary>
+        <div class="hdr-menu-list">
+          <button id="btnKeys" title="键盘快捷键（按 ? 显示 / 隐藏）"><span class="mi-icon" aria-hidden="true">⌨</span>键盘快捷键</button>
+          <button id="btnTheme" title="切换深色 / 浅色主题"><span class="mi-icon" aria-hidden="true">◐</span>深色 / 浅色主题</button>
+          <span class="hdr-menu-sep" aria-hidden="true"></span>
+          <button id="btnAdmin" title="管理后台（需管理员登录）"><span class="mi-icon" aria-hidden="true">⚙</span>管理后台</button>
+        </div>
+      </details>
+    </div>
+
     <input type="file" id="fileInput" accept=".ofd,.xml,.dat,.txt,application/octet-stream,text/xml" class="hide" />
-    <button id="btnImport" data-capability="import">导入病历文件</button>
-    <button id="btnTplCreate" title="新建一份文书：先选文书类型，模板只提供章节骨架与数据元绑定，正文由医生填写">新建</button>
-    <button id="btnSaveAll" title="把还没保存的编辑立刻落盘（平时失焦 250ms 会自动保存，这里是手动兜底）">保存</button>
-    <button id="btnUndo" title="撤销 / 历史版本（最近 15 次，可回到任意一版）">撤销</button>
-    <button id="btnPalette" title="命令面板：跳转段落 / 插入检验值 / 套模板 / 查术语（Ctrl+K）">命令</button>
-    <button id="btnMyContent" title="个人模板：常用语与内容段落（常用语插进当前这一句，内容段落整段带入）">个人模板</button>
-    <button id="btnKeys" class="icon-btn" title="键盘快捷键（按 ? 显示 / 隐藏）" aria-label="键盘快捷键帮助">⌨</button>
-    <button id="btnTheme" class="icon-btn" title="切换深色 / 浅色主题" aria-label="切换深色 / 浅色主题">◐</button>
-    <button id="btnPreview" title="分页预览：按排版引擎算出的页与行画纸面（打印走这一份，浏览器不再重排）">分页预览</button>
-    <button id="btnPaper" class="icon-btn" title="纸张视图：按 A4 纸面预览（再点一次回到普通视图）"
-      aria-label="纸张视图" aria-pressed="false">▤</button>
-    <button id="btnAdmin" title="管理后台（需管理员登录）">管理后台</button>
   </div>
 </header>
 
@@ -114,7 +140,7 @@
           <button data-mark="sub" title="下标：如 H₂O（也可用 Ctrl+=）">x<sub>2</sub></button>
           <span class="muted">回车拆段 · 段首退格合段 · 可跨段选中</span>
         </div>
-        <div class="ftools-spacer" id="flowToolsSpacer" aria-hidden="true" hidden></div>
+        <div class="ftools ftools-float" id="flowToolsFloat" hidden></div>
         <div class="body doc" id="docBody">
           <div class="empty" role="status">正在加载工作区…</div>
         </div>        

@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WriteSession } from '../core/session.ts';
 import { buildOfdPackage, renderLines, type OfdExportPlan } from '../export/ofd.ts';
 import { breakBeforeOf } from '../model/presentation.ts';
@@ -17,6 +21,10 @@ const PLAN: OfdExportPlan = {
   layout: { textAsPath: false },
   machineReadable: { signed: true, carrier: 'separate-xml' },
 };
+
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const ARTIFACTS = join(ROOT, 'artifacts');
+const PROBE = join(ROOT, 'tools', 'layout-check', 'layout-check.mjs');
 
 function bigDoc(options: { sections?: number; paragraphsPerSection?: number } = {}): DocumentModel {
   return buildSyntheticDoc({
@@ -145,6 +153,116 @@ async function main(): Promise<void> {
     const layout = layoutDocument(doc);
     const texts = layout.pages.flatMap((page) => page.lines.map((line) => line.text)).join('\n');
     assert(texts.includes('图片缺失'), `取不到图时必须留可见占位，实际：${texts.slice(0, 80)}`);
+  });
+
+  await test('L11 标题不落页底：任何一页的最后一行都不是标题', async () => {
+    const layout = layoutDocument(bigDoc({ sections: 14, paragraphsPerSection: 9 }));
+    assert(layout.pages.length >= 3, `前置：应至少 3 页，实际 ${layout.pages.length}`);
+    for (const page of layout.pages) {
+      const last = page.lines[page.lines.length - 1];
+      assert(!!last, `第 ${page.number} 页没有内容`);
+      assert(last!.blockKind !== 'title', `第 ${page.number} 页把标题留在了页底：「${last!.text.slice(0, 20)}」`);
+    }
+  });
+
+  await test('L12 段落被拆开时两侧各留两行：不许出现单行孤页', async () => {
+    const doc = bigDoc({ sections: 8, paragraphsPerSection: 4 });
+    const longText = '这是一段刻意写得很长的病程记录，用来把段落撑到跨页。'.repeat(120);
+    const textNode = Object.values(doc.nodes).find((node) => node.type === 'text');
+    assert(!!textNode, '前置：应有正文节点');
+    (doc.nodes[textNode!.id] as { runs: Array<{ text: string }> }).runs = [{ text: longText }];
+    const layout = layoutDocument(doc);
+    const byNode = new Map<string, Array<{ page: number; count: number }>>();
+    for (const page of layout.pages) {
+      for (const line of page.lines) {
+        const bucket = byNode.get(line.nodeId) ?? [];
+        const current = bucket[bucket.length - 1];
+        if (current && current.page === page.number) current.count += 1;
+        else bucket.push({ page: page.number, count: 1 });
+        byNode.set(line.nodeId, bucket);
+      }
+    }
+    const splits = [...byNode.entries()].filter(([, pages]) => pages.length > 1 && pages.reduce((sum, item) => sum + item.count, 0) >= 3);
+    assert(splits.length > 0, '前置：长文书里应该有被拆开的段落，否则这条用例测不到东西');
+    for (const [nodeId, pages] of splits) {
+      assert(pages[0]!.count >= 2, `${nodeId} 在上一页只剩 ${pages[0]!.count} 行（孤行）`);
+      const last = pages[pages.length - 1]!;
+      assert(last.count >= 2, `${nodeId} 在下一页只有 ${last.count} 行（寡行）`);
+    }
+  });
+
+  await test('L13 与下文同页：段落声明 keepWithNext 后，下一段首行不得被挤到下一页', async () => {
+    const doc = bigDoc({ sections: 14, paragraphsPerSection: 9 });
+    const paragraphs = Object.values(doc.nodes).filter((node) => node.type === 'paragraph');
+    assert(paragraphs.length > 4, '前置：应有多个段落');
+    const target = paragraphs[3]!;
+    doc.nodes[target.id] = { ...doc.nodes[target.id]!, presentation: { keepWithNext: true } };
+
+    const layout = layoutDocument(doc);
+    const pageOfFirstLine = (nodeId: NodeId): number | null => {
+      for (const page of layout.pages) {
+        if (page.lines.some((line) => line.nodeId === nodeId)) return page.number;
+      }
+      return null;
+    };
+    const selfPage = pageOfFirstLine(target.id);
+    const sibling = paragraphs[4]!;
+    const nextPage = pageOfFirstLine(sibling.id);
+    assert(!!selfPage && !!nextPage, '两段都应出现在纸面上');
+    assertEqual(selfPage, nextPage, '声明了 keepWithNext 的段落必须与下一段同页');
+  });
+
+  await test('L9 独立探针：预览快照与归档件逐行对拍，五条检查全过', async () => {
+    mkdirSync(ARTIFACTS, { recursive: true });
+    const doc = await exportable(bigDoc({ sections: 9, paragraphsPerSection: 6 }));
+    const sectionIds = Object.values(doc.nodes)
+      .filter((node) => node.type === 'section')
+      .sort((a, b) => a.order - b.order)
+      .map((node) => node.id);
+    doc.nodes[sectionIds[2] as NodeId] = { ...doc.nodes[sectionIds[2] as NodeId]!, presentation: { pageBreakBefore: true } };
+
+    const pkg = await buildOfdPackage(doc, PLAN);
+    const ofdPath = join(ARTIFACTS, 'page-layout-sample.ofd');
+    const layoutPath = join(ARTIFACTS, 'page-layout-sample.layout.json');
+    const reportPath = join(ARTIFACTS, 'page-layout-sample.report.json');
+    writeFileSync(ofdPath, pkg.bytes);
+    writeFileSync(layoutPath, `${JSON.stringify(layoutDocument(doc), null, 2)}\n`, 'utf8');
+
+    const run = spawnSync(process.execPath, [PROBE, ofdPath, '--layout', layoutPath, '--json', reportPath], { encoding: 'utf8' });
+    const report = JSON.parse(readFileSync(reportPath, 'utf8').replace(/^\uFEFF/, '')) as {
+      verdict: string;
+      checks: Array<{ id: string; pass: boolean; detail: string }>;
+    };
+    assertEqual(run.status, 0, `探针应判通过。实际输出：\n${run.stdout}\n${run.stderr}`);
+    assertEqual(report.verdict, 'PASS', '探针结论应为 PASS');
+    assertEqual(report.checks.filter((check) => !check.pass), [], '不应有失败项');
+    assertEqual(report.checks.map((check) => check.id), ['C1', 'C2', 'C3', 'C4', 'C5'], '五条检查都要跑到');
+    assertEqual(pkg.pages, layoutDocument(doc).pages.length, '前置：导出页数应与预览页数相同');
+  });
+
+  await test('L10 探针有鉴别力：坐标被挪 3pt、正文被改一个字，都必须判失败', async () => {
+    const ofdPath = join(ARTIFACTS, 'page-layout-sample.ofd');
+    const base = JSON.parse(readFileSync(join(ARTIFACTS, 'page-layout-sample.layout.json'), 'utf8')) as ReturnType<typeof layoutDocument>;
+
+    const moved = structuredClone(base);
+    const moveTarget = moved.pages.flatMap((page) => page.lines).find((line) => line.text.length > 0);
+    assert(!!moveTarget, '前置：应有可篡改的正文行');
+    moveTarget!.y += 3;
+    const movedPath = join(ARTIFACTS, 'page-layout-tampered-y.json');
+    writeFileSync(movedPath, `${JSON.stringify(moved, null, 2)}\n`, 'utf8');
+    const movedRun = spawnSync(process.execPath, [PROBE, ofdPath, '--layout', movedPath], { encoding: 'utf8' });
+    assertEqual(movedRun.status, 1, '坐标被挪动后探针必须失败（截图式放过就是没比对）');
+    assert(/坐标/.test(movedRun.stdout ?? ''), `失败原因应指向坐标：${movedRun.stdout ?? ''}`);
+
+    const edited = structuredClone(base);
+    const editTarget = edited.pages.flatMap((page) => page.lines).find((line) => line.text.length > 1);
+    assert(!!editTarget, '前置：应有可篡改的正文行');
+    editTarget!.text = `${editTarget!.text}改`;
+    const editedPath = join(ARTIFACTS, 'page-layout-tampered-text.json');
+    writeFileSync(editedPath, `${JSON.stringify(edited, null, 2)}\n`, 'utf8');
+    const editedRun = spawnSync(process.execPath, [PROBE, ofdPath, '--layout', editedPath], { encoding: 'utf8' });
+    assertEqual(editedRun.status, 1, '正文被改写后探针必须失败');
+    assert(/文本/.test(editedRun.stdout ?? ''), `失败原因应指向文本：${editedRun.stdout ?? ''}`);
   });
 
   process.exit(suite.report());

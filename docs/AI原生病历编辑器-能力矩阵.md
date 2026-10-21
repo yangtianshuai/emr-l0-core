@@ -1,6 +1,6 @@
-# AI 原生病历编辑器 · 能力矩阵（v3.3）
+# AI 原生病历编辑器 · 能力矩阵（v3.7）
 
-> 版本：v3.3 ｜ 编制日期：2026-10-21 ｜ 取代 v3.2、v3.1、v3.0、v2.0
+> 版本：v3.7 ｜ 编制日期：2026-10-21 ｜ 取代 v3.6、v3.5、v3.4、v3.3、v3.2、v3.1、v3.0、v2.0
 > 读者：产品决策、研发排期、售前对标
 > 事实基线：本仓库代码（HEAD `d19e38c`）。每条给出 `文件:行` 证据，给不出证据的记 `○`。
 > 外部参照（仅作对标依据，不构成符合性声明）：GB/T 48666—2026（OFD-H，正文未公开，2027 实施）；《促进和规范"人工智能+医疗卫生"应用发展的实施意见》（2025-12）；《医疗机构人工智能应用与治理专家共识》（2026-03）。
@@ -28,13 +28,13 @@
 
 | 组 | 条目 | ✅ | ◐ | ○ |
 |---|---|---|---|---|
-| P 排版与出口 | 8 | 3 | 3 | 2 |
+| P 排版与出口 | 8 | 3 | 4 | 1 |
 | K 文档内核 | 20 | 10 | 8 | 2 |
 | A AI 接入与门控 | 8 | 3 | 4 | 1 |
 | I 临床场景 | 12 | 1 | 7 | 4 |
 | G 治理·安全·合规 | 12 | 3 | 7 | 2 |
 | D 工程验收与数据飞轮 | 9 | 4 | 3 | 2 |
-| **合计** | **69** | **24** | **32** | **13** |
+| **合计** | **69** | **24** | **33** | **12** |
 
 K 组编号沿用历史序列，K3、K8、K11 已并入 P 组与 K6/P5。
 
@@ -116,20 +116,20 @@ doc + layoutPlan ──► layout() ──► Page[] { lines: {nodeId, text, x, 
 
 **验收口径**：新增探针 `tools/layout-check`，对同一份文档输出四份行坐标，按 `nodeId` 逐行对齐比对：页数相等；每行 `x/y` 容差 ≤0.5pt 且 `text` 完全相等；任一行缺失或顺序不同即失败。这条探针存在后，一致性才有可失败的用例，也是 P3/P4 的准入条件。
 
-已有的替代物到此为止：T27 的 L5 断言"预览页数等于归档件页数"（`src/layout/page-layout-self-test.ts`），它只证明两条链路分页口径一致，**不证明行坐标一致**；别拿它当"四出口对拍"。
+**探针已建**：`tools/layout-check/layout-check.mjs`（`npm run verify:layout`）。它不 import 仓库源码，自己读 ZIP、解 Content.xml，再与 `GET /api/layout` 的快照对拍，五条检查 C1–C5 全过才算通过；T27-L10 用"挪 3pt / 改一字"证明它会红。覆盖边界：只对拍「预览 vs 归档件」，编辑区与打印消费同一份坐标，靠结构断言而不参与坐标对拍。
 
 ## 七、P 组：排版与出口
 
 | 编号 | 能力 | 现状 | 评分 | 证据 | 缺口与下一步 |
 |---|---|---|---|---|---|
-| P1 | 排版引擎（行盒 / 断行 / 孤行寡行 / 分页） | ◐ | M/5 | 引擎仍只有一套：`src/export/ofd.ts:174`（`renderLines`）、`:385`（`contentBox`）、`:398`（`paginatePages`，第 4 参收断页集合）、`:471`（`renderFurniture`）；对外出口 `src/layout/page-layout.ts`（`layoutDocument`/`contentArea`/`imageBoxResolver`），断页判定唯一来源 `src/model/presentation.ts` | 缺度量统一（仍按全角/半角估算，见第六节第 2 条）、正文 widow/orphan、`keepWithNext` 消费、表格行不可分页；无行盒模型，P3 仍要另做。① |
-| P2 | 屏幕分页预览（只读） | ✅ | M/5 | `GET /api/layout`（`demo-server.ts:4043`，`doc.export` 权限）下发 `LayoutDocument`；界面 `ui.js:197`（`openPreview`/`previewLine`，按 pt 绝对定位）、`ui.css`（`.pv-page` 固定页高、`.pv-guide` 版心虚线、`.pv-watermark` 草稿水印）；`ui.html` 的 `previewDialog`；用例 B83（`ui-self-test.ts`）+ L1–L8（`src/layout/page-layout-self-test.ts`） | 只读、无缩放与连续滚动；未做真浏览器截图比对（① 档）。纸面尺寸、页眉页脚、页码、断页原因均来自服务端排版，不在界面另算 |
+| P1 | 排版引擎（行盒 / 断行 / 孤行寡行 / 分页） | ◐ | M/5 | 引擎只有一套：`ofd.ts` 的 `renderLines`→`contentBox`→`paginatePages`→`renderFurniture`；`paginatePages` 已做**孤行寡行**（拆开时两侧各 ≥2 行）与 **keepWithNext**（标题默认开启，段落可声明），`renderLines` 把 `presentation.keepWithNext` 落到行上；对外出口 `src/layout/page-layout.ts` | 缺度量统一（仍按全角/半角估算，见第六节第 2 条）、表格行不可分页；无行盒模型，P3 仍要另做。① |
+| P2 | 屏幕分页预览（只读） | ✅ | M/5 | `GET /api/layout`（`doc.export` 权限）下发 `LayoutDocument`；界面 `openPreview`/`previewLine` 按 pt 绝对定位，`.pv-page` 固定页高、`.pv-watermark` 草稿水印；B83 + L1–L8；**2026-10-21 真实浏览器核对**：页高 1122.65px = 842pt，页眉/页脚（`第 1 页 共 1 页 · 文书号`）实测都在纸面内 | 只读、无缩放与连续滚动；截图核对属人工证据，未纳入自动化 |
 | P3 | 编辑态流式排版（可编辑 + 局部重排） | ○ | M/5 | 反向证据：`flow-view.js:117-169` 输出块级 `.fp` 段落 div，无行盒；`doc-view.js:275-278` 一节点一卡片。唯一分页骨架在 `tools/editor-check/editor.html:259-277`，`PAGE_CONTENT_PX=1000` 写死 | 与 P2 共用引擎，差别在可编辑：光标定位、编辑中段落被拆页、重排后滚动位置。增量重画是节点级（`patch-plan.js:50-105`），需扩到行区间。不进 V1 |
-| P4 | 打印输出（页面家具 / 水印 / 静默 / 套打） | ◐ | S/4 | 预览打印：`ensurePreviewPageRule`（`@page` 尺寸取排版结果、边距归零）+ `printing-preview` 只留预览容器（`ui.css` 打印段）；页眉页脚与页码画在页上（`layoutDocument.furniture`）；草稿水印随状态（`.pv-watermark`）；旧入口 `printDoc`（`ui.js:115`）仍打印 DOM、无页面家具，命令面板已标为"打印当前视图" | 缺静默打印参数、打印留痕（谁、何时、第几次）、"signed 才可打正式件"的门控、套打；正式件页脚声明未做。① |
+| P4 | 打印输出（页面家具 / 水印 / 留痕 / 套打） | ◐ | S/4 | 预览打印：`ensurePreviewPageRule`（`@page` 取排版结果、边距归零）+ `printing-preview` 只留预览容器；页眉页脚与页码由 `layoutDocument.furniture` 画；草稿水印随状态；**打印留痕**：`/api/print-log` → `print_logs`（谁/何时/第几版/几页/是否正式件），先落痕再出纸、落不上就拦下（B84）；留痕已进审计报告：事实统计 + `PRINT_TRAIL_CONSISTENT` 可失败项 + Markdown 明细表，界面审计面板可见 | 缺静默打印参数、套打、正式件页脚声明；管理端尚未提供按文书查打印记录；留痕无导出附件。① |
 | P5 | 导出件分页与页面家具 | ✅ | S/3 | `ofd.ts:676-681`（页眉页脚高度参与版心压缩）、`:722-755`（独立 Layer + 占位符 `{page}{pages}{docId}`）；E4/E5（`ofd-self-test.ts:433,463`） | 只解决导出件散页归位。② |
-| P6 | 四出口一致性对拍（探针） | ○ | M/4 | 反向证据：`ui-self-test.ts` B81/B83 为源码正则与接口形状断言；`tools/model-check/` 无版式探针，`tools/ofd-check` 只数层与字符（`:265-292`） | P3/P4 的验收前提。现有最接近的是 T27-L5"预览页数 == 导出页数"，只到页级。口径见第六节 |
+| P6 | 版式一致性对拍（探针） | ◐ | M/4 | `tools/layout-check/layout-check.mjs`（独立进程，自读 ZIP + 解 XML，不 import 仓库源码），五条检查 C1–C5：页数、逐页行数、逐行文本、逐行坐标（≤0.5pt）、页眉页脚；`npm run verify:layout`；自测 T27-L9 正路径 + L10 鉴别力（挪 3pt、改一字都必须判失败） | 只对拍「预览快照 vs 归档件」两个实现；编辑区与打印消费同一份坐标，靠结构断言而非坐标对拍；未覆盖字体度量差异。② |
 | P7 | 排版参数单一来源 | ✅ | S/2 | `DEFAULT_LAYOUT`/`DEFAULT_FURNITURE`（`ofd.ts:42-58`）→ `state.paper`（`demo-server.ts:2487-2496`）→ `@page`（`ui.js:104-113`）与 `/api/layout`；B81 反向锁死样式表不许写死 `@page`（`ui-self-test.ts:2988-2989`） | 参数同源已成立；排版同源由 P1/P2 承接，两件事别混说。① |
-| P8 | 分页意图与块保护 | ◐ | S/3 | `pageBreakBefore`：模型 `types.ts:109` → 唯一判定 `model/presentation.ts`（含父一层继承）→ 四处消费：`doc-view.js:98`、`flow-view.js:161`、`ui.css:1623`、**`ofd.ts:398`（导出分页也收，L4/L5 锁死）**；自测 `patch-plan-self-test.ts:149-153` | `keepWithNext` 仍无消费方；屏幕上仍是视觉标记（预览/打印/导出已真断页） |
+| P8 | 分页意图与块保护 | ◐ | S/3 | `pageBreakBefore`：模型 `types.ts:109` → 唯一判定 `model/presentation.ts`（只认标记节点、不向下继承、一个节点只断一次）→ 四处消费（`doc-view.js:98`、`flow-view.js:161`、`ui.css:1623`、`ofd.ts` 的 `paginatePages`）；`keepWithNext` 已由排版引擎消费（标题默认开，T27-L11/L13 锁死） | 只剩表格行不可分页；屏幕上仍是视觉标记（预览/打印/导出已真断页） |
 
 ## 八、K 组：文档内核
 
@@ -211,7 +211,7 @@ doc + layoutPlan ──► layout() ──► Page[] { lines: {nodeId, text, x, 
 | D2 | 专科知识资产（模板/规则/术语/内容包） | ◐ | S/3 | `knowledge/pack.ts`（三类包 + 内容指纹）、`qc/plugin.ts`（包当数据不签也收，插件是代码必须验签）、`samples/packs/`、`content/content-store.ts` | 无专科包体系，无包导出，无版本号；术语包引擎为空（A3）；内容条目不能上收 |
 | D3 | 评测集与标注流程 | ○ | M/3 | 反向证据：无评测集目录与标注文件；`samples/` 是契约样本与性能基线 | 每季度 +100 份、κ≥0.8 仍是纸面目标。V1 内补齐 |
 | D4 | 训练数据合规（伦理/去标识/联邦） | ○ | S/4 | 反向证据：无伦理流程代码，无联邦学习 | `phi-scan` 是发布前扫描，不等于训练数据合规 |
-| D5 | 独立验收链 + 探针 | ✅ | M/4 | `tools/ofd-check`（C1–C5，含 `--require-signature`）、`tools/model-check`（schema 对拍、node-diff、perf、ai-path 26 条门控 + `--noncompliant` 鉴别力自证）、`npm run test:http` | 版式尚无探针（P6 待建），现有纪律只覆盖模型、机读、门控 |
+| D5 | 独立验收链 + 探针 | ✅ | M/4 | `tools/ofd-check`（C1–C5，含 `--require-signature`）、`tools/model-check`（schema 对拍、node-diff、perf、ai-path 26 条门控 + `--noncompliant` 鉴别力自证）、`tools/layout-check`（版式 C1–C5）、`npm run test:http` | 版式探针只覆盖预览与归档件；编辑区/打印靠结构断言 |
 | D6 | 性能基线 | ✅ | S/3 | `tools/model-check/perf-check.mjs`（P1–P10、P12/P13）、`perf-baseline.json`、`npm run perf:1000p` | P11 判定：无 `--browser-report` 则 SKIP；报告有效且 p95≤50ms 则 PASS；`headless:true` 需 `--allow-headless` 才判。SKIP 只因缺真实浏览器取证（`:484-552`） |
 | D7 | 发布前隐私与密钥扫描 | ✅ | M/2 | `security/phi-scan.ts`（四档结论、`.ofd` 解包逐条目扫、命中打码）、`phi-scan.reviewed.json` | 模式匹配不是合规审计，截图与加密产物仍需人工看过 |
 | D8 | 自测规模与红灯登记 | ◐ | M/3 | `package.json` 82 个 `test:*`（`npm test` 聚合链 77 条，5 条不在链上，含新增 `test:page-layout`）、`README.md:10` 写「78 个自测脚本 / 1052 条用例」 | 三处数字互不一致（77、78、82）；README 无「已知红灯」章节。当前实测红灯 2 条（B56/B59，规则包自建包，与排版无关） |
@@ -228,7 +228,7 @@ doc + layoutPlan ──► layout() ──► Page[] { lines: {nodeId, text, x, 
 7. 受控阅读分两句说：生产侧不签发授权（只验签、登记、执行）；仓库内存在演示签发者（`controlled-reading.ts:144-174`），演示能签不等于产品具备签发能力。
 8. 内涵类质控是"未配置即不可用"（引擎已接入，默认 `none`）；外部落位服务未配置即拒。
 9. 无租户隔离，无 TLS/MFA/CA/SSO；`contract-server` 默认 `trusted` 模式，不可直接暴露到网络。
-10. 排版可说"预览与归档件同页数、页码与页眉页脚由同一份排版结果生成（① 档，L5/B83）"。不得说"屏幕/打印/导出逐行一致"（无四出口对拍）、"与 OFD 阅读器逐像素一致"（宽度按估算）；不得说支持套打、静默打印、打印件可作归档原件（无打印留痕，正式件门控未做）。
+10. 排版可说"预览与归档件逐页、逐行、逐字、坐标一致（容差 0.5pt），由独立进程解析 OFD 对拍验证（② 档）"；打印可说"每次打印都留痕，记谁、何时、第几版、几页、是否正式件，留痕失败不出纸"。不得说"编辑区/打印也逐行对拍过"（靠同一份坐标，未单独比对）、"与 OFD 阅读器逐像素一致"（宽度按估算）；不得说支持套打、静默打印、打印件可作归档原件（留痕未进审计报告附件，正式件页脚声明未做）。
 11. 无时间戳，无第三方存证：两侧都是局部链式结构，删一条当场可发现，但持有库文件者能整链重算；不得称"不可抵赖""已存证""证据保全"。
 12. 不得对外报采纳率、修改率数字：有口径，无评测集。
 13. 书写时长只在 `trusted:true` 时可报数，它是质控线索，不是绩效口径。
@@ -242,13 +242,13 @@ doc + layoutPlan ──► layout() ──► Page[] { lines: {nodeId, text, x, 
 | V1.1 | 编辑态排版流畅度（P3）、真实语音链路 |
 | 不进 V1 | 见本节末尾延后清单 |
 
-**可对外讲的（优先 ②③ 档）**：P2、P5、P7、K1、K5、K6、K7、K12、K13、K18、K21、A6、A7、A8、G1、G8、G10、G11、D5、D6、D7、D9。
+**可对外讲的（优先 ②③ 档）**：P2、P5、P6、P7、K1、K5、K6、K7、K12、K13、K18、K21、A6、A7、A8、G1、G8、G10、G11、D5、D6、D7、D9。
 
 | 序 | 主线 | 规模 | 最小可用口径 | 验收 |
 |---|---|---|---|---|
 | 1 | 审签界面五个按钮（K22） | 小 | 提交审核、通过、退回、作废、归档 | 服务端四接口与 B76 已通，验收只看界面是否真调到 |
-| 2 | 排版引擎与只读预览（P1a + P2 + P6） | 大 | **P1a/P2 已完成（2026-10-21）**：`GET /api/layout` 下发页与行坐标，界面逐页绝对定位，打印复用同一容器 | 剩余：`tools/layout-check` 四出口对拍（逐行 `nodeId` 对齐，`x/y` 容差 ≤0.5pt）。已有 L5 只到页级 |
-| 3 | 打印收口（P4） | 中 | 页眉页脚与页码、草稿水印**已通**；剩余 `signed` 才可打正式件、打印留痕进审计、静默打印参数 | 纸面水印随状态变化；审计能查到谁在何时打了第几次 |
+| 2 | 排版引擎与只读预览（P1a + P2 + P6） | 大 | **P1a/P2/P6 已完成（2026-10-21）**：`GET /api/layout` 下发页与行坐标，界面逐页绝对定位；`tools/layout-check` 独立对拍预览与归档件（C1–C5，容差 0.5pt） | 剩余：字体度量接入（现按全角/半角估算）、编辑区与打印的坐标对拍 |
+| 3 | 打印收口（P4） | 中 | 页眉页脚与页码、草稿水印、打印留痕**已通**（先落痕再出纸）；剩余留痕进审计报告、正式件页脚声明、静默打印参数 | 纸面水印随状态变化；审计能查到谁在何时打了第几次 |
 | 4 | 评测集与标注（D3 + G5） | 中 | 首版 100~200 份，固定口径，可一键回放 | 能给出"上一版到这一版修改率变化" |
 | 5 | 真实 ASR + 术语包（I1 + A3） | 中 | 一家可用院内 ASR + 一张能加载的术语表 | ③ 档：真实端点实测；术语包载入即生效（不再是 `term: []`） |
 | 6 | 编辑态流式排版（P3） | 大 | 行盒渲染 + 按行区间局部重排；光标不丢、滚动不跳 | 移至 V1.1 验收：P11 p95 ≤50ms（真浏览器 + 目标终端）；千页插入线性度 |
@@ -274,15 +274,48 @@ I4 单列一句：若目标客户按病案首页质量考核付费，它的商�
 6. 打印件上有页码和文书号吗，草稿与已签打出来有区别吗，打印记不记留痕。三条缺一条，归档时会被退。
 7. 字体度量从哪来。答不出或答"浏览器自己排"的，屏幕与纸面必然是两套。
 
-## 十六、本次变更（v3.2 → v3.3）
+## 十六、本次变更（v3.3 → v3.4）
 
 | 条目 | 变化 | 证据 |
 |---|---|---|
-| P2 屏幕分页预览 | ○ → ✅ | `src/layout/page-layout.ts`、`GET /api/layout`、`ui.js` 预览浮层、B83 + L1–L8 |
-| P1 排版引擎 | 仍是 ◐，但有了对外出口 | `layoutDocument()` 输出页与行坐标；`contentArea`/`pageFurniture` 成为版心与页眉页脚的唯一算法 |
-| P8 分页意图 | 底部补齐：导出也消费 | `paginatePages` 第 4 参 `breakBefore`；`model/presentation.ts` 为唯一判定 |
-| P4 打印 | ◐ 加重：页眉页脚、页码、草稿水印已通 | 预览容器 + `printing-preview` 打印段；旧 DOM 打印降级为"打印当前视图" |
-| 自测 | `test:*` 82 个（链上 77），新增 T27 | `npm run test:page-layout`（8 条） |
-| 已知红灯 | 实测 2 条：B56、B59（规则包自建包，与排版无关，HEAD 上同样失败） | `npm run test:ui` |
+| P6 版式对拍 | ○ → ◐ | `tools/layout-check/layout-check.mjs`（C1–C5）、`npm run verify:layout`、T27-L9/L10 |
+| P8 断页语义 | 修正：只认标记节点，不向下继承，同一节点只断一次 | `model/presentation.ts`；`paginatePages` 内 `broken` 集合；修复前一个章节能把纸面拆成一串单行页 |
+| D5 验收链 | 补入版式探针 | 同上 |
+| 自测 | `test:*` 83 个，T27 扩到 10 条（新增 L9 正路径、L10 鉴别力） | `npm run test:page-layout` |
+| 并发编辑 | 工作区当前不可编译：`src/storage/intake-store.ts` 有 `continue` 越出循环、`demo-server.ts` 引用未定义的 `CONTEXT_FIELDS`（他人未完成的改动，未触碰） | `npm run typecheck`；`node src/demo/demo-server.ts` 启动即失败 |
 
-两条口径提醒：L5 只对到"页数相等"，不是逐行对拍；`estimateWidth` 仍是估算，所以"预览与打印一致"成立，因为两边吃同一份坐标；"预览与 OFD 阅读器像素一致"不成立。
+三条口径提醒：探针只对拍"预览 vs 归档件"，编辑区与打印不参与坐标对拍；`estimateWidth` 仍是估算，所以"预览与打印一致"成立（两边吃同一份坐标），"与 OFD 阅读器像素一致"不成立；对拍通过不等于字体与院内阅读器显示一致。
+
+## 十七、本次变更（v3.4 → v3.5）
+
+| 条目 | 变化 | 证据 |
+|---|---|---|
+| P4 打印留痕 | 新落地：`/api/print-log` → `print_logs`（谁/何时/第几版/几页/是否正式件），预览头显示已打印次数 | `src/storage/print-log-store.ts`、迁移 `0009-print-log`、B84 |
+| 打印失败语义 | 留痕写不上就不出纸（fail-closed），不做"先打再说" | `ui.js` 的 `printPreview` |
+| 数据库结构 | 版本 8 → 9，加 `print_logs` 与两条索引 | `src/storage/schema.ts` |
+| B81 断言 | 随断页语义修正：改为锁"唯一判定 + 不继承 + 导出消费" | `ui-self-test.ts` B81 |
+| 已知红灯 | B56、B59（既有）；A42（admin.html 页签顺序，来自并发改动，非本项引入） | `npm run test:ui` 144 条 |
+
+口径边界：留痕只进库，未进 `audit-report`、未进管理端审计页、无导出附件；因此"打印件可作归档原件"仍不可说。
+
+### 追加（v3.5 → v3.6）
+
+| 条目 | 变化 | 证据 |
+|---|---|---|
+| 留痕进审计报告 | 事实统计带打印次数、`PRINT_TRAIL_CONSISTENT` 可失败项（缺操作者/页数为 0/版本越界都要红）、Markdown 明细表 | `core/audit-report.ts`、T28-P1/P2、B84 端到端 |
+| 审计面板 | 生成报告后显示"打印 N 次（正式件 M 次）· 最近一次谁打的" | `ui.js` 的 `renderAudit` |
+| 检查项数量 | 8 → 9（B19 随之更新，避免只改数字不改含义） | `ui-self-test.ts` B19 |
+| 仍缺 | 管理端按文书查留痕、留痕导出附件、静默打印、套打 | — |
+
+"打印件可作归档原件"仍不可说：留痕进的是本系统审计报告，不等于院内归档凭证。
+
+### 追加（v3.6 → v3.7）
+
+| 条目 | 变化 | 证据 |
+|---|---|---|
+| P1 分页约束 | 新增孤行寡行（拆开时两侧各 ≥2 行）与 keepWithNext 消费；标题默认不许落页底 | `ofd.ts` 的 `paginatePages`、`RenderLine.keepWithNext`；T27-L11/L12/L13 |
+| P8 缺口 | 收窄到"表格行不可分页"；`keepWithNext` 不再是空声明 | 同上 |
+| P2 证据 | 真实浏览器核对预览：页高 842pt、页眉页脚在纸面内 | 2026-10-21 截图核对（人工） |
+| 自测 | T27 10 → 13 条 | `npm run test:page-layout` |
+
+一条口径提醒：孤行寡行是排版规则，不等于出版规范；院内若有更严的行数要求（如"每段至少三行"），改常量即可，别写成"符合规范"。

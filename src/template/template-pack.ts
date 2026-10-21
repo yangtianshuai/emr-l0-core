@@ -1138,7 +1138,7 @@ export function patchControl(pack: TemplatePack, itemId: string, patch: ControlP
       'E_TPL_ITEM_TYPE',
       `条目「${itemId}」不是专科控件：`
         + (current.itemType === 'expression'
-          ? '它是医学表达式控件（那是"这个值怎么算"，走「基础数据 → 表达式控件」那一页改）'
+          ? '它是医学表达式控件（那是"这个值怎么算"，走「知识资产 → 表达式控件」那一页改）'
           : `它是一条 ${current.itemType} 条目`),
     );
   }
